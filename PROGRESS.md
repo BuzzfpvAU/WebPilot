@@ -52514,3 +52514,39 @@ an admin removing it and a publish putting it back.
 ### RUN LOG
 
     npm run verify              not run: no code changed
+
+## 2026-09-26 | art | The wall art's hanging, in a module the front door can copy
+
+### What changed
+
+`src/art/wallart-hang.js`, new: `HANGING`, the table of where each poster
+and banner hangs, and `wallArtGeometry(table, room)`, the quads cut out of
+the atlas and the banners' rods, moved whole out of `src/art/wallart.js`.
+`wallart.js` keeps what is its own, the material, the layer and the picture,
+takes its geometry from the new module and re-exports `HANGING`. `src/fresh.js`
+regenerated: 222 served.
+
+### Why
+
+The front door's whoop act draws this room and has to hang the same art in
+the same places, and it copies this repository's code byte for byte rather
+than restating it. It cannot copy `wallart.js`: that lights the art with
+`src/render/celmat.js`, and the front door has its own port of celmat, which
+patches the same three.js shader chunk at import, so both on one page is two
+patches of one chunk. The new module makes no material, fetches no picture
+and knows no layer, so it goes to the front door as it is, beside the atlas
+table, and the front door lights the art with its own port.
+
+### Checked
+
+The old and new modules side by side in headless Chromium, `hangWallArt`
+called on each with the shipped atlas table at MICRO_SCALE and at one: the
+art's positions, normals, uvs and index, the rods' geometry, the art's
+layer mask and `HANGING` itself all identical, 12 quads and 256 rod
+vertices each time.
+
+### RUN LOG
+
+    npm run lint:preload        up to date: boot 114, city 74, built 34, 222
+    npm run check:fresh         18 passed, 0 failed
+    npm run verify              not run: no physics, plant, ABI or build

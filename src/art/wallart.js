@@ -5,8 +5,10 @@
  * in the sakura theme and dressed with the slap pack's stickers "as wall
  * art", made into posters and banners. scripts/wallart.js makes the art: one
  * picture, assets/wallart/atlas.webp, and a table of where each piece is in
- * it, src/art/wallart-atlas.js. This hangs it, and HANGING below is the
- * whole of the design decision about where.
+ * it, src/art/wallart-atlas.js. This hangs it: HANGING, in ./wallart-hang.js
+ * with the quads and rods that hang each piece, is the whole of the design
+ * decision about where, and this file lights the art and puts the picture
+ * on it.
  *
  * PAINT, NOT SOLID. Nothing here goes into the collider set, and nothing
  * stands proud of its wall by more than a banner rod's width, 24 mm on a
@@ -46,59 +48,16 @@
  */
 
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { celMaterial } from '../render/celmat.js';
+import { HANGING, wallArtGeometry } from './wallart-hang.js';
 
-/*
- * WHERE EACH PIECE HANGS, in the room RaceGOW would recognise: true metres,
- * before MICRO_SCALE, on a 10 m wide, 12 m deep, 4 m high hall.
- *
- *   wall    which wall, by the scene's frame: north is -z, east is +x
- *   along   metres from the middle of the wall, to the right of a person
- *           standing in the room facing it
- *   up      the height of the piece's centre above the floor
- *   rod     hung from a rod along its top edge, which a banner is
- *
- * The composition, wall by wall: a banner high in the middle of each short
- * wall, flanked by two posters on the north wall and two nobori on the
- * south; three posters down the east wall; the cut vinyl wordmark between
- * two posters on the west wall. Every poster's centre is at the same
- * height, 2.3 m, and every one is clear of the rail at 1.26 m by more than
- * a hand's width, so the gate band below the rail stays bare and dark.
- */
-export const HANGING = [
-  { piece: 'bannerVisor', wall: 'north', along: 0, up: 3.15, rod: true },
-  { piece: 'posterChibi', wall: 'north', along: -3.4, up: 2.3 },
-  { piece: 'posterBubble', wall: 'north', along: 3.4, up: 2.3 },
-  { piece: 'bannerWave', wall: 'south', along: 0, up: 3.15, rod: true },
-  { piece: 'nobori', wall: 'south', along: -3.4, up: 2.35, rod: true },
-  { piece: 'nobori', wall: 'south', along: 3.4, up: 2.35, rod: true },
-  { piece: 'posterCity', wall: 'east', along: -3.8, up: 2.3 },
-  { piece: 'posterPilot', wall: 'east', along: 0, up: 2.3 },
-  { piece: 'posterSea', wall: 'east', along: 3.8, up: 2.3 },
-  { piece: 'posterGoggles', wall: 'west', along: -4.0, up: 2.3 },
-  { piece: 'wordmark', wall: 'west', along: 0, up: 2.6 },
-  { piece: 'posterEma', wall: 'west', along: 4.0, up: 2.3 },
-];
+/* Where each piece hangs is ./wallart-hang.js's, and it is re-exported so
+ * nothing that asked this module for it has to know it moved. */
+export { HANGING };
 
 /* How long the room waits for the picture before it lets the race start
  * without it, in milliseconds. */
 const WAIT_MS = 6000;
-/* A print's gap off the plaster and a rod's radius, in true metres. */
-const GAP = 0.003;
-const ROD_R = 0.012;
-
-/* Each wall as a frame: where its middle is, which way is right for a
- * person facing it, and which way its face looks, into the room. */
-function wallFrame(wall, halfW, halfD) {
-  switch (wall) {
-    case 'north': return { x: 0, z: -halfD, rx: 1, rz: 0, nx: 0, nz: 1 };
-    case 'south': return { x: 0, z: halfD, rx: -1, rz: 0, nx: 0, nz: -1 };
-    case 'east': return { x: halfW, z: 0, rx: 0, rz: 1, nx: -1, nz: 0 };
-    case 'west': return { x: -halfW, z: 0, rx: 0, rz: -1, nx: 1, nz: 0 };
-    default: throw new Error(`wallart: no wall called ${wall}`);
-  }
-}
 
 /*
  * table   WALLART from src/art/wallart-atlas.js
@@ -109,62 +68,7 @@ function wallFrame(wall, halfW, halfD) {
  * the art is up and false when the room went on without it.
  */
 export function hangWallArt(table, room) {
-  const { halfW, halfD, y0, K } = room;
-  const S = table.size;
-  const pos = [];
-  const nor = [];
-  const uv = [];
-  const idx = [];
-  const rods = [];
-  for (const h of HANGING) {
-    const p = table.pieces[h.piece];
-    if (!p) {
-      throw new Error(`wallart: the atlas has no piece called ${h.piece}`);
-    }
-    const f = wallFrame(h.wall, halfW, halfD);
-    /* Width from the print, height from the pixels, so a quad can never be
-     * a different shape from the picture on it. */
-    const w = p.printW * K;
-    const ht = (w * p.h) / p.w;
-    const cx = f.x + f.rx * h.along * K + f.nx * GAP * K;
-    const cz = f.z + f.rz * h.along * K + f.nz * GAP * K;
-    const cy = y0 + h.up * K;
-    const base = pos.length / 3;
-    /* Top left, top right, bottom left, bottom right, as a viewer in the
-     * room sees them, wound counter clockwise from the room side. */
-    for (const [sx, sy] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-      pos.push(cx + f.rx * sx * w * 0.5, cy + sy * ht * 0.5, cz + f.rz * sx * w * 0.5);
-      nor.push(f.nx, 0, f.nz);
-    }
-    const u0 = p.x / S;
-    const u1 = (p.x + p.w) / S;
-    const vTop = 1 - p.y / S;
-    const vBot = 1 - (p.y + p.h) / S;
-    uv.push(u0, vTop, u1, vTop, u0, vBot, u1, vBot);
-    idx.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
-    if (h.rod) {
-      const len = w + 0.08 * K;
-      const rod = new THREE.CylinderGeometry(ROD_R * K, ROD_R * K, len, 10);
-      /* A cylinder stands up the y axis; lay it along the wall. */
-      if (f.rx !== 0) {
-        rod.rotateZ(Math.PI * 0.5);
-      } else {
-        rod.rotateX(Math.PI * 0.5);
-      }
-      rod.translate(
-        f.x + f.rx * h.along * K + f.nx * ROD_R * K,
-        cy + ht * 0.5 + ROD_R * K * 0.6,
-        f.z + f.rz * h.along * K + f.nz * ROD_R * K,
-      );
-      rods.push(rod);
-    }
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  geo.setIndex(idx);
+  const { art: geo, rods } = wallArtGeometry(table, room);
 
   const tex = new THREE.Texture();
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -187,11 +91,11 @@ export function hangWallArt(table, room) {
   const group = new THREE.Group();
   group.name = 'wallArt';
   group.add(art);
-  if (rods.length) {
+  if (rods) {
     /* Bamboo, in the town's own bamboo green, drawn and inked like any
      * other object and in no collider set. */
     const rodMesh = new THREE.Mesh(
-      mergeGeometries(rods, false),
+      rods,
       celMaterial({ color: 0x94b06b, rim: 0.18, rimColor: 0xffe8ec, spec: 0.12 }),
     );
     rodMesh.name = 'wallArtRods';
