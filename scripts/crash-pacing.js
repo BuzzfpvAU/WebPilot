@@ -378,11 +378,15 @@ export async function record(sc) {
 
 /*
  * Fly a recorded stream at one pacing and phase, as the shell's frame loop
- * does, with the shell's judge asked where src/main.js asks it. `report` is
- * 'step' (read every step and folded) or 'frame' (read once a frame, summed
- * by the module), for the fold guard. Returns the verdict, the ground's
- * judged hits, the rows (the state after every step, its ground contacts
- * and its own report) and the state the flight started from.
+ * does, with the shell's judge asked where src/main.js asks it: every step,
+ * with the step's own report, the loop ending on a crash step, and what the
+ * steps found read after them. `report` is 'step' (read every step and
+ * folded, as the shell reads it), and for the fold guard, which needs whole
+ * frames to the end, 'fold' (read every step and folded) or 'frame' (read
+ * once a frame, summed by the module), both judged by nothing. Returns the
+ * verdict, the ground's judged hits, the rows (the state after every step,
+ * its ground contacts and its own report) and the state the flight started
+ * from.
  */
 export async function replay(sc, stream, pacing, ph, report = 'step') {
   const { sim, readReport, raiseGround } = await newSim(sc);
@@ -425,37 +429,35 @@ export async function replay(sc, stream, pacing, ph, report = 'step') {
       st = sim.readState().state;
       stepIdx += 1;
       g = sim.e.sim_ground_contacts();
-      const rep = report === 'step' ? readReport() : null;
+      const rep = report === 'frame' ? null : readReport();
       if (rep) {
         foldWorldReport(acc, rep);
       }
       rows.push({ at: stepIdx, st, g, rep });
-      if (judge.step(before, st, g, rep, stepIdx)) {
+      /* No scenario takes off or waits in turtle, so the perch may take a
+       * craft at rest, as it may in the shell. */
+      if (report === 'step' && judge.step(before, st, g, rep, stepIdx, true)) {
         break;
       }
     }
-    const frameRep = report === 'step' ? acc : readReport();
+    const frameRep = report === 'frame' ? readReport() : acc;
     frameReps.push({ at: stepIdx, rep: Float64Array.from(frameRep) });
-    /* The shell's perch, which comes before the ground judgement and would
+    if (report !== 'step') {
+      continue;
+    }
+    /* The shell's perch, which it skips on a crash step and which would
      * freeze the craft: no scenario may reach it before its verdict. */
     const tiltDeg = (Math.acos(stateUpZ(st)) * 180) / Math.PI;
     const rate = Math.sqrt(st[11] * st[11] + st[12] * st[12] + st[13] * st[13]);
-    const perched = g > 0 && canPerch(tiltDeg, speedOf(st), rate);
+    const perched = !judge.crash && g > 0 && canPerch(tiltDeg, speedOf(st), rate);
     if (perched && perchedEarly == null) {
       perchedEarly = stepIdx;
     }
-    let kind = '';
-    if (!perched && judge.ground(f.wall, g)) {
+    if (judge.hit) {
       hits.push({ at: judge.hitAtMs, hard: judge.hitHard, crash: judge.hitCrash });
-      if (judge.hitCrash) {
-        kind = 'ground';
-      }
     }
-    /* The ground's verdict is named first, as the shell reads it first. */
-    const solid = judge.contact(frameRep, st);
-    kind = kind || solid;
-    if (kind) {
-      verdict = { kind, at: stepIdx };
+    if (judge.crash) {
+      verdict = { kind: judge.crash, at: stepIdx };
     }
   }
   return { verdict, hits, rows, frameReps, perchedEarly, st0 };
@@ -464,11 +466,12 @@ export async function replay(sc, stream, pacing, ph, report = 'step') {
 /*
  * THE READING THE SHELL USED UNTIL 2026-09-26, for the edge guard only: the
  * three rules once a frame, on the frame's peaks, its summed report and the
- * attitude at its end, the ground gated on the wall clock. It is not the
- * shell's any more and nothing here asserts it is right; it is here so that a
- * scenario named for the edge can show it is still on the edge. Flown over
- * the one step a frame rows, which every pacing reproduces to the bit (the
- * first guard).
+ * attitude at its end, the ground gated on the wall clock (the perch that
+ * came before that judgement is left out). It is not the shell's any more
+ * and nothing here asserts it is right; it is here so that a scenario named
+ * for the edge can show it is still on the edge. Read over the recorded
+ * flight's rows, which every pacing reproduces to the bit (the first
+ * guard).
  */
 export function frameEndReading(rows, st0, pacing, ph) {
   let groundAtWall = 0;
@@ -606,10 +609,11 @@ async function runScenario(sc, check, verbose) {
       readings.set(pacing.name, rs);
     }
   }
-  /* The fold guard: the same flight at 30 Hz, the report read once a frame
-   * by the module, against the per step reads folded in the shell. */
+  /* The fold guard: the same flight at 30 Hz to its end, the report read
+   * once a frame by the module, against the per step reads folded in the
+   * shell. */
   const p30 = PACINGS.find((p) => p.name === '30 Hz');
-  const byStep = await replay(sc, stream, p30, p30.phases[0], 'step');
+  const byStep = await replay(sc, stream, p30, p30.phases[0], 'fold');
   const byFrame = await replay(sc, stream, p30, p30.phases[0], 'frame');
   const nf = Math.min(byStep.frameReps.length, byFrame.frameReps.length);
   let foldSame = nf > 0;

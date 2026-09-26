@@ -53086,9 +53086,9 @@ ground judgement on the frame's peaks behind the wall clock cooldown,
 frame's end attitude and the STOP. main.js calls it at the points where the
 rules stood, with the same numbers; the step loop reads sim_ground_contacts
 once a step now and hands the one reading to both the judge and its own
-takeoff test. With it, **foldWorldReport**, sim_world_report's own sum done in the shell, so a
-frame can be given the report the module would give it from reads taken
-every step.
+takeoff test. With it, **foldWorldReport**, sim_world_report's own sum
+done in the shell, so a frame can be given the report the module would give
+it from reads taken every step.
 
 Eight scenarios, five found by sweeping two pilots' numbers for flights the
 frame end reading disagreed about, and three anchors:
@@ -53143,3 +53143,261 @@ the reset step, because a crash read at the frame's end is reset on the
 frame's last step, which is wherever the frame happened to end: the nose
 first hit at 41 different steps from 2740 to 2838 ms. The belly tap anchor
 passed everything.
+
+### The change
+
+- **CrashJudge judges every step** (src/game/collide.js). `step()` takes the
+  state either side of one physics step, that step's sim_ground_contacts,
+  that step's own world report, the sim clock it ended at, and whether the
+  shell's perch may take a craft at rest (not while taking off or waiting in
+  turtle), and asks the three rules of that step alone, as the old reading
+  asked a frame one step long:
+  - the ground, on the step's own closing speed, its speed going in and
+    body up after it, BOUNCE_COOLDOWN_MS of **sim clock** after the last
+    contact it judged; a step that leaves the craft at rest where the shell
+    would perch it is a landing and not a hit, and starts no cooldown, as
+    the frame's perch came before its ground judgement;
+  - the solid rule, on the step's report against the attitude after it;
+  - the STOP, on the step's own velocity change, with no solid touched in
+    that step. It counts as a hard hit unless the ground counted one within
+    BOUNCE_COOLDOWN_MS of sim clock before it: the frame's "not twice in one
+    frame", held on the step clock.
+
+  It returns true on a crash. After the steps the shell reads what they
+  found: `hit` (the ground's judged smack and its step), `crash` (the rule
+  and its step) and `stopHard`. The wall clock is gone from it.
+- **The step loop reads the world report every step** (src/main.js,
+  readStepReport) and folds it into `frameReport`, which everything that
+  read it once a frame now reads (the sound and shake, the Wall Tap
+  recogniser, passStats). Anything stepped outside the loop, the launch
+  stand, is read and folded in at the frame's end as before.
+- **A crash ends the step loop on its step**, when crashResetTick will take
+  it (crashCanReset, its own guard, asked before the steps). The rest of the
+  frame is never flown, since the reset would throw it away, and the
+  render, the set down (its position and heading) and the impact frame read
+  the crash step's own state: statePrev and stateCurr are both that step,
+  and the cars are read with it. The lap clock still takes the whole frame,
+  as it did, because the craft sits set down for the rest of it; simStepIdx
+  and airtime take the steps flown. The perch is skipped on a crash step.
+- **The ground's hit is acted on whether or not the frame ends in a
+  perch.** It sat in the perch's else; the judge now makes the perch's
+  call per step, above.
+- **scripts/world-check.js**: its reading, "a wall tap is judged the same
+  whichever way the map faces", judges the tap and the nose first hit one
+  step at a time as well as over 7, 16 and 33 step frames: 1/7/16/33, every
+  line as before, and its comment says how the shell reads it now. No
+  scenario moved; READINGS are not in the world golden.
+- **check:clip, a new suite**, "crash judge: every step on its own, on the
+  sim clock", 26 checks: the STOP (no flight in crash-pacing produced one:
+  a flat back fall onto the grass reports a ground contact and is the ground
+  rule's), its hard count and its once, the ground's cooldown to the step
+  and on the sim clock, a clock gone backwards, forget(), a landing at rest
+  as the perch's, the first crash of a frame kept, the solid rule at the
+  step's own attitude, and the fold.
+- **The check's frame driver followed main.js's calls**, nothing it asserts:
+  it reads `hit` and `crash` after the steps instead of calling
+  `ground(nowWall, hits)` and `contact(rep, st)`, passes the perch flag,
+  skips its perch guard on a crash step as main.js skips the perch, and the
+  fold guard flies whole flights unjudged ('fold' against 'frame'), because
+  a judged flight now stops mid frame on its crash step.
+
+No module ABI, build or plant change: dist/sim.wasm (5408b3e2),
+src/native, patches and vendor are untouched, and so is everything under
+tests/ but check 18 and its thresholds entry from the first commit.
+
+### After the change
+
+check:crash-pacing **all passed, 48 of 48 lines**, every scenario the same
+flight to the bit at all 83 pacings and phases:
+
+    scenario                       at every pacing and phase
+    tap, the landing step resets   solid, reset at 3303 ms
+    tap, no one step resets        no crash
+    skim, side just past cooldown  ground, reset at 2934 ms (hits 2748, 2934)
+    skim, touch inside cooldown    ground, reset at 3015 ms (hits 2830, 3015)
+    skim, side inside cooldown     no crash (hit 2806, a bump)
+    nose first hit                 solid, reset at 2740 ms
+    belly first tap                no crash
+    flat on its back at 8 m/s      ground, reset at 792 ms
+
+**What it can and cannot see.** It drives CrashJudge through a frame driver
+that mirrors main.js's calls; that main.js makes those calls (the break, the
+perch skip, the report fold) is read in the diff, not flown, and check:crash
+flies the real loop in Chromium without asserting a reset step. It holds the
+verdict to the frames, not the rule to the truth: judging the solid rule at
+the attitude before the step instead of after it, tried as a mutation,
+passed crash-pacing and failed check:clip's "pitched back 50 it is the
+belly, and not" (935 passed, 1 failed); restored byte for byte.
+
+### What a pilot will feel, and on what frame rates
+
+Every frame rate now gets the verdict a 1000 Hz display would have got,
+because the crash is judged on the millisecond it happens. So 144 Hz and
+240 Hz pilots feel the least change, and 60 and 30 Hz pilots and any
+machine that hitches feel the most. From the scenarios, which are edges on
+purpose:
+
+- **A tap that lands just outside the belly cone and rolls into it** is a
+  crash on the step it lands, everywhere. It was forgiven on 10 of 17 phases
+  at 60 Hz, 27 of 34 at 30 Hz and 20 of 24 of the stutter, and reset on all
+  7 at 144 Hz.
+- **A tap whose props meet the wall at a smack's speed and whose frame
+  follows slower** is no longer a crash anywhere. It was reset on 4 of 7
+  phases at 144 Hz, 14 of 17 at 60 and 31 of 34 at 30.
+- **After a skim**, a touch of the grass is judged when it comes 180 ms of
+  sim time after the last judged one, whatever the monitor, and a hitch no
+  longer ends that early and lets a harmless belly touch hide a crash (the
+  stutter missed the fourth scenario's crash on 17 of 24 phases).
+- **The reset itself** comes from the step that crashed, not the end of the
+  frame it fell in: at 30 Hz up to 33 ms sooner, a quarter of a metre at
+  8 m/s, and up to 100 ms sooner after a hitch. The set down is found from
+  that step's position and heading, and the impact frame shows it.
+- **Bumps** (the thud, the camera kick, the freestyle BUMP, a hard hit's
+  bail) come on the same contacts at every frame rate. By the rule, not
+  measured: a skid that stopped inside one 30 Hz frame used to be a silent
+  landing there and a bump at 144, and is a bump everywhere now unless the
+  contact step itself left the craft at rest.
+
+### For the owner, when flying
+
+On a 60 Hz laptop, or with the frame rate capped, and then on a 144 Hz
+monitor if there is one: belly first wall taps pitched back about 45
+degrees at 4 to 5 m/s, a skim along the grass then a roll onto the side,
+and ordinary nose first hits. Whether each is reset should be the same on
+both, and a reset should put the craft down where it hit. Wrong would be a
+crash that resets with the craft already past the wall, a landing at rest
+that plays the crash cue, a bump every frame while sliding, or a nose first
+hit that is not reset.
+
+### RUN LOG
+
+Branch crash-per-step from origin/claude/vibrant-wozniak-v2pg5e at 3040628,
+fetched first; the coverage is a78d6f9, the change the commit after it. Not
+pushed: the lead merges it. Browser profiles in a private folder under
+/tmp, removed at the end.
+
+    git diff --stat vendor/betaflight   empty (and not checked out here)
+    npm run build:wasm             could not run: no emcc, no EMSDK, no
+                                   vendor/betaflight; verify's own attempt
+                                   stopped at bf_glue.c's platform.h and
+                                   left dist/sim.wasm as it was, 5408b3e2
+    npm run verify                 17 of 17 passing, check 1 SKIP (above).
+                                   Every row read: 2 a=b=de0401cd4266,
+                                   3 node=chrome=de0401cd4266, 4 one hash
+                                   at 30, 60, 144, 240 Hz, 5 hover 0.2793,
+                                   6 punch 80.0 m, 7 terminal 31.0 m/s,
+                                   8 motor step 26 ms, 9 671.7 deg/s,
+                                   10 yaw -0.10 deg, 11 sag 11.14 percent,
+                                   12 ratio 1.2472, 13 errors 0 warnings 0,
+                                   14 media 2.51 s in 2.51 s, 15 every
+                                   reference in band, 16 no city module
+                                   with the field and its cost unchanged
+                                   across a round trip, 17 35 of 35 runs,
+                                   18 48 of 48 lines. Rows 2 to 12 equal to
+                                   the last recorded run in this file
+    npm run check:crash-pacing     the judgement as it stood (a78d6f9): 10
+                                   FAILED, guards all passing; after: all
+                                   passed, 48 of 48, 18 s
+    npm run check:plant            all passed, before and after
+    npm run check:world            all passed, 110 lines before and after;
+                                   the reading's lines read 1/7/16/33 now,
+                                   every number as 7/16/33 was
+    npm run check:world-golden     all passed, 35 runs, 62 flights, 263200
+                                   steps each flown twice; tests/goldens
+                                   untouched
+    npm run check:world-engines    Node and Chromium agree to the bit on
+                                   every step of every run
+    npm run check:clip             910 passed on the parent and on
+                                   a78d6f9; 936 passed, 0 failed after, the
+                                   26 new
+    npm run check:crash            68 of 68 guards on the parent, on
+                                   a78d6f9 and after; its targets are
+                                   measured on the headless frame clock and
+                                   move between any two runs, as that
+                                   script says, and are compared for nothing
+    npm run score:selftest         all passed
+    npm run check:counter          all passed
+    npm run check:chase            all passed
+    npm run lint:boot              9 of 9 checks clean
+    npm run lint:memory            PASS, every world lazy and freed
+    npm run lint:input             all 160 passed
+    npm run lint:preload           up to date, boot 115 modules
+    scratch                        the extracted judge against a
+                                   transcription of main.js at 3040628, 664
+                                   flights, 0 differ; a mutation, the solid
+                                   rule at the attitude before the step,
+                                   caught by check:clip and not by
+                                   crash-pacing, restored byte for byte
+    node --check                   every changed file
+    dash scan                      no em or en dash in any added line
+    tests/                         only check 18 in tests/lib/checks.js and
+                                   its entry in tests/thresholds.json, both
+                                   in a78d6f9; no threshold widened, no
+                                   golden or baseline touched
+
+Determinism rows, what they can see: 2, 3 and 4 replay
+tests/inputs/baseline.rec through dist/sim.wasm with no world and no shell,
+so they cannot see the crash judge at all. Their hash is the one this file
+has recorded for weeks because the module did not change, and that is all
+it says. The determinism this change is about is check 18's: every
+scenario's flight bit identical at 83 pacings, and one verdict.
+
+### What went wrong
+
+- **The first check:crash on the parent died** with "no DevTools endpoint":
+  its profile was in the session scratchpad, and Chromium would not start
+  from a path that long. A short private folder under /tmp was used after.
+- **The frame end reading first read the reference flight that had stopped
+  at its own verdict**, so frames that ended later read a truncated frame and
+  every phase came out a crash; the edge guard failed for the wrong reason.
+  It reads the recorded flight to its end now.
+- **Shortening the approaches moved the flights**, and the second tap the
+  probe had found was no longer on an edge. The sweep was run again on the
+  check's own pilots and the scenarios chosen from that.
+- **After the change the fold guard failed 4 times**, on the four crash
+  scenarios only: it compared a judged flight, which now stops mid frame on
+  its crash step, with the module's whole frame. The guard flies both
+  unjudged to the end now.
+- **The first per step judge judged the ground before the perch could call
+  it a landing.** Every landing at a smack's speed that comes to rest would
+  have been a bump, half a trick's points in freestyle, at every frame rate.
+  Found reading the diff against main.js's perch, before the commit; the
+  judge makes the perch's call per step.
+- **a78d6f9's message first said verify's check 18 failed with it.** Verify
+  had not been run on that commit, so the local, unpushed commit was
+  amended to say so before anything else was done.
+- **main.js changed while a first round of the checks was running**, so
+  that round is not reported; everything above ran on the final tree.
+
+### Found on the way, not fixed
+
+For the owner, each a line to draw or physics:
+
+1. **The ground's crash still waits behind the bump cooldown.** A smack on
+   the side within 180 ms of a judged skim is never judged: the fifth
+   scenario's 5 m/s side touch at 174 ms is no crash at any frame rate now,
+   where the old reading reset it on some phases of each. The cooldown was
+   written so a slide reports one bounce, not to hide crashes.
+2. **An obstacle impact strikes the props from the shell once a frame.**
+   feelImpact calls sim_prop_strike with the frame's largest impulse, behind
+   the cue's wall clock cooldown and performance.now grace windows, on top
+   of world.c's own per contact strike. That reaches the rotors, so a frame
+   rate dependence still reaches the trajectory. Physics, the owner's.
+3. **The perch, stuckTick and turtle entry are still read at frame ends.**
+   None is a crash; each moves or freezes the craft, so each is a frame rate
+   dependence of its own.
+4. **recoverFrom, the open air a set down must be reachable from, is taken
+   from the rendered pose at frame ends**, so where a crash is set down can
+   still differ with the frame rate at the margins; when, and from which
+   state, no longer can.
+5. **The Wall Tap recogniser is told once a frame** with the frame's largest
+   closing speed, on a sim clock cooldown sampled at frame ends. Scoring.
+6. **A belly landing that stops dead upright is a perch at any speed**, so
+   a 20 m/s belly flop that comes to rest is not in the site's crash count;
+   as before, at every frame rate.
+7. **The lap clock drops the accumulator's sub millisecond remainder at
+   every reset** (acc = 0 in resetCraft), a different amount at each frame
+   rate.
+8. **The STOP has no flown scenario**: in Node a flat back fall reports a
+   ground contact and is the ground rule's. check:clip's hand written steps
+   are its only coverage.

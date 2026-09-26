@@ -96,7 +96,8 @@ import {
   CLIP_CRASH_HOLD_MS, BOUNCE_SEPARATION, CLIP_SPAWN_GRACE_MS,
   setCraftAirframe, dirtClearance, craftVerticalOffset, craftVerticalHalf,
   findRestSpot, restSpotAt, CRAFT_WORLD_R, CRASH_UNDERSIDE_NZ, CRASH_BELLY_UP,
-  bodyUpDotWorld, solidContactCrash,
+  bodyUpDotWorld, solidContactCrash, CrashJudge, emptyWorldReport, foldWorldReport,
+  BOUNCE_COOLDOWN_MS,
 } from '../game/collide.js';
 import { sincos } from '../props/trig.js';
 import { AIRFRAMES, airframeById } from '../../configs/airframes.js';
@@ -2353,6 +2354,163 @@ function suiteCrashFrame() {
     !solidContactCrash(solidReport(wall, 6), ...plantQuat(0, 50 * deg, 0), 1, 0));
   check('pitched back 40 degrees it is not',
     solidContactCrash(solidReport(wall, 6), ...plantQuat(0, 40 * deg, 0), 1, 0));
+}
+
+/*
+ * THE CRASH JUDGE, one step at a time (src/game/collide.js CrashJudge, the
+ * owner's approval of 2026-09-26). scripts/crash-pacing.js flies it; these
+ * pin the rules no flight there reaches, the STOP above all, on state blocks
+ * written by hand: [4..6] velocity, [7..10] the attitude.
+ */
+function judgeState(v, q) {
+  const st = new Float64Array(18);
+  st[4] = v[0];
+  st[5] = v[1];
+  st[6] = v[2];
+  st[7] = q[0];
+  st[8] = q[1];
+  st[9] = q[2];
+  st[10] = q[3];
+  return st;
+}
+
+function suiteCrashJudge() {
+  console.log('\ncrash judge: every step on its own, on the sim clock');
+  const level = [1, 0, 0, 0];
+  const back = [0, 1, 0, 0];
+  /* Rolled 60 degrees: body up 0.5, off the belly. */
+  const side = [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6), 0, 0];
+  const none = emptyWorldReport(new Float64Array(11));
+  const prop = solidReport([-1, 0, 0], 30, 0);
+
+  /* The STOP. */
+  let j = new CrashJudge();
+  j.beginFrame();
+  const stop = j.step(judgeState([10.3, 0, 0], back), judgeState([0.02, 0, 0], back), 0, none, 1000, true);
+  check('a step that stops the craft from 10.3 m/s, flat on its back, touching nothing, is a crash: the STOP',
+    stop && j.crash === 'stop' && j.crashAtMs === 1000, `${stop} ${j.crash} ${j.crashAtMs}`);
+  check('under BOUNCE_SPEED_MAX it is a reset and not a hard hit', !j.stopHard);
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([20, 0, 0], back), judgeState([0.02, 0, 0], back), 0, none, 1000, true);
+  check('from 20 m/s it is also a hard hit for the count', j.crash === 'stop' && j.stopHard);
+  j = new CrashJudge();
+  j.beginFrame();
+  check('the same stop on the belly is not a crash',
+    !j.step(judgeState([10.3, 0, 0], level), judgeState([0.02, 0, 0], level), 0, none, 1000, true) && j.crash === '');
+  j = new CrashJudge();
+  j.beginFrame();
+  check('nor in a step where a solid was touched, a prop alone included: that is the solid rule\'s',
+    !j.step(judgeState([10.3, 0, 0], back), judgeState([0.02, 0, 0], back), 0, prop, 1000, true) && j.crash === '');
+  j = new CrashJudge();
+  j.beginFrame();
+  check('nor 3.9 m/s taken off in one step',
+    !j.step(judgeState([10, 0, 0], back), judgeState([6.1, 0, 0], back), 0, none, 1000, true));
+
+  /* The ground, and its cooldown on the sim clock. */
+  const t0 = 5000;
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([6, 0, -0.5], level), judgeState([5.5, 0, 0], level), 1, none, t0, true);
+  check('a skim at 6 m/s on the belly is judged, a hit and not a crash',
+    j.hit && !j.hitCrash && j.hitAtMs === t0 && j.crash === '', JSON.stringify({ hit: j.hit, at: j.hitAtMs }));
+  j.beginFrame();
+  const inside = j.step(judgeState([5, 0, 0], side), judgeState([4.8, 0, 0], side), 1, none, t0 + BOUNCE_COOLDOWN_MS, true);
+  check('the side on the grass BOUNCE_COOLDOWN_MS of sim clock later is not judged',
+    !inside && !j.hit && j.crash === '');
+  j.beginFrame();
+  const past = j.step(judgeState([5, 0, 0], side), judgeState([4.8, 0, 0], side), 1, none, t0 + BOUNCE_COOLDOWN_MS + 1, true);
+  check('one step later it is, and off the belly it is a crash',
+    past && j.hit && j.hitCrash && j.crash === 'ground' && j.crashAtMs === t0 + BOUNCE_COOLDOWN_MS + 1);
+  j.beginFrame();
+  const slow = j.step(judgeState([3.9, 0, 0], side), judgeState([3.8, 0, 0], side), 1, none, t0 + 2 * BOUNCE_COOLDOWN_MS + 5, true);
+  check('under a smack\'s speed a judged contact is neither a hit nor a crash', !slow && !j.hit);
+  j.beginFrame();
+  check('and it starts the cooldown all the same',
+    !j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, t0 + 3 * BOUNCE_COOLDOWN_MS, true));
+  j.beginFrame();
+  check('a sim clock that went backwards ends the cooldown',
+    j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, 40, true) && j.crash === 'ground');
+  j = new CrashJudge();
+  j.step(judgeState([6, 0, 0], level), judgeState([5.8, 0, 0], level), 1, none, t0, true);
+  j.forget();
+  j.beginFrame();
+  check('and so does forget(), a set down or a restart',
+    j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, t0 + 10, true) && j.crash === 'ground');
+
+  /* A landing is the perch's, which came before the ground judgement. */
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([0, 0, -5], level), judgeState([0, 0, 0], level), 1, none, t0, true);
+  check('a 5 m/s landing that comes to rest on the step it touches is a landing, not a hit', !j.hit);
+  j.beginFrame();
+  check('and starts no cooldown: a side touch 50 ms later is judged',
+    j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, t0 + 50, true) && j.crash === 'ground');
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([0, 0, -5], level), judgeState([0, 0, 0], level), 1, none, t0, false);
+  check('taking off, when the shell does not perch, the same touch is a hit', j.hit && !j.hitCrash);
+
+  /* One crash, counted once. */
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([3, 0, -20], level), judgeState([3, 0, 0], level), 1, none, t0, true);
+  check('a belly landing at 20 m/s, skidding on, is a hard hit and not a crash', j.hit && j.hitHard && !j.hitCrash);
+  j.beginFrame();
+  j.step(judgeState([19, 0, 0], back), judgeState([0.1, 0, 0], back), 0, none, t0 + 40, true);
+  check('a STOP 40 ms after it is a crash, but not a second hard hit',
+    j.crash === 'stop' && !j.stopHard);
+  j = new CrashJudge();
+  j.step(judgeState([3, 0, -20], level), judgeState([3, 0, 0], level), 1, none, t0, true);
+  j.beginFrame();
+  j.step(judgeState([19, 0, 0], back), judgeState([0.1, 0, 0], back), 0, none, t0 + BOUNCE_COOLDOWN_MS + 1, true);
+  check('past the cooldown it is its own hard hit', j.crash === 'stop' && j.stopHard);
+
+  /* The frame. */
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([10.3, 0, 0], back), judgeState([0.02, 0, 0], back), 0, none, 700, true);
+  j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, 701, true);
+  check('a frame keeps its first crash and the step it came on', j.crash === 'stop' && j.crashAtMs === 700);
+  j.beginFrame();
+  check('and the next frame starts from nothing', j.crash === '' && !j.hit && !j.stopHard);
+
+  /* The solid rule reads the step's own attitude. */
+  const wall = [-1, 0, 0];
+  j = new CrashJudge();
+  j.beginFrame();
+  const deg = Math.PI / 180;
+  check('a tap pitched back 40 degrees at the step it lands is a crash, at that step',
+    j.step(judgeState([5, 0, 0], level), judgeState([0.8, 0, 0], plantQuat(0, 40 * deg, 0)), 0,
+      solidReport(wall, 5), 1234, true) && j.crash === 'solid' && j.crashAtMs === 1234);
+  j.beginFrame();
+  check('pitched back 50 it is the belly, and not',
+    !j.step(judgeState([5, 0, 0], level), judgeState([0.8, 0, 0], plantQuat(0, 50 * deg, 0)), 0,
+      solidReport(wall, 5), 1235, true));
+
+  /* The report, summed in the shell as world.c sums it. */
+  const acc = emptyWorldReport(new Float64Array(11));
+  const a = solidReport([1, 0, 0], 3, 0);
+  a[2] = 2;
+  a[3] = 7;
+  a[7] = 1;
+  a[9] = 0.01;
+  const b = solidReport([0, 1, 0], 5, 1);
+  b[2] = 2;
+  b[3] = 9;
+  b[9] = 0.004;
+  b[10] = 4;
+  const quiet = emptyWorldReport(new Float64Array(11));
+  quiet[10] = 6;
+  foldWorldReport(acc, a);
+  foldWorldReport(acc, b);
+  check('folded: steps, prop steps and frame steps add; the closing speed and the depth keep the larger',
+    acc[0] === 2 && acc[7] === 1 && acc[8] === 1 && acc[1] === 5 && acc[9] === 0.01, Array.from(acc).join(','));
+  check('an equal velocity change goes to the later read, its shape and normal with it',
+    acc[2] === 2 && acc[3] === 9 && acc[4] === 0 && acc[5] === 1);
+  foldWorldReport(acc, quiet);
+  check('a read with no contact moves nothing but the support box',
+    acc[0] === 2 && acc[3] === 9 && acc[10] === 6);
 }
 
 /*
@@ -5557,6 +5715,7 @@ async function main() {
   suitePresets();
   suiteCrashRule();
   suiteCrashFrame();
+  suiteCrashJudge();
   suiteClipCatch();
   suiteRecoverSpot();
   suiteFaces();

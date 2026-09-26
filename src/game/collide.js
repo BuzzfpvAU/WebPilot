@@ -2422,62 +2422,75 @@ export function stateUpZ(st) {
 
 /*
  * THE CRASH JUDGE: CRASH IS A RESET's three rules (src/main.js has the
- * owner's words and the argument), asked the way the shell asks them, in one
- * place that scripts/crash-pacing.js drives in Node over the same input
- * stream at several frame pacings.
+ * owner's words and the argument), asked of every physics step at that
+ * step's own attitude, in one place that scripts/crash-pacing.js drives in
+ * Node over the same input stream at several frame pacings.
  *
- * The shell's frame loop calls it at four points, and nothing else decides a
+ * The shell's frame loop calls it at two points, and nothing else decides a
  * crash:
  *
- *   beginFrame()                           every frame, before its steps
- *   step(before, after, ground, rep, atMs) after each physics step: the
+ *   beginFrame()                           every frame, before anything
+ *                                          else: clears what the last frame
+ *                                          was told
+ *   step(before, after, ground, rep, atMs, mayPerch)
+ *                                          after each physics step: the
  *                                          state blocks either side of it,
  *                                          sim_ground_contacts, the step's
- *                                          own world report or null, and
- *                                          the sim clock it ended at. True
- *                                          means the step loop ends here
- *   ground(nowWall, hits)                  after the steps, where the ground
- *                                          judgement stands, unless the
- *                                          frame ended in a perch. True
- *                                          means a ground hit to act on:
- *                                          hitClosing, hitSpeed, hitHard,
- *                                          hitCrash, and hitAtMs, the step
- *                                          it was taken at
- *   contact(rep, st)                       once a frame, with the frame's
- *                                          world report and the state at
- *                                          its end: the solid rule and the
- *                                          STOP. Returns 'solid', 'stop' or
- *                                          ''; stopHard says whether the
- *                                          STOP is a hard hit to count
+ *                                          own world report (read after the
+ *                                          step, so it holds that step and
+ *                                          nothing else), the sim clock it
+ *                                          ended at, and whether the shell
+ *                                          would perch a craft at rest on
+ *                                          the ground (not while it takes
+ *                                          off or waits in turtle). True
+ *                                          means this step is a crash, and
+ *                                          the step loop ends on it
+ *
+ * and after the steps reads what they found:
+ *
+ *   hit        the ground judged a smack this frame: hitClosing, hitSpeed,
+ *              hitHard, hitCrash and hitAtMs, the step it was judged at
+ *   crash      '' or the rule that called the frame's crash, 'ground',
+ *              'solid' or 'stop' (named in that order when a step meets
+ *              more than one), and crashAtMs, its step
+ *   stopHard   that crash is a STOP from BOUNCE_SPEED_MAX or more, a hard
+ *              hit for the site's count that the ground did not count
  *
  * seat(c, s) is the plant frame's turn (see bodyUpDotWorld), from
  * seatWorldFrame; forget() is a set down or a restart.
  *
- * AS IT IS READ TODAY, ONCE A FRAME. step only gathers: the frame's largest
- * one step velocity change and body up after it (the STOP), and the fastest
- * ground contact and body up after it (the ground). The ground is judged on
- * the frame's peaks and gated on the WALL clock, BOUNCE_COOLDOWN_MS since the
- * last frame it judged; the solid rule reads the frame's summed report
- * against the attitude at the frame's end. So how a tap at the edge of the
- * belly cone is judged, and whether a second touch of the ground is judged
- * at all, depends on where the frames fall: PROGRESS.md, 2026-09-25, "A
- * belly first wall tap is not a crash", found on the way, items 2 and 4.
+ * EVERY STEP, ON THE SIM CLOCK. Until 2026-09-26 the rules were read once a
+ * frame: the ground on the frame's peaks behind a cooldown on the WALL
+ * clock, the solid rule on the frame's summed report against the attitude
+ * at the frame's end, the STOP on the frame's largest step. So a tap at the
+ * edge of the belly cone, and whether a second touch of the grass was
+ * judged at all, depended on where the frames fell (PROGRESS.md,
+ * 2026-09-25, "A belly first wall tap is not a crash", found on the way,
+ * items 2 and 4), and a crash was reset on the frame's last step, wherever
+ * that was. Now each step is judged alone, as the old reading would judge a
+ * frame one step long:
+ *
+ *   ground   a step with a ground contact, BOUNCE_COOLDOWN_MS of sim clock
+ *            after the last one judged, is judged on its own closing speed
+ *            and speed going in and body up after it; unless it leaves the
+ *            craft at rest where the shell perches it (canPerch), which is
+ *            a landing and not a hit, as the frame's perch came before its
+ *            ground judgement, and starts no cooldown
+ *   solid    the step's report (its frame or lens contact, its closing
+ *            speed, its normal) against the attitude after the step
+ *   STOP     the step's own velocity change, body up after it, and no
+ *            solid touched in that step
+ *
+ * The STOP counts as a hard hit unless the ground counted one within
+ * BOUNCE_COOLDOWN_MS of sim clock before it: the same crash, once, as the
+ * frame's "not twice in one frame" meant it.
  */
 export class CrashJudge {
   constructor() {
     this.c = 1;
     this.s = 0;
-    this.groundAtWall = 0;
-    this.hardGround = false;
-    this.stopDv = 0;
-    this.stopUpZ = 1;
-    this.stopSpeed = 0;
-    this.stopHard = false;
-    this.hitClosing = 0;
-    this.hitSpeed = 0;
-    this.hitHard = false;
-    this.hitCrash = false;
-    this.hitAtMs = 0;
+    this.groundAtMs = -Infinity;
+    this.hardAtMs = -Infinity;
     this.beginFrame();
   }
 
@@ -2487,81 +2500,82 @@ export class CrashJudge {
   }
 
   forget() {
-    this.groundAtWall = 0;
+    this.groundAtMs = -Infinity;
+    this.hardAtMs = -Infinity;
   }
 
   beginFrame() {
-    this.peakClosing = 0;
-    this.peakSpeed = 0;
-    this.peakUpZ = 1;
-    this.peakAtMs = 0;
-    this.sawGround = false;
+    this.hit = false;
+    this.hitClosing = 0;
+    this.hitSpeed = 0;
+    this.hitHard = false;
+    this.hitCrash = false;
+    this.hitAtMs = 0;
+    this.crash = '';
+    this.crashAtMs = 0;
+    this.stopHard = false;
   }
 
-  step(before, after, ground, rep, atMs) {
-    void rep;
-    const vzBefore = before[6];
+  step(before, after, ground, rep, atMs, mayPerch) {
     const spdBefore = Math.sqrt(before[4] * before[4] + before[5] * before[5] + before[6] * before[6]);
-    const dvx = after[4] - before[4];
-    const dvy = after[5] - before[5];
-    const dvz = after[6] - before[6];
-    const dv2 = dvx * dvx + dvy * dvy + dvz * dvz;
-    if (dv2 > this.stopDv * this.stopDv) {
-      this.stopDv = Math.sqrt(dv2);
-      this.stopUpZ = stateUpZ(after);
-      this.stopSpeed = spdBefore;
-    }
-    if (ground > 0) {
-      this.sawGround = true;
-      const inbound = -vzBefore;
-      if (inbound > this.peakClosing) {
-        this.peakClosing = inbound;
-      }
-      if (spdBefore > this.peakSpeed) {
-        this.peakSpeed = spdBefore;
-        this.peakUpZ = stateUpZ(after);
-        this.peakAtMs = atMs;
-      }
-    }
-    return false;
-  }
-
-  ground(nowWall, hits) {
-    if (!((hits > 0 || this.sawGround) && nowWall - this.groundAtWall > BOUNCE_COOLDOWN_MS)) {
-      return false;
-    }
-    this.groundAtWall = nowWall;
-    const closing = this.peakClosing;
-    const speed = this.peakSpeed;
-    if (!(closing >= GRAZE_SPEED_MAX || speed >= GRAZE_SPEED_MAX)) {
-      return false;
-    }
-    this.hitClosing = closing;
-    this.hitSpeed = speed;
-    this.hitHard = closing >= BOUNCE_SPEED_MAX || speed >= BOUNCE_SPEED_MAX;
-    this.hitCrash = this.peakUpZ < CRASH_BELLY_UP;
-    this.hitAtMs = this.peakAtMs;
-    if (this.hitHard) {
-      this.hardGround = true;
-    }
-    return true;
-  }
-
-  contact(rep, st) {
+    const upZ = stateUpZ(after);
     let kind = '';
-    if (rep[0] > 0 && st && solidContactCrash(rep, st[7], st[8], st[9], st[10], this.c, this.s)) {
+    /* A landing: the shell's own perch test, on the state this step left,
+     * with the tilt taken as the shell takes it. */
+    const lands = ground > 0 && mayPerch && canPerch(
+      (Math.acos(upZ) * 180) / Math.PI,
+      Math.sqrt(after[4] * after[4] + after[5] * after[5] + after[6] * after[6]),
+      Math.sqrt(after[11] * after[11] + after[12] * after[12] + after[13] * after[13]),
+    );
+    /* The ground. A clock that went backwards (a restart the shell did not
+     * tell forget() about) ends the cooldown rather than stretching it. */
+    if (ground > 0 && !lands && (atMs - this.groundAtMs > BOUNCE_COOLDOWN_MS || atMs < this.groundAtMs)) {
+      this.groundAtMs = atMs;
+      const closing = -before[6];
+      if (closing >= GRAZE_SPEED_MAX || spdBefore >= GRAZE_SPEED_MAX) {
+        const hard = closing >= BOUNCE_SPEED_MAX || spdBefore >= BOUNCE_SPEED_MAX;
+        if (hard) {
+          this.hardAtMs = atMs;
+        }
+        if (upZ < CRASH_BELLY_UP) {
+          kind = 'ground';
+        }
+        /* The cooldown outlasts the longest frame (dt is capped at 100 ms),
+         * so a frame holds one judged hit; the first is kept if ever not. */
+        if (!this.hit) {
+          this.hit = true;
+          this.hitClosing = closing;
+          this.hitSpeed = spdBefore;
+          this.hitHard = hard;
+          this.hitCrash = kind === 'ground';
+          this.hitAtMs = atMs;
+        }
+      }
+    }
+    const solidTouched = rep[0] > 0;
+    if (!kind && solidTouched && solidContactCrash(rep, after[7], after[8], after[9], after[10], this.c, this.s)) {
       kind = 'solid';
     }
-    this.stopHard = false;
-    if (this.stopDv >= GRAZE_SPEED_MAX && this.stopUpZ < CRASH_BELLY_UP && !(rep[0] > 0)) {
-      kind = 'stop';
-      this.stopHard = this.stopSpeed >= BOUNCE_SPEED_MAX && !this.hardGround;
+    if (!kind && !solidTouched && upZ < CRASH_BELLY_UP) {
+      const dvx = after[4] - before[4];
+      const dvy = after[5] - before[5];
+      const dvz = after[6] - before[6];
+      if (Math.sqrt(dvx * dvx + dvy * dvy + dvz * dvz) >= GRAZE_SPEED_MAX) {
+        kind = 'stop';
+        if (!this.crash) {
+          const counted = atMs >= this.hardAtMs && atMs - this.hardAtMs <= BOUNCE_COOLDOWN_MS;
+          this.stopHard = spdBefore >= BOUNCE_SPEED_MAX && !counted;
+        }
+      }
     }
-    this.stopDv = 0;
-    this.stopUpZ = 1;
-    this.stopSpeed = 0;
-    this.hardGround = false;
-    return kind;
+    if (!kind) {
+      return false;
+    }
+    if (!this.crash) {
+      this.crash = kind;
+      this.crashAtMs = atMs;
+    }
+    return true;
   }
 }
 
