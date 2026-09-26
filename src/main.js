@@ -527,7 +527,7 @@ export async function boot({ loading, bootStart, mapId }) {
   let replayState = 'loading'; /* loading, ready, failed */
   let replayClock = null; /* { startMs, vt } when active */
   let replayStepMode = false; /* true when using __replayStep */
-  let replayChaseCam = null; /* { pos, look, prevDt } for chase camera smoothing */
+  let replayChaseCam = null; /* { pos, look, prevVt } for chase camera smoothing */
   let replayPresence = 0; /* tracked separately since ghostRig doesn't expose it */
   const replayScratchPos = new THREE.Vector3();
   const replayScratchQuat = new THREE.Quaternion();
@@ -6663,7 +6663,6 @@ export async function boot({ loading, bootStart, mapId }) {
     /* The manga layer's clock, before a crash can start its impact frame,
      * so the frame the crash is read on is the impact frame's first. */
     manga.tick(dt);
-    let frameSteps = 0;
 
     /*
      * The site's counters, once a frame, reading state this loop already
@@ -7070,7 +7069,6 @@ export async function boot({ loading, bootStart, mapId }) {
           airtimeMs += steps * MS_PER_STEP;
         }
         simStepIdx += steps;
-        frameSteps = steps;
         /* A replay steps nothing, so its frames read the cars as a frame
          * that did not step does, in trafficFrame at the replay's clock. */
         if (trafficOn && !replayMode) {
@@ -7908,13 +7906,26 @@ export async function boot({ loading, bootStart, mapId }) {
           const BACK = micro ? 0.55 : 1.6;
           const UP = BACK * 0.35;
           const AHEAD = BACK * 1.1;
-          const dt = replayStepMode ? (replayClock.vt - (replayChaseCam ? replayChaseCam.prevDt : 0)) : frameSteps * MS_PER_STEP;
-          if (!replayChaseCam) {
+          /*
+           * THE SPRING RUNS ON THE REPLAY'S OWN CLOCK: how far vt moved
+           * since the frame before, in step mode and in real time alike.
+           * Real time used to take the plant's steps this frame, and a
+           * replay parks the craft and steps nothing, so dt was 0 on every
+           * frame and ?replay= with cam=chase never moved off the pose it
+           * was seeded at. On vt the camera follows the ghost as fast as
+           * the ghost flies, a paused replay (vt still) holds it where it
+           * is, and a capture stepping 500 ms a frame gets the same camera
+           * as before. A clock that went BACK (the lap looped, or R) is a
+           * cut, not a swing across the field: the arm is seeded again on
+           * the ghost where it now is.
+           */
+          const dt = replayChaseCam ? replayClock.vt - replayChaseCam.prevVt : 0;
+          if (!replayChaseCam || dt < 0) {
             replayScratchUp.set(0, UP, 0);
             replayChaseCam = {
               pos: replayScratchPos.clone().addScaledVector(replayScratchDir, -BACK).add(replayScratchUp),
               look: replayScratchPos.clone().addScaledVector(replayScratchDir, AHEAD),
-              prevDt: replayClock.vt,
+              prevVt: replayClock.vt,
             };
           }
           const k = 5; /* spring constant */
@@ -7924,7 +7935,7 @@ export async function boot({ loading, bootStart, mapId }) {
           replayChaseCam.pos.lerp(replayScratchPos, alpha);
           replayScratchPos.set(ghostSample.px, ghostSample.py, ghostSample.pz).addScaledVector(replayScratchDir, AHEAD);
           replayChaseCam.look.lerp(replayScratchPos, alpha);
-          replayChaseCam.prevDt = replayClock.vt;
+          replayChaseCam.prevVt = replayClock.vt;
           shell.camera.up.set(0, 1, 0);
           shell.camera.position.copy(replayChaseCam.pos);
           shell.camera.lookAt(replayChaseCam.look);

@@ -748,11 +748,64 @@ async function testReplayRestartsOnR() {
   }
 }
 
+/*
+ * THE CHASE CAMERA FOLLOWS A REAL TIME REPLAY, AND A PAUSED ONE HOLDS.
+ *
+ * The chase camera's spring took its dt from the plant's steps each frame,
+ * and a replay parks the craft and steps nothing, so in real time the
+ * camera never left the pose it was seeded at while the ghost flew off
+ * (POLISH-PLAN item 23). Every check above steps the replay through
+ * __replayStep, where dt was the clock's own, so none of them could see it.
+ *
+ * So the full sized course's lap, which runs the racing line at a steady
+ * 17 m/s and so always has somewhere to be, is replayed in real time from
+ * the chase camera: on every frame whose vt rose, the camera must move.
+ * Then Escape: on the pause screen vt stands still, and so must the camera,
+ * to the bit.
+ */
+async function testChaseFollowsInRealTime() {
+  const track = SPONSORED[0];
+  const page = await openPage({
+    root: ROOT, url: replayUrl({ id: track.id, time: track.time, cam: 'chase', clean: true }), seed: [track.seed], ...SHOT,
+  });
+  try {
+    await untilFlying(page);
+    await page.until('window.__replayInfo().clock.vt > 500', 30000);
+    await page.evaluate(traceUntil('true', 12));
+    const flying = await page.evaluate('window.__keyTrace');
+    await page.tap('Escape');
+    await page.until('window.__mode === "paused"', 10000);
+    await page.evaluate(traceUntil('true', 12));
+    const paused = await page.evaluate('window.__keyTrace');
+    const travel = (a, b) => Math.hypot(a.cam.x - b.cam.x, a.cam.y - b.cam.y, a.cam.z - b.cam.z);
+    const rose = flying.filter((f, i) => i > 0 && f.vt > flying[i - 1].vt);
+    const vts = flying.map((f) => Math.round(f.vt)).join(' ');
+    const metres = flying.slice(1).reduce((sum, f, i) => sum + travel(f, flying[i]), 0);
+    /* Every claim is reported, not just the first to fail. */
+    const problems = [
+      [rose.length >= 6 ? 0 : 1, `only ${rose.length} frames where vt rose (${vts}), too few to mean anything`],
+      [flying.filter((f, i) => i > 0 && f.vt > flying[i - 1].vt && !(travel(f, flying[i - 1]) > 0.001)).length,
+        `frames where vt rose and the chase camera did not move (vt ${vts})`],
+      [paused.filter((f, i) => i > 0 && f.vt !== paused[i - 1].vt).length, 'frames on the pause screen where vt moved'],
+      [paused.filter((f, i) => i > 0 && travel(f, paused[i - 1]) !== 0).length, 'frames on the pause screen where the chase camera moved'],
+    ].filter(([n]) => n !== 0).map(([n, what]) => `${n} ${what}`);
+    if (problems.length) {
+      throw new Error(`chase camera over ${flying.length} frames in real time and ${paused.length} paused: ${problems.join('; ')}`);
+    }
+    console.log(` ok   the chase camera follows a real time replay: it moved on all ${rose.length} frames where vt rose `
+      + `(${Math.round(flying[0].vt)} to ${Math.round(flying[flying.length - 1].vt)} ms, ${metres.toFixed(1)} m of camera travel), `
+      + `and held to the bit for all ${paused.length} frames on the pause screen`);
+  } finally {
+    await page.close();
+  }
+}
+
 async function main() {
   console.log('replay-test: headless browser checks for replay mode\n');
   const tests = [
     testMagentaCounter, testNormalBoot, testReplaySuccess, testFailuresRestore,
     testSponsorsHidden, testReplayGuards, testReplayIgnoresSticks, testReplayRestartsOnR,
+    testChaseFollowsInRealTime,
   ];
   let fail = 0;
   for (const test of tests) {
