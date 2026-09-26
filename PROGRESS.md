@@ -53053,3 +53053,93 @@ by side should have three different faces. What would be wrong: a lamp or
 plate floating off a face or sinking into it, a bumper with a gap between
 it and the body at a corner, a far wheel showing as a black blade, glass
 that reads as paint.
+
+## 2026-09-26 | physics path, shell, checks | Crashes judged per physics step, the same at every frame rate
+
+The owner, 2026-09-26, answer 5 at the end of POLISH-PLAN.md: "5. ok
+approved", for "judge crashes per physics step, which removes the frame rate
+dependence and changes crash outcomes" (item 16). It is on the physics path
+and changes the core's crash outcomes; it changes no module ABI and no build
+(dist/sim.wasm and src/native are untouched), which the survey said and this
+work confirmed. Under CLAUDE.md the coverage landed first, in a commit of
+its own, failing, and the change came after it.
+
+### The coverage, first
+
+**scripts/crash-pacing.js**, `npm run check:crash-pacing`, and verify's
+check 18. Each scenario is flown once through dist/sim.wasm and Betaflight
+by a pilot on feedback, one step a frame, and what the pilot did is kept:
+the sticks at every 4 ms RC slot and the step of each angle mode switch.
+That input stream is flown again from the start at one step a frame, 144 Hz
+at every whole ms phase (7), 60 Hz (17), 30 Hz (34) and a 60 Hz that hitches
+(a 150 ms frame the shell caps at 100 ms of steps, a short one, a dropped
+one: 24 rotations and phases), 83 flights a scenario, the way src/main.js's
+frame loop flies: wall clock frames, dt capped at 100 ms, the accumulator,
+the frame's RC samples handed over before its steps, the steps one at a
+time, and the shell's own crash judge asked where the shell asks it.
+
+The judge had to be reachable without a browser, so the judgement moved out
+of main.js into **CrashJudge in src/game/collide.js**, as it stood:
+`step()` gathers what the step loop gathered, `ground(nowWall, hits)` is the
+ground judgement on the frame's peaks behind the wall clock cooldown,
+`contact(rep, st)` is the solid rule on the frame's summed report at the
+frame's end attitude and the STOP. main.js calls it at the points where the
+rules stood, with the same numbers; the step loop reads sim_ground_contacts
+once a step now and hands the one reading to both the judge and its own
+takeoff test. With it, **foldWorldReport**, sim_world_report's own sum done in the shell, so a
+frame can be given the report the module would give it from reads taken
+every step.
+
+Eight scenarios, five found by sweeping two pilots' numbers for flights the
+frame end reading disagreed about, and three anchors:
+
+- a wall tap at 4.2 m/s closing with the belly 50 degrees off the wall,
+  outside the cone on the step it lands and turning into it after;
+- a shallower one, belly 63 degrees off, whose props close at 4.0 m/s and
+  whose frame touches 3 ms later at 3.5, so no single step holds both;
+- a belly skim then touches at 145, 176 and 186 ms as it rolls on its side,
+  body up 0.75, 0.70, 0.69: the one at 186 is the first past the cooldown;
+- a skim, a belly touch at 133 ms and side touches at 172 and 185 ms, which
+  a stutter frame turns into a judged bump that hides the side touches;
+- a skim, then the side at 174 ms, inside the cooldown, stopped by the grass
+  to 1.1 m/s by the first step past it;
+- anchors: a steep nose first hit (a crash), a belly first tap (not), flat
+  on its back onto the grass at 8 m/s (a crash).
+
+Each asserts: the flight is the same at every pacing, every step's state,
+ground contacts and report to the bit up to the verdict; the report folded
+per step is the module's once a frame report to the bit; no frame ends in a
+perch before the verdict; for the five edges, the reading the shell used
+until now (the check's frameEndReading) still disagrees with itself across
+the pacings, so a pass can never be a flight that drifted off its edge; and
+then **the same verdict and the same reset step at every pacing and phase**,
+and the ground's judged hits on the same steps. The anchors pin their kind.
+
+**Behaviour identical, the extraction.** check:crash 68 of 68 guards pass
+on the parent (3040628) and on the extraction, 0 failed; its targets are
+measured on the headless frame clock and moved between the two runs as they
+move between any two (the 20 m/s run's upward kick 0 and 1.03 m/s, the
+glancing hit's speed kept 34736 and 97 percent), which is why that script
+compares nothing for equality. check:clip 910 passed, 0 failed, on a copy
+of the parent and on the extraction. check:plant, check:world and
+check:world-golden all passed. And a scratch comparison: the extracted
+judge, driven as the shell drives it, against the check's frameEndReading,
+a line by line transcription of main.js at 3040628, over all 664 flights:
+0 differ.
+
+**Its result on the judgement as it stood: 10 FAILED**, every guard
+passing. The verdict at each pacing, reset of phases:
+
+    scenario                       1 kHz   144 Hz  60 Hz   30 Hz   stutter
+    tap, the landing step resets   reset   7/7     7/17    7/34    4/24
+    tap, no one step resets        kept    4/7     14/17   31/34   22/24
+    skim, side just past cooldown  reset   3/7     6/17    24/34   11/24
+    skim, touch inside cooldown    reset   7/7     17/17   34/34   7/24
+    skim, side inside cooldown     kept    2/7     9/17    10/34   18/24
+
+The same verdict and reset step failed for all five edges; the ground's
+judged hits failed for the three skims; and the two crash anchors failed
+the reset step, because a crash read at the frame's end is reset on the
+frame's last step, which is wherever the frame happened to end: the nose
+first hit at 41 different steps from 2740 to 2838 ms. The belly tap anchor
+passed everything.

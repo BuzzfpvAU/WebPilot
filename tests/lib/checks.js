@@ -1019,6 +1019,61 @@ export function buildChecks() {
         };
       },
     },
+    {
+      num: 18,
+      id: 'crash-pacing',
+      thresholdText: 'one input stream: the same crash verdict and reset step at every frame pacing',
+      /*
+       * THE CRASH IS PART OF THE TRAJECTORY. A crash resets the craft, so a
+       * crash that depends on the frame rate is a trajectory that does, which
+       * CLAUDE.md rules out. POLISH-PLAN.md item 16 found two such (the belly
+       * cone's edge and the ground's wall clock cooldown), and the owner
+       * approved judging crashes per physics step on 2026-09-26 with the
+       * coverage first. This runs scripts/crash-pacing.js: each scenario's
+       * input stream flown through the module at one step a frame, 144, 60
+       * and 30 Hz at every phase and a stuttering 60 Hz, through the shell's
+       * own crash judge (CrashJudge, src/game/collide.js), every line of it
+       * a pass. A child process, as check 17 is, so its modules stay out of
+       * this one.
+       */
+      async run(ctx) {
+        const th = ctx.th.checks['crash-pacing'];
+        const run = spawnSync('node', [join(ctx.root, 'scripts/crash-pacing.js')], {
+          cwd: ctx.root,
+          encoding: 'utf8',
+          timeout: th.timeout_ms.value,
+          maxBuffer: 16 * 1024 * 1024,
+        });
+        const out = `${run.stdout ?? ''}${run.stderr ?? ''}`;
+        const head = out.match(/(\d+) scenarios, each flown at (\d+) pacings and phases/);
+        const lines = out.split('\n').filter((l) => /^\s*(pass|FAIL)\s/.test(l));
+        const failed = lines.filter((l) => /^\s*FAIL\s/.test(l));
+        const fails = [];
+        if (run.error) {
+          fails.push(`crash-pacing could not run: ${run.error.message}`);
+        }
+        if (!head) {
+          fails.push(`crash-pacing printed no scenario count: ${out.trim().split('\n').slice(-2).join(' | ')}`);
+        }
+        const scenarios = head ? Number(head[1]) : 0;
+        if (head && scenarios < th.scenarios_min.value) {
+          fails.push(`${scenarios} scenarios, under the ${th.scenarios_min.value} it was written with`);
+        }
+        if (failed.length > th.failed_lines.value) {
+          fails.push(`${failed.length} line(s) failed, first: ${failed[0].trim().slice(0, 300)}`);
+        }
+        if (run.status !== 0 && fails.length === 0) {
+          fails.push(`crash-pacing exited ${run.status}: ${out.trim().split('\n').slice(-1)[0]}`);
+        }
+        return {
+          measured: head
+            ? `${lines.length - failed.length} of ${lines.length} lines pass, ${scenarios} scenarios at ${head[2]} pacings and phases`
+            : 'no result',
+          pass: fails.length === 0,
+          reason: fails.join('; '),
+        };
+      },
+    },
   ];
 }
 

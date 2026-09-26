@@ -2369,6 +2369,203 @@ export function solidContactCrash(rep, qw, qx, qy, qz, c, s) {
 }
 
 /*
+ * sim_world_report's own sum, done in the shell: fold one read `rep` into a
+ * running `acc`, exactly as src/native/world.c folds a step into the report
+ * between two reads. Steps, prop steps and frame steps add; the closing speed
+ * and the depth keep the larger; the velocity change keeps the larger or the
+ * equal, later one, and the shape and normal go with it; the support box is
+ * the latest read's. A read with no contact in it moves nothing but the
+ * support. `acc` starts as emptyWorldReport leaves it. Reading the module
+ * every step and folding here gives a frame the report the module would have
+ * given it read once, to the bit: scripts/crash-pacing.js holds it to that.
+ */
+export function emptyWorldReport(acc) {
+  acc.fill(0);
+  acc[3] = -1;
+  return acc;
+}
+export function foldWorldReport(acc, rep) {
+  if (rep[0] > 0) {
+    acc[0] += rep[0];
+    if (rep[1] > acc[1]) {
+      acc[1] = rep[1];
+    }
+    if (rep[2] >= acc[2]) {
+      acc[2] = rep[2];
+      acc[3] = rep[3];
+      acc[4] = rep[4];
+      acc[5] = rep[5];
+      acc[6] = rep[6];
+    }
+    acc[7] += rep[7];
+    acc[8] += rep[8];
+    if (rep[9] > acc[9]) {
+      acc[9] = rep[9];
+    }
+  }
+  acc[10] = rep[10];
+  return acc;
+}
+
+/* Body up's vertical component from a plant state block, clamped into
+ * [-1, 1]: the shell's plantUpZ, here so the judge below reads the same
+ * number the shell does. */
+export function stateUpZ(st) {
+  const x = st[8];
+  const y = st[9];
+  const u = 1 - 2 * (x * x + y * y);
+  if (u > 1) {
+    return 1;
+  }
+  return u < -1 ? -1 : u;
+}
+
+/*
+ * THE CRASH JUDGE: CRASH IS A RESET's three rules (src/main.js has the
+ * owner's words and the argument), asked the way the shell asks them, in one
+ * place that scripts/crash-pacing.js drives in Node over the same input
+ * stream at several frame pacings.
+ *
+ * The shell's frame loop calls it at four points, and nothing else decides a
+ * crash:
+ *
+ *   beginFrame()                           every frame, before its steps
+ *   step(before, after, ground, rep, atMs) after each physics step: the
+ *                                          state blocks either side of it,
+ *                                          sim_ground_contacts, the step's
+ *                                          own world report or null, and
+ *                                          the sim clock it ended at. True
+ *                                          means the step loop ends here
+ *   ground(nowWall, hits)                  after the steps, where the ground
+ *                                          judgement stands, unless the
+ *                                          frame ended in a perch. True
+ *                                          means a ground hit to act on:
+ *                                          hitClosing, hitSpeed, hitHard,
+ *                                          hitCrash, and hitAtMs, the step
+ *                                          it was taken at
+ *   contact(rep, st)                       once a frame, with the frame's
+ *                                          world report and the state at
+ *                                          its end: the solid rule and the
+ *                                          STOP. Returns 'solid', 'stop' or
+ *                                          ''; stopHard says whether the
+ *                                          STOP is a hard hit to count
+ *
+ * seat(c, s) is the plant frame's turn (see bodyUpDotWorld), from
+ * seatWorldFrame; forget() is a set down or a restart.
+ *
+ * AS IT IS READ TODAY, ONCE A FRAME. step only gathers: the frame's largest
+ * one step velocity change and body up after it (the STOP), and the fastest
+ * ground contact and body up after it (the ground). The ground is judged on
+ * the frame's peaks and gated on the WALL clock, BOUNCE_COOLDOWN_MS since the
+ * last frame it judged; the solid rule reads the frame's summed report
+ * against the attitude at the frame's end. So how a tap at the edge of the
+ * belly cone is judged, and whether a second touch of the ground is judged
+ * at all, depends on where the frames fall: PROGRESS.md, 2026-09-25, "A
+ * belly first wall tap is not a crash", found on the way, items 2 and 4.
+ */
+export class CrashJudge {
+  constructor() {
+    this.c = 1;
+    this.s = 0;
+    this.groundAtWall = 0;
+    this.hardGround = false;
+    this.stopDv = 0;
+    this.stopUpZ = 1;
+    this.stopSpeed = 0;
+    this.stopHard = false;
+    this.hitClosing = 0;
+    this.hitSpeed = 0;
+    this.hitHard = false;
+    this.hitCrash = false;
+    this.hitAtMs = 0;
+    this.beginFrame();
+  }
+
+  seat(c, s) {
+    this.c = c;
+    this.s = s;
+  }
+
+  forget() {
+    this.groundAtWall = 0;
+  }
+
+  beginFrame() {
+    this.peakClosing = 0;
+    this.peakSpeed = 0;
+    this.peakUpZ = 1;
+    this.peakAtMs = 0;
+    this.sawGround = false;
+  }
+
+  step(before, after, ground, rep, atMs) {
+    void rep;
+    const vzBefore = before[6];
+    const spdBefore = Math.sqrt(before[4] * before[4] + before[5] * before[5] + before[6] * before[6]);
+    const dvx = after[4] - before[4];
+    const dvy = after[5] - before[5];
+    const dvz = after[6] - before[6];
+    const dv2 = dvx * dvx + dvy * dvy + dvz * dvz;
+    if (dv2 > this.stopDv * this.stopDv) {
+      this.stopDv = Math.sqrt(dv2);
+      this.stopUpZ = stateUpZ(after);
+      this.stopSpeed = spdBefore;
+    }
+    if (ground > 0) {
+      this.sawGround = true;
+      const inbound = -vzBefore;
+      if (inbound > this.peakClosing) {
+        this.peakClosing = inbound;
+      }
+      if (spdBefore > this.peakSpeed) {
+        this.peakSpeed = spdBefore;
+        this.peakUpZ = stateUpZ(after);
+        this.peakAtMs = atMs;
+      }
+    }
+    return false;
+  }
+
+  ground(nowWall, hits) {
+    if (!((hits > 0 || this.sawGround) && nowWall - this.groundAtWall > BOUNCE_COOLDOWN_MS)) {
+      return false;
+    }
+    this.groundAtWall = nowWall;
+    const closing = this.peakClosing;
+    const speed = this.peakSpeed;
+    if (!(closing >= GRAZE_SPEED_MAX || speed >= GRAZE_SPEED_MAX)) {
+      return false;
+    }
+    this.hitClosing = closing;
+    this.hitSpeed = speed;
+    this.hitHard = closing >= BOUNCE_SPEED_MAX || speed >= BOUNCE_SPEED_MAX;
+    this.hitCrash = this.peakUpZ < CRASH_BELLY_UP;
+    this.hitAtMs = this.peakAtMs;
+    if (this.hitHard) {
+      this.hardGround = true;
+    }
+    return true;
+  }
+
+  contact(rep, st) {
+    let kind = '';
+    if (rep[0] > 0 && st && solidContactCrash(rep, st[7], st[8], st[9], st[10], this.c, this.s)) {
+      kind = 'solid';
+    }
+    this.stopHard = false;
+    if (this.stopDv >= GRAZE_SPEED_MAX && this.stopUpZ < CRASH_BELLY_UP && !(rep[0] > 0)) {
+      kind = 'stop';
+      this.stopHard = this.stopSpeed >= BOUNCE_SPEED_MAX && !this.hardGround;
+    }
+    this.stopDv = 0;
+    this.stopUpZ = 1;
+    this.stopSpeed = 0;
+    this.hardGround = false;
+    return kind;
+  }
+}
+
+/*
  * A ROTOR PRESSED INTO A SURFACE CANNOT PULL AIR THROUGH IT.
  *
  * The report: "if you hit a wall i think its programmed to kick you off
