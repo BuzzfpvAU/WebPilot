@@ -53656,3 +53656,48 @@ For the owner, each a line to draw or physics:
 8. **The STOP has no flown scenario**: in Node a flat back fall reports a
    ground contact and is the ground rule's. check:clip's hand written steps
    are its only coverage.
+
+## 2026-09-26 | integration, verify | Crash judgement per physics step and the manga menus, verified in the main tree
+
+Both merged into the working branch (c77149a the manga menus, 5838248
+crash judgement per physics step, the owner's approval of 2026-09-26 in
+POLISH-PLAN.md answer 5). The crash agent's own verify skipped row 1 (its
+worktree had no emcc and no Betaflight checkout), so the procedure was run
+again in the main tree, where both are.
+
+### RUN LOG
+
+    sha256 dist/sim.wasm            5408b3e2be286ee8 before
+    npm run build:wasm              exit 0, wrote dist/sim.wasm
+    sha256 dist/sim.wasm            5408b3e2be286ee8 after: the module
+                                    reproduces from source, and the crash
+                                    change does not touch it
+    git diff --stat vendor/betaflight  empty
+    npm run verify (first run)      16 of 18: rows 15 world-scale and 16
+                                    map-isolation reported harness-error, the
+                                    town never ready inside the check's wait,
+                                    with three agents running headless Chrome
+                                    at a load average of 27 on 4 cores. Not
+                                    counted as passing.
+    npm run verify (rerun, load 0.14, nothing else running)
+                                    18 of 18 passing. Row 1 build clean, abi 1,
+                                    vendor diff empty; rows 2 to 4 de0401cd4266
+                                    in both processes, Node and Chrome, and one
+                                    hash across 30, 60, 144 and 240 Hz; rows 5
+                                    to 12 hover 0.2793, punch 80.0 m, terminal
+                                    31.0 m/s, motor step 26 ms, 671.7 deg/s,
+                                    yaw coupling, battery sag and diff ratio
+                                    as recorded; row 13 console clean; row 14
+                                    audio bed; row 15 world scale 1.0000; row
+                                    16 no city module with the field selected;
+                                    row 17 35 of 35 world runs bit identical;
+                                    row 18 crash-pacing 48 of 48 at 83 pacings.
+
+What the determinism rows can and cannot see: rows 2 to 4 replay the
+baseline with no world and no shell, so they cannot see the crash judge;
+their hash is the same because the module is. Row 18 is the check that sees
+it, and it failed 10 ways on the old code (the crash agent's entry above).
+
+The browser's other checks ran on 3040628 plus each branch in the agents'
+own worktrees, and on the merge: check:clip 936 and score:selftest all
+passed, lint:boot 9 of 9, lint:memory PASS, lint:preload up to date.
