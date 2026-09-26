@@ -74,7 +74,7 @@ import { decodeGhost, encodeGhost, ghostFromBase64, ghostToBase64 } from './shar
 import { uploadWorld, setWorldFrame, setMover, setBoxHeight, kindOf, setVehicleClock, readVehicles, makeVehiclePoses } from './game/plantworld.js';
 import { Chase, CHASE_EVERY, pays } from './game/chase.js';
 import { sincos } from './props/trig.js';
-import { setCraftAirframe, CRAFT_R, CRAFT_WORLD_R, CRAFT_V_UP, CRAFT_V_DOWN, craftVerticalHalf, craftVerticalOffset, canPerch, shouldScorePass, shouldEnterTurtle, uprightPlantQuat, turtleFlipEase, turtleFlipLift, turtleSlerpQuat, TURTLE_STICK_MIN, TURTLE_SPEED, TURTLE_RATE, TURTLE_FLIP_MS, TURTLE_INVERT_UPZ, TURTLE_EXIT_UPZ, turtleClearance, findRestSpot, PROP_PLANE_MAX_UP_DOT, GRAZE_SPEED_MAX, BOUNCE_SPEED_MAX, BOUNCE_COOLDOWN_MS, LAND_DESCENT_MAX, LAND_HORIZONTAL_MAX, LAND_TILT_MAX_DEG, LAND_TILT_HARD_DEG, LAND_TIP_SPEED_MAX, GROUND_MU, GROUND_E, CLIP_SPAWN_GRACE_MS, CRASH_BELLY_UP, solidContactCrash } from './game/collide.js';
+import { setCraftAirframe, CRAFT_R, CRAFT_WORLD_R, CRAFT_V_UP, CRAFT_V_DOWN, craftVerticalHalf, craftVerticalOffset, canPerch, shouldScorePass, shouldEnterTurtle, uprightPlantQuat, turtleFlipEase, turtleFlipLift, turtleSlerpQuat, TURTLE_STICK_MIN, TURTLE_SPEED, TURTLE_RATE, TURTLE_FLIP_MS, TURTLE_INVERT_UPZ, TURTLE_EXIT_UPZ, turtleClearance, findRestSpot, PROP_PLANE_MAX_UP_DOT, GRAZE_SPEED_MAX, BOUNCE_SPEED_MAX, BOUNCE_COOLDOWN_MS, LAND_DESCENT_MAX, LAND_HORIZONTAL_MAX, LAND_TILT_MAX_DEG, LAND_TILT_HARD_DEG, LAND_TIP_SPEED_MAX, GROUND_MU, GROUND_E, CLIP_SPAWN_GRACE_MS, CrashJudge, emptyWorldReport, foldWorldReport } from './game/collide.js';
 import { Ui, formatTime, WEIGHT_STOCK, clampWeight, gravityScaleFor } from './ui/ui.js';
 import {
   adoptMapFromLocation, adoptMostFlownTrack, adoptShareFromLocation, boardPageUrl, fetchGhost,
@@ -1244,6 +1244,11 @@ export async function boot({ loading, bootStart, mapId }) {
   /* The cosine and sine of the yaw the plant's frame was last seated at,
    * which seatWorldFrame writes: see bodyUpDotWorld in src/game/collide.js. */
   const frameTurn = { s: 0, c: 1 };
+  /* CRASH IS A RESET's rules, asked by the frame loop: see CrashJudge in
+   * src/game/collide.js. Here beside frameTurn for frameTurn's reason:
+   * seatWorldFrame hands it the turn, and no reset may meet it before it
+   * exists. */
+  const crashJudge = new CrashJudge();
   /*
    * The height of the surface a craft standing at (x, z) rests on.
    *
@@ -1302,6 +1307,7 @@ export async function boot({ loading, bootStart, mapId }) {
     /* And the same yaw as a turn, for the world report's normals, which come
      * back in the world frame: see bodyUpDotWorld in src/game/collide.js. */
     sincos(startYaw, frameTurn);
+    crashJudge.seat(frameTurn.c, frameTurn.s);
   }
 
   /* Hand the current map's solids to the plant. Called whenever a map is
@@ -1826,6 +1832,14 @@ export async function boot({ loading, bootStart, mapId }) {
     sim.e.sim_world_report(worldReportPtr);
     worldReport.set(new Float64Array(sim.e.memory.buffer, worldReportPtr, 11));
     return worldReport;
+  }
+
+  /* One step's report, read after the step so it holds that step alone,
+   * and folded into the frame's. See worldReport. */
+  function readStepReport() {
+    const r = readWorldReport();
+    foldWorldReport(frameReport, r);
+    return r;
   }
 
   /* The race: gate order, lap clock, best lap. On a freestyle map it is a
@@ -2773,9 +2787,10 @@ export async function boot({ loading, bootStart, mapId }) {
    * THE SOLID WORLD IS THE PLANT'S. src/native/world.c resolves every wall,
    * roof, gate, tree and the train inside the 1 kHz step, with the same
    * solver and on the same clock as the ground, and src/game/plantworld.js
-   * hands it the map. What the shell keeps is the READING: once a frame,
-   * sim_world_report says what was touched, how hard, and by what, and that
-   * is what the sound, the shake and the trick recogniser hear.
+   * hands it the map. What the shell keeps is the READING: sim_world_report
+   * says what was touched, how hard, and by what. The crash judge reads it
+   * every step; summed over the frame it is what the sound, the shake and
+   * the trick recogniser hear.
    *
    * obsTouched is any contact at all, for the recogniser: a Wall Tap needs
    * to know the hull reached the wall, however little the solver had left to
@@ -2808,9 +2823,17 @@ export async function boot({ loading, bootStart, mapId }) {
    * The module's report, and a running total of it for window.__contacts, so
    * a probe can tell a wall it touched from a wall it stopped short of.
    * worldReportPtr is a buffer in the module's heap, taken once.
+   *
+   * READ EVERY STEP. The crash judge needs each step's own report (see
+   * CrashJudge), so the step loop reads and clears it after every step and
+   * folds it into frameReport, which is what the rest of the frame reads:
+   * sim_world_report's own sum, done in the shell (foldWorldReport), the
+   * report the module would have given the frame read once, to the bit.
+   * scripts/crash-pacing.js holds it to that.
    */
   const worldReport = new Float64Array(11);
   let worldReportPtr = 0;
+  const frameReport = emptyWorldReport(new Float64Array(11));
   const passStats = {
     steps: 0,
     frame: 0,
@@ -2827,8 +2850,7 @@ export async function boot({ loading, bootStart, mapId }) {
   /* Wall clock until which a recover-in-place is allowed to settle. */
   let recoverGraceUntil = 0;
   /* The last ground skip, so a craft sliding along the grass reports one
-   * bounce rather than one a frame. */
-  let groundBounceAtWall = 0;
+   * bounce rather than one a frame, is crashJudge's: see CrashJudge. */
   let bounceHitIndex = -1;
   let bounceHitKind = '';
   /* The craft's tilt-aware vertical half extent, written by the physics
@@ -3662,7 +3684,7 @@ export async function boot({ loading, bootStart, mapId }) {
     raceHasPrev = false;
     bounceCount = 0;
     bounceAtWall = 0;
-    groundBounceAtWall = 0;
+    crashJudge.forget();
     bounceHitIndex = -1;
     bounceHitKind = '';
     /* The race interpolates a gate crossing between its own previous sim
@@ -3864,7 +3886,7 @@ export async function boot({ loading, bootStart, mapId }) {
    * so a crash was a pause with the craft hanging on a wall or lying on the
    * street, and only then a reset.
    *
-   * So a CRASH is set down nearby on the frame it is read, exactly as X and
+   * So a CRASH is set down nearby on the step it is read, exactly as X and
    * stuckTick do it. A crash is a smack, GRAZE_SPEED_MAX of closing or more,
    * the line the recogniser and the impact cue already draw between a
    * deliberate touch and a hit, landed anywhere but on the belly:
@@ -3878,10 +3900,10 @@ export async function boot({ loading, bootStart, mapId }) {
    *     (scripts/input-check.js, the whoop pinned under the room's ceiling,
    *     which caught the first version of this rule resetting it);
    *   the ground, a roof included: the ground judgement's own hit speed,
-   *     with the craft not belly down at the hardest contact step;
+   *     with the craft not belly down after the contact step it judged;
    *   or a STOP, one step that changed the craft's velocity by
    *     GRAZE_SPEED_MAX or more, with the craft not belly down after it, in
-   *     a frame where no solid reported any contact at all. Nothing but a
+   *     a step where no solid reported any contact at all. Nothing but a
    *     contact does that in a millisecond: 4 m/s in 1 ms is about 400 g,
    *     where thrust and gravity together give a few tens of g. With no
    *     solid touched, props included, the contact was the ground (the box
@@ -3903,28 +3925,36 @@ export async function boot({ loading, bootStart, mapId }) {
    * out of), anything under 4 m/s (a wall tap, a nudge), a prop clip and a
    * knock on a ceiling. Those still tumble flat and turtle as before.
    *
+   * EVERY PHYSICS STEP, AT ITS OWN ATTITUDE. The owner, 2026-09-26
+   * (POLISH-PLAN.md item 16, answer 5): "ok approved", to judge crashes per
+   * physics step. Each rule reads one step: its own world report, its own
+   * ground contact, the attitude it left, and the ground's cooldown runs on
+   * the sim clock. A crash ends the step loop on its step, and the craft is
+   * set down from the state that step left. Until then the rules were read
+   * once a frame, at the frame's end attitude and behind a wall clock
+   * cooldown, and the same tap was a crash on one monitor and not on
+   * another (PROGRESS.md, 2026-09-25 and 2026-09-26).
+   *
    * CRASH_BELLY_UP and CRASH_UNDERSIDE_NZ live in src/game/collide.js, with
    * the solid rule itself, solidContactCrash, so that scripts/world-check.js
-   * can ask it of flights through the module.
+   * can ask it of flights through the module, and so do all three rules as
+   * the step loop asks them, CrashJudge (crashJudge, beside frameTurn), so
+   * that scripts/crash-pacing.js can fly one input stream through them at
+   * several frame rates and hold them to one verdict and one reset step.
    */
   let crashReset = false;
-  /* The frame's largest one step velocity change, and body up after it:
-   * the STOP above. Written by the step loop, read and cleared with the
-   * world report. */
-  let stepStopDv = 0;
-  let stepStopUpZ = 1;
-  /* The speed going into that step, and whether the ground's own hit
-   * judgement counted a hard hit this frame: the STOP's bookkeeping, read
-   * and cleared with it. */
-  let stepStopSpeed = 0;
-  let frameHardGround = false;
+  /* Whether a crash read now would be taken: the step loop asks it before
+   * it steps, so a crash step ends the loop only when the reset follows. */
+  function crashCanReset() {
+    return mode === 'flight' && ui.screen === 'flight' && !poseLock && !launchStaging && !landed
+      && !turtleFlip.active;
+  }
   function crashResetTick() {
     if (!crashReset) {
       return;
     }
     crashReset = false;
-    if (!(mode === 'flight' && ui.screen === 'flight') || poseLock || launchStaging || landed
-      || turtleFlip.active) {
+    if (!crashCanReset()) {
       return;
     }
     stuckSinceMs = -1;
@@ -6664,6 +6694,10 @@ export async function boot({ loading, bootStart, mapId }) {
      * so the frame the crash is read on is the impact frame's first. */
     manga.tick(dt);
     let frameSteps = 0;
+    /* What this frame's steps will tell the crash judge and the world
+     * report, from nothing: see CrashJudge and readStepReport. */
+    crashJudge.beginFrame();
+    emptyWorldReport(frameReport);
 
     /*
      * The site's counters, once a frame, reading state this loop already
@@ -6847,10 +6881,10 @@ export async function boot({ loading, bootStart, mapId }) {
         }
       } else {
       scoring = view.mode === 'freestyle';
-      let peakGroundClosing = 0;
-      let peakGroundSpeed = 0;
-      let peakGroundUpZ = 1;
       let sawGroundHit = false;
+      /* The step the loop ended on for a crash, or -1: see CRASH IS A
+       * RESET. */
+      let crashStep = -1;
       acc += dt;
       let steps = Math.floor(acc / MS_PER_STEP);
       acc -= steps * MS_PER_STEP;
@@ -6973,10 +7007,13 @@ export async function boot({ loading, bootStart, mapId }) {
            * end-of-frame descent for the OSD meant a real hit never
            * announced: the bounce finished inside the same batch.
            */
-          peakGroundClosing = 0;
-          peakGroundSpeed = 0;
-          peakGroundUpZ = 1;
           sawGroundHit = false;
+          /* Taken once, before the steps: a crash ends the loop only when
+           * crashResetTick will set the craft down from it this frame; and
+           * whether the perch below may take a craft at rest, which makes
+           * a ground contact a landing and not a hit (see CrashJudge). */
+          const crashTakes = crashCanReset();
+          const mayPerch = !takingOff && !turtleWait;
           if (trafficOn) {
             trafficBeforeSteps();
           }
@@ -6984,10 +7021,6 @@ export async function boot({ loading, bootStart, mapId }) {
             if (i === 0 || (i & 7) === 0 || plantUpZ(stNow) < 0.5) {
               sampleGroundNormalFromState(stNow);
             }
-            const vzBefore = stNow[6];
-            const spdBefore = Math.sqrt(
-              stNow[4] * stNow[4] + stNow[5] * stNow[5] + stNow[6] * stNow[6],
-            );
             const stBefore = stNow;
             raiseGroundFromState(stNow);
             /* The train and the crossing's booms, where they are at this
@@ -6995,6 +7028,10 @@ export async function boot({ loading, bootStart, mapId }) {
             pushWorldSolids(simTimeMs + i);
             sim.step(1);
             stNow = readState();
+            /* This step's world report and nothing else, for the crash
+             * judge; folded into the frame's for everything that reads it
+             * once a frame. See readStepReport. */
+            const stepRep = readStepReport();
             /* The cars, at the clock this step left them at: the chase, the
              * smoke, and the pose statePrev is drawn with. */
             if (trafficOn) {
@@ -7037,39 +7074,52 @@ export async function boot({ loading, bootStart, mapId }) {
             const dvy = stNow[5] - stBefore[5];
             const dvz = stNow[6] - stBefore[6];
             const dv2 = dvx * dvx + dvy * dvy + dvz * dvz;
-            if (dv2 > stepStopDv * stepStopDv) {
-              stepStopDv = Math.sqrt(dv2);
-              stepStopUpZ = plantUpZ(stNow);
-              stepStopSpeed = spdBefore;
-            }
+            const groundHits = sim.e.sim_ground_contacts();
             /* The counter's gaps every step and close calls every 8 ms,
              * with this step's change of velocity for the hard contact. */
             if (scoring) {
               counterStep(simTimeMs + i + 1, stNow, dv2);
             }
-            if (sim.e.sim_ground_contacts() > 0) {
+            if (groundHits > 0) {
               sawGroundHit = true;
-              const inbound = -vzBefore;
-              if (inbound > peakGroundClosing) {
-                peakGroundClosing = inbound;
-              }
-              if (spdBefore > peakGroundSpeed) {
-                peakGroundSpeed = spdBefore;
-                peakGroundUpZ = plantUpZ(stNow);
-              }
+            }
+            /*
+             * THE STEP, JUDGED AT ITS OWN ATTITUDE: see CRASH IS A RESET and
+             * CrashJudge. A crash ends the loop on this step, so the craft is
+             * set down from the state this step left, at every frame rate;
+             * the frame's remaining steps are never flown, as the reset
+             * that follows would throw them away. The lap clock still takes
+             * the whole frame below: the craft sits set down for the rest
+             * of it, as it would after the reset.
+             */
+            if (crashJudge.step(stBefore, stNow, groundHits, stepRep, simTimeMs + i + 1, mayPerch) && crashTakes) {
+              crashStep = i;
+              break;
             }
           }
-          if (steps === 1) {
+          if (crashStep >= 0) {
+            /* Drawn at the crash step itself, whatever the accumulator's
+             * fraction, so the set down and the impact frame read the
+             * state the verdict was taken on; the cars with it, which the
+             * loop would have read at its last but one step. */
+            statePrev = stNow;
+            if (trafficOn) {
+              readVehicles(sim, carPrev);
+            }
+          } else if (steps === 1) {
             statePrev = stateCurr;
           }
           stateCurr = stNow;
         }
+        /* The steps the module actually took: all of them, or up to the
+         * crash step. */
+        const flown = crashStep >= 0 ? crashStep + 1 : steps;
         simTimeMs += steps * MS_PER_STEP;
         /* Airtime: only steps flown off the stand. See airtimeMs. */
         if (!stood && !replayMode) {
-          airtimeMs += steps * MS_PER_STEP;
+          airtimeMs += flown * MS_PER_STEP;
         }
-        simStepIdx += steps;
+        simStepIdx += flown;
         frameSteps = steps;
         /* A replay steps nothing, so its frames read the cars as a frame
          * that did not step does, in trafficFrame at the replay's clock. */
@@ -7143,8 +7193,11 @@ export async function boot({ loading, bootStart, mapId }) {
           }
         }
       }
+      /* Not on a crash step: the crash is set down below, and a perch
+       * would land it where it hit. */
       if (
-        !launchStaging
+        crashStep < 0
+        && !launchStaging
         && !takingOff
         && hits > 0
         && canPerch(tiltDeg, speed, rate)
@@ -7168,72 +7221,67 @@ export async function boot({ loading, bootStart, mapId }) {
           groundCueAtWall = nowWall;
           audio.event('land');
         }
-      } else if (
-        (hits > 0 || sawGroundHit)
-        && nowWall - groundBounceAtWall > BOUNCE_COOLDOWN_MS
-      ) {
-        const closing = peakGroundClosing;
+      }
+      if (crashJudge.hit) {
         /*
-         * peakGroundSpeed alone. It floored on `speed`, the END OF FRAME
-         * total speed, which no contact in the frame need ever have had: a
-         * frame that brushed the grass at 0.1 m/s and finished at 6 m/s
-         * scored a 6 m/s hit and played the crash cue for it. Worse, the
-         * frame is wall time and dt is capped at 100 ms, so how hard the
-         * hit sounded depended on the frame rate, which is the one thing
-         * CLAUDE.md says must never reach the game. Both numbers here are
-         * now sampled at a step that actually reported contact.
+         * The ground's hit, a smack of GRAZE_SPEED_MAX or more, judged by
+         * crashJudge at the step it happened, BOUNCE_COOLDOWN_MS of sim clock
+         * after the last contact it judged, so a slide is one bounce and not
+         * one a step. Both numbers are that step's: its closing speed and its
+         * speed going in, never the END OF FRAME total speed, which no
+         * contact in the frame need ever have had (a frame that brushed the
+         * grass at 0.1 m/s and finished at 6 m/s once scored a 6 m/s hit).
+         * Until 2026-09-26 the frame's peaks were judged instead, behind a
+         * cooldown on the wall clock, so whether a second touch was judged
+         * at all depended on the frame rate, which is the one thing CLAUDE.md
+         * says must never reach the game. It is acted on after the steps,
+         * perched or not: a perch after the hit does not unhappen it.
          */
-        const hitSpeed = peakGroundSpeed;
-        if (closing >= GRAZE_SPEED_MAX || hitSpeed >= GRAZE_SPEED_MAX) {
-          bounceCount += 1;
-          /*
-           * The ground, for scoring, on the line collide.js has already
-           * drawn rather than a new one: under BOUNCE_SPEED_MAX the bounce
-           * model applies and hitOutcome calls it a bounce, at or over it
-           * hitOutcome calls it a crash. So a bounce is a BUMP and a crash
-           * bails the combo. No third threshold, because a third threshold
-           * is a number nobody can defend six months later.
-           */
-          const hard = closing >= BOUNCE_SPEED_MAX || hitSpeed >= BOUNCE_SPEED_MAX;
-          /*
-           * THE SITE'S CRASH COUNT IS THIS LINE, IN EVERY MODE. The shell has
-           * exactly one defended definition of a crash, the ceiling collide.js
-           * draws at BOUNCE_SPEED_MAX, and the scorer below reads it only in
-           * freestyle because a race map never touches the scorer. The
-           * statistics are not the scorer: a pilot who puts a five inch into
-           * the grass at ten metres a second on a race track has crashed,
-           * and the board's counter used to hear only the clip-through
-           * catch, which is a glitch recovery, so it read nought for a day
-           * of flying. Turtle entry is NOT counted as well, because it is
-           * what a hard hit usually leads to and would count the same crash
-           * twice. See src/share/stats.js.
-           */
+        const closing = crashJudge.hitClosing;
+        const hitSpeed = crashJudge.hitSpeed;
+        bounceCount += 1;
+        /*
+         * The ground, for scoring, on the line collide.js has already
+         * drawn rather than a new one: under BOUNCE_SPEED_MAX the bounce
+         * model applies and hitOutcome calls it a bounce, at or over it
+         * hitOutcome calls it a crash. So a bounce is a BUMP and a crash
+         * bails the combo. No third threshold, because a third threshold
+         * is a number nobody can defend six months later.
+         */
+        const hard = crashJudge.hitHard;
+        /*
+         * THE SITE'S CRASH COUNT IS THIS LINE, IN EVERY MODE. The shell has
+         * exactly one defended definition of a crash, the ceiling collide.js
+         * draws at BOUNCE_SPEED_MAX, and the scorer below reads it only in
+         * freestyle because a race map never touches the scorer. The
+         * statistics are not the scorer: a pilot who puts a five inch into
+         * the grass at ten metres a second on a race track has crashed,
+         * and the board's counter used to hear only the clip-through
+         * catch, which is a glitch recovery, so it read nought for a day
+         * of flying. Turtle entry is NOT counted as well, because it is
+         * what a hard hit usually leads to and would count the same crash
+         * twice. See src/share/stats.js.
+         */
+        if (hard) {
+          flightStats.noteCrash();
+        }
+        if (view.mode === 'freestyle') {
           if (hard) {
-            flightStats.noteCrash();
-            frameHardGround = true;
-          }
-          if (view.mode === 'freestyle') {
-            if (hard) {
-              trickDetector.reset();
-              counterCrash(true);
-              chaseBail();
-            } else {
-              /* NOT TAPPABLE: this is the ground. See TrickDetector.bump. */
-              trickDetector.bump(undefined, false);
-            }
-          }
-          /* No banner. The owner's instruction: the sound is enough, and
-           * so is the feel. Naming the thing you just hit on screen tells
-           * a pilot what they already watched happen, and it does it over
-           * the top of the next gate. */
-          feelImpact(closing > hitSpeed ? closing : hitSpeed, 'ground');
-          /* A smack that did not land on the belly is a crash, and a crash
-           * resets at once: see CRASH IS A RESET. */
-          if (peakGroundUpZ < CRASH_BELLY_UP) {
-            crashReset = true;
+            trickDetector.reset();
+            counterCrash(true);
+            chaseBail();
+          } else {
+            /* NOT TAPPABLE: this is the ground. See TrickDetector.bump. */
+            trickDetector.bump(undefined, false);
           }
         }
-        groundBounceAtWall = nowWall;
+        /* No banner. The owner's instruction: the sound is enough, and
+         * so is the feel. Naming the thing you just hit on screen tells
+         * a pilot what they already watched happen, and it does it over
+         * the top of the next gate. */
+        feelImpact(closing > hitSpeed ? closing : hitSpeed, 'ground');
+        /* A smack that did not land on the belly is a crash, and a crash
+         * resets at once: crashJudge.crash below, with the others. */
       }
       }
     } else if (mode === 'flight' && landed) {
@@ -7310,15 +7358,17 @@ export async function boot({ loading, bootStart, mapId }) {
     /*
      * WHAT THE SOLID WORLD DID THIS FRAME. src/native/world.c resolved it
      * inside the step loop above, every millisecond, with the same solver as
-     * the ground; the module adds up what it saw across the frame's steps and
-     * this reads it once. A roof the craft is standing on is the GROUND in
-     * the plant, so it arrives through sim_ground_contacts with the street,
-     * not here: this is everything else.
+     * the ground; the step loop read it after every step, and frameReport
+     * is those reads summed as the module sums them, with whatever was
+     * stepped outside the loop (the launch stand) read and folded in here.
+     * A roof the craft is standing on is the GROUND in the plant, so it
+     * arrives through sim_ground_contacts with the street, not here: this is
+     * everything else.
      */
     speedNow = Math.sqrt(
       stateCurr[4] * stateCurr[4] + stateCurr[5] * stateCurr[5] + stateCurr[6] * stateCurr[6],
     );
-    const rep = readWorldReport();
+    const rep = foldWorldReport(frameReport, readWorldReport());
     if (rep[0] > 0) {
       obsContact = true;
       obsTouched = true;
@@ -7334,47 +7384,41 @@ export async function boot({ loading, bootStart, mapId }) {
       /* The report's normal is the physics frame's, Z up, so [6] is how much
        * of it points up: a craft resting on the top of something. */
       obsRoof = rep[6] > 0.5;
-      /* The frame or the lens, not a prop alone, at a smack's closing
-       * speed, on anything but the belly, and not an underside: see CRASH IS
-       * A RESET. The report's normal points out of the solid, so a belly
-       * first hit has it along the body's own up and a ceiling has it
-       * pointing down. It is the WORLD's normal and the attitude is the
-       * plant's, so it is turned by the frame's yaw before the two meet:
-       * see bodyUpDotWorld. */
-      if (stateCurr && solidContactCrash(rep, stateCurr[7], stateCurr[8], stateCurr[9], stateCurr[10],
-        frameTurn.c, frameTurn.s)) {
-        crashReset = true;
-      }
       upAxis.set(0, 1, 0).applyQuaternion(qPrev);
       lastUpDot = Math.abs(-rep[5] * upAxis.x + rep[6] * upAxis.y - rep[4] * upAxis.z);
       passStats.index = idx;
       passStats.kind = kind;
     }
-    /* A stop in a frame that touched no solid is the ground's: see the
-     * STOP in CRASH IS A RESET. */
-    if (stepStopDv >= GRAZE_SPEED_MAX && stepStopUpZ < CRASH_BELLY_UP && !(rep[0] > 0)) {
+    /*
+     * CRASH IS A RESET, as crashJudge found it at a step of this frame: the
+     * ground's smack off the belly, a solid (the frame or the lens, not a
+     * prop alone, at a smack's closing speed, on anything but the belly, and
+     * not an underside: the report's normal points out of the solid, so a
+     * belly first hit has it along the body's own up and a ceiling has it
+     * pointing down; it is the WORLD's normal and the attitude is the
+     * plant's, so it is turned by the frame's yaw before the two meet, see
+     * bodyUpDotWorld), or a STOP that touched no solid, which is the
+     * ground's. The step loop ended on that step.
+     */
+    if (crashJudge.crash) {
       crashReset = true;
-      /*
-       * And a stop from BOUNCE_SPEED_MAX or more is the ground's hard hit,
-       * which the ground judgement above counts, bails and scores as a
-       * crash when sim_ground_contacts sees it, and never sees flat on the
-       * back. So it is counted here, on the same line and once a frame.
-       * Under the line a stop stays a reset and nothing more, as a bump
-       * does there.
-       */
-      if (stepStopSpeed >= BOUNCE_SPEED_MAX && !frameHardGround) {
-        flightStats.noteCrash();
-        if (view.mode === 'freestyle') {
-          trickDetector.reset();
-          counterCrash(true);
-          chaseBail();
-        }
+    }
+    /*
+     * And a stop from BOUNCE_SPEED_MAX or more is the ground's hard hit,
+     * which the ground judgement above counts, bails and scores as a crash
+     * when sim_ground_contacts sees it, and never sees flat on the back. So
+     * it is counted here, on the same line, and not again where the ground
+     * judgement already counted it. Under the line a stop stays a reset and
+     * nothing more, as a bump does there.
+     */
+    if (crashJudge.stopHard) {
+      flightStats.noteCrash();
+      if (view.mode === 'freestyle') {
+        trickDetector.reset();
+        counterCrash(true);
+        chaseBail();
       }
     }
-    stepStopDv = 0;
-    stepStopUpZ = 1;
-    stepStopSpeed = 0;
-    frameHardGround = false;
     passStats.steps += rep[0];
     passStats.frame += rep[8];
     passStats.props += rep[7];
