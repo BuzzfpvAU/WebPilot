@@ -53701,3 +53701,280 @@ it, and it failed 10 ways on the old code (the crash agent's entry above).
 The browser's other checks ran on 3040628 plus each branch in the agents'
 own worktrees, and on the merge: check:clip 936 and score:selftest all
 passed, lint:boot 9 of 9, lint:memory PASS, lint:preload up to date.
+
+## 2026-09-27 | render, shell, input, race, checks | Polish items 22 to 24, and the AU Nationals loop
+
+POLISH-PLAN.md items 22 (overcast and faceted canopies), 23 (the chase
+camera frozen in a real time replay) and 24 (the radio "parked" help row
+sometimes five times late), then the owner's "fix the au nats track" from
+the later answers of 2026-09-26. Built on claude/vibrant-wozniak-v2pg5e at
+c77149a, branch polish-small, not pushed: the lead merges it. Main moved
+to 9ce6d61 (crashes judged per physics step) during the work and was
+merged in (d40867d). No physics, plant, module ABI or build change: the
+race is the shell's scoring downstream of the plant, and nothing under
+src/native, patches or vendor/betaflight moved.
+
+### What was built, a commit each
+
+- **Item 23, the replay chase camera** (8f1f5eb). Its spring took dt from
+  frameSteps, the plant's steps this frame, and a replay parks the craft
+  and steps nothing, so in real time dt was 0 on every frame and the
+  camera never left the pose it was seeded at. It now runs on the replay
+  clock's own advance, vt this frame less vt last frame, in step mode and
+  in real time alike: it follows the ghost as fast as the ghost flies, the
+  pause screen holds it to the bit (vt stands still there), a capture
+  stepping 500 ms a frame gets the camera it got before, and a clock that
+  went back (the lap looped, or R) reseeds the arm on the ghost rather than
+  swinging it across the field. Which clock was the owner's open decision
+  10; the lead's brief chose the replay clock. Flight is untouched: the
+  branch runs only in a replay, and frameSteps, which nothing else read,
+  is gone (the merge with main kept it gone: see below).
+  replay:test gains testChaseFollowsInRealTime on the full course's lap at
+  a steady 17 m/s: the camera moves on every frame whose vt rose and holds
+  to the bit on every frame of the pause screen. Run on the old tree it
+  fails, 11 of 11 frames still.
+- **Item 24, the parked yaw axis on the wall clock** (7642044), after the
+  diagnosis below. noteYawParked times the rest from the wall stamp of
+  the first poll that saw the stick there, not by summing the poll's dtMs.
+  input:selftest gains a stall case (3 s: not yet; 4.5 s across two polls:
+  the verdict), which fails on the old timer.
+- **Item 22, overcast and canopies** (5910e23). Render only.
+  - Overcast (src/maps/built/looks.js): the clouds' lit layer a step
+    LIGHTER than the sky (0xdedce8 at 0.94, from 0xaaa7be at 0.55, which
+    was darker than every stop of the sky), the shaded underside a step
+    darker than it (0x9d99b3 at 0.62), and a 3 texel ink line in the
+    time's own ink round each cloud's lit layer (sky.cloudInk, paintSky:
+    the plain cloudTex stamped in sixteen directions and filled with the
+    ink divided by the cloud's colour, then the plain shape laid over it;
+    made once, kept, and taken off again for a time without cloudInk). The
+    touch more ramp contrast is the cloud's own two step ramp, pulled
+    apart. Golden and dusk skies are the same to the pixel from the same
+    camera. The sun was also given more of the light (1.05 from 0.6,
+    the hemisphere 2.3 from 2.55) in 5910e23 and put back in 9b93dcf:
+    measured, it moved the plot 3 percent and a wall's two faces apart by
+    less than the wall's own texture, which bought nothing but a change to
+    what the flats were measured against.
+  - Canopies: IcosahedronGeometry at detail 0 gives every vertex its face's
+    normal, so the ramp quantised each of twenty facets on its own. Every
+    vertex of the unit icosahedron is on the unit sphere, so its normal is
+    now its own direction, as planet.js does for the planet: the vendored
+    buildSakura and buildGrove (PATCH-world-trees.diff beside the tree,
+    git diff form with a GPL preamble that git apply skips; checked to
+    apply forward to the old file and backward to the new) and the kit's
+    new K.leaf, which src/props/street.js's trees draw their blobs with.
+    Rubble, a sandbag and the town's shrubs and bamboo keep the faceted
+    blob. "The clump's sphere" was read as each blob's own: a leaf clump
+    is one blob, and a tree wide sphere would need per instance data on
+    the town's instanced canopies. Each blob now has two or three bands
+    with a curved terminator and keeps its faceted outline.
+  - Colliders: the same placement hashes before and after (4846cefd...,
+    2667e1be...), check:props and check:world-golden pass unchanged.
+- **The merge of main** (d40867d). Two conflicts in src/main.js, both beside
+  frameSteps. Kept both sides: the crash judge's beginFrame and
+  emptyWorldReport, simStepIdx += flown, and no frameSteps.
+- **AU Nationals** (19c1b8c), below, and the overcast light put back
+  (9b93dcf).
+
+### Item 24: the harness or the shell? The shell.
+
+Read both first. The check parks axis 3 at -1 and waits up to 20 s on
+page.until, polling every 100 ms on Node's clock. The shell's timer summed
+the poll's dtMs, and dtMs is min(wall gap, 100 ms), capped for the
+keyboard's integration. The poll runs on a 2 ms setInterval and once a
+frame, so the cap only bites when the main thread is held up.
+
+Logged both, side by side: the harness's time to the row, and the shell's
+timer, every poll's raw wall gap, what it was credited, and when the
+verdict came, over six full runs of lint:input on the old timer (an
+instrumented copy of the check in the scratchpad, not committed) and three
+runs of the section alone:
+
+    run           harness  shell's verdict  wall lost to the cap
+    full 1        4.58 s   4.01 s           0 in 0 capped polls
+    full 2        9.49 s   9.43 s           5.39 s in 6, one gap of 5.15 s
+    full 3        4.79 s   4.28 s           0.48 s in 4, largest 0.31 s
+    full 4        4.31 s   4.00 s           0
+    full 5        4.09 s   4.01 s           0
+    full 6        4.91 s   4.01 s           0
+    alone x3      4.43 to 4.98 s, 1 to 3 capped polls, 31 to 69 ms lost
+
+The harness saw the row within half a second of the shell's verdict every
+time: it waits for the right thing on the right clock. The shell's verdict
+came late by exactly the wall time the cap threw away, and in run 2 a 5.2 s
+stall on the title made the row 5.4 s late with 4.1 s credited. None of
+these six reached the check's 20 s, so the 20.5 s failures in PROGRESS were
+not reproduced; they are the same arithmetic with more stall, which is
+what "parked":false at 20 s says. A pilot with a radio in the wrong mode
+on a machine that stalls waits the same way, so the fix is the shell's: the
+rest is a pilot's time, wall time, and a stick read at the same place
+either side of a stall rested through it as far as anything can tell.
+
+Other failures in those runs, none of them this row and none new to this
+work: "and the input layer and the button agree with the setting" (3 of
+6, the stick mode button read a frame early, known since Stage E) and
+"let go in the air, the throttle rests on the measured hover" (2 of 6,
+the craft read as landed).
+
+### AU Nationals: the same opening twice in a row
+
+2022 AU Nationals (tracks/json/trk-0870b164.json and the board's copy)
+flies its gate 32-36 twice running, round a loop its document marks with
+waypoints 33, 34 and 35. One straight pass through it was credited at the
+box's face and again at its plane, so a lap could skip the loop. The
+station rule of 2026-09-26 (half a metre of flying between two credits)
+cannot see it, and must not refuse RaceGOW6 Track 1, whose two pairs of
+DIFFERENT gates on one spot are one pass.
+
+The fix is the one the station rule's agent proposed, in src/game/race.js:
+an opening credited while the craft is still inside its box is held, and
+is not credited again until the craft has left that box, by any way out,
+flown or not (update's not flown branch lets go too). The opening is its
+element and hole; a station with no element is its own. A held opening is
+not tested at all, because a straight travel that starts inside a box
+cannot leave and come back. The builder's close-stations warning no longer
+speaks for the same opening twice in a row, which is now what a loop
+through it means; it still speaks for RaceGOW6's pairs and Orbit's flags.
+
+Flown, every course's racing line (courseFromDocument, 0.3 m over its
+knots, 5 cm steps, three laps, 12.7 m/s, a room at its scale) through
+c77149a's Race and this one, pass for pass: the 11 in tracks/ and the
+board's 41, each read with GET from webfpv.org/board/api/tracks/ID/document
+into the scratchpad (nothing was sent to the board but GETs):
+
+    52 courses        50 identical pass for pass; 0 with a different lap
+                      time or lap count; 50 closed laps (Orbit
+                      (Anticlockwise) and Vertical Speed Arrest stall at the
+                      same station in both, as before)
+    AU Nationals x2   the same 97 passes and laps (51.047, 51.090, 51.090
+                      s); station 30 credited at 46.47 s, after the loop,
+                      where it was 40.34 s, before it
+    RaceGOW6 Track 1  identical: its pairs 9 then 0 and 4 then 5 are
+                      credited 9.0 and 11.2 ms apart, as before
+
+The loop cut out of AU Nationals' line (through 32-36 once, then on to 37,
+78.4 m shorter): the old Race closed 44.88 s laps; the new one credits
+station 29 and waits at station 30 until the gate is flown again.
+
+check:clip has six new lines: the same opening crossed straight (credited
+once) and flown round and through again (credited the second time), two
+different gates on one spot (still both), a one gate course (one straight
+pass closed a 50 ms lap before and closes none now; round and through
+again closes one), and the warning. Against c77149a's Race and warnings
+the first, second, fourth, fifth and sixth fail, as they should, and the
+third passes in both, which is its point. The Orbit rocking line
+changed: rocking in one square closed 784 ms laps under the station rule
+and closes none now, because the square the lap started in is never left,
+so its check says that rather than timing laps that no longer exist. No
+threshold moved: the check asserted a floor on a lap time and now asserts
+there is no lap.
+
+### Board laps on AU Nationals that may include the skip
+
+The board holds four laps on 2022 AU Nationals, all AsylumFPV (read with
+GET, nothing written):
+
+    tm-f61be24b  50.516 s  2026-08-26  ghost: through 32-36 ONCE, at 48.03 s
+    tm-ead5d4fe  58.822 s  2026-08-26  ghost: through 32-36 ONCE, at 55.77 s
+    (no id)      61.954 s  2026-08-19  no ghost, cannot be seen
+    (no id)      76.691 s  2026-08-18  no ghost, cannot be seen
+
+Counted as crossings of the opening's plane inside its rectangle on every
+segment of the ghost, so the 30 Hz sampling cannot hide a pass. Both laps
+with a ghost skipped the loop, the board's best among them; under this
+Race neither recorded lap closes. Whether to purge any of them is the
+owner's call; nothing was changed on the board.
+
+### RUN LOG
+
+Browser profiles in a private temp folder (TMPDIR), removed at the end.
+The container restarted once during the work; the scratchpad and the
+worktree survived, and the checks below were all run after it, on 19c1b8c
+(the browser checks) and 9b93dcf (check:props again, after the overcast
+light went back, a data change no browser check here displays).
+
+    npm run lint:boot           9 of 9 checks clean
+    npm run lint:memory         PASS, every world lazy and freed; built 61 ->
+                                177 -> 61 geometries, city 61 -> 307 -> 61
+    npm run lint:shell          PASS, title overflow 0 px
+    npm run lint:input          three runs: all 160 passed (266 s); all 160
+                                passed (276 s); 1 failed, 159 passed (347 s,
+                                load 16), "and the input layer and the button
+                                agree with the setting", the known stick mode
+                                read. "parked and left" passed in all three,
+                                and in all three runs on 7642044 before the
+                                restart (all 160 twice, and once 2 failed:
+                                the stick mode read and the hover one)
+    npm run replay:test         9 tests: 9 pass, 0 fail, the new real time
+                                chase check among them (also 9 of 9 on
+                                8f1f5eb)
+    npm run check:props         all passed, 206 (19c1b8c and 9b93dcf); the
+                                placement hashes 4846cefd and 2667e1be, the
+                                same as c77149a's own run
+    npm run check:world-golden  all passed, 35
+    npm run check:clip          942 passed, 0 failed (936 on main)
+    npm run input:selftest      all 200 passed (198 before the stall case)
+    npm run lint:quality        56 of 56 checks clean
+    npm run lint:preload        up to date, boot 115, city 74, built 33; 220
+                                served; no regeneration needed
+    node scripts/micro-check.js exit 0, 267 passed
+    patch                       PATCH-world-trees.diff applies forward to
+                                c77149a's trees.js and backward to this one
+    dash scan                   none, U+2012 to U+2015 by code point, in any
+                                added line
+    git diff --stat vendor/betaflight   empty
+    npm run verify              not run: no physics, plant, ABI or build
+                                change, and the brief said not to
+
+### Pictures
+
+In the session scratchpad, never committed:
+`/tmp/claude-0/-home-user-WebFPVSimulator/6ddfd91b-7f5b-543b-a441-691d12014517/scratchpad/small/shots/`.
+The real shell through tests/lib/page.js in a rig (look-rig.mjs,
+chase-rig.mjs beside the shots), before served from a git archive of
+c77149a, fixed cameras through window.__setCam and the #ui hidden.
+
+- **Item 22**, look/: before- and after1- for the town at golden (street,
+  grove, sakura, sakura-near, grove-near; the town has no other time) and
+  Hibari Yard at golden and dusk (pads, sakura-near, tree-near, street,
+  sky); before- and final- for the yard at overcast (final is 9b93dcf;
+  after1 to after3 are the tries on the way). crop-*.png are
+  close ups of the canopies and a cloud; diff-*.png are difference
+  pictures, and the golden and dusk skies differ by 0 pixels.
+- **Item 23**, chase/: chase-before-run-0 to 7 and -paused-0 to 2, the
+  camera at (15.855, 2.122, -5.026) in every one while vt ran 532 to
+  6649 ms; chase-after-*, the camera 6.3 to 9.0 m further on at each read
+  and still on the pause screen.
+
+### What went wrong
+
+- The first picture and diagnosis runs failed to start Chromium with
+  TMPDIR in the scratchpad: the profile path is too long for its socket.
+  A short private folder under /tmp served.
+- An overcast run was killed by its own 600 s timeout at a load average of
+  18 with other agents' browsers running, and was run again.
+- The spend limit and then a container restart stopped the work twice;
+  each time the worktree was intact and the work picked up from its last
+  commit.
+- Several shell commands were refused by the worktree's guard as too
+  complex and were split.
+- The first cloud ink was 5 texels at 0.86 opacity: heavy, and the sky
+  read through the cloud. 3 texels at 0.94.
+
+### For the owner, when flying
+
+Verification to choose: **shots** or **fly it** for the look, **fly it**
+for the race. **Look for**: at overcast on Hibari Yard, pale clouds with a
+thin dark outline and a darker underside against the lavender sky, and a
+wall's lit face a little brighter than its side; on the town and the yard,
+tree canopies whose blobs each shade from a lit top to a darker underside
+with a clean curved edge instead of a mosaic of triangles; in a
+?replay=...&cam=chase link, a camera that follows the ghost and stops
+when paused; with a radio whose throttle is on the yaw axis, the "This
+browser has your throttle as yaw" row on the title about four seconds
+after the throttle is left alone; on 2022 AU Nationals, the lap counting
+only when 32-36 is flown, the loop flown, and 32-36 flown again. **Wrong
+would be**: clouds as dark smudges or with a heavy black rim; canopies
+that look like balls or lose their outline; a replay camera that jumps
+across the field; the help row arriving much later than four seconds; a
+lap on AU Nationals, RaceGOW6 Track 1 or any other course that is flown
+properly and does not count.
