@@ -54757,4 +54757,5 @@ is not fixed here.
     npm run score:selftest          all passed (score.js's egg still pays once)
     npm run lint:nouns              FAIL, pre-existing, see above
     npm run verify                  not run: no physics, plant, ABI or build
-    node scripts/shots.js           not run: offered to the owner
+    node scripts/shots.js           not run: offered, and the owner chose
+                                    none on 2026-09-27
