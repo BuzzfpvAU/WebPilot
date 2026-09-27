@@ -63,7 +63,10 @@ import { FlightRecorder, downloadText, flightLogName } from './share/flightlog.j
 import { PRACTICE_LAPS, Race, runComplete } from './game/race.js';
 import { TrickDetector } from './game/trickdetect.js';
 import { deriveObstacles, OB_BAR, OB_POLE } from './game/obstacles.js';
-import { MARK_FINDS, seesMark } from './game/egg.js';
+import {
+  MARK_FINDS, PARTNER_FINDS, glimpsesMark, seesMark,
+} from './game/egg.js';
+import { partnerBySlug } from './partners/roster.js';
 import { Counter, formatScore } from './game/score.js';
 import { NamedGapCounter } from './game/gaps.js';
 import { CloseCalls, CC_EVERY, CC_HARD_DV } from './game/closecall.js';
@@ -81,7 +84,9 @@ import {
   fetchMapDocument, fetchTrackDocument, fetchTrackTimes, postFreestyleRun, postTime,
 } from './share/board.js';
 import { findBoardTwin, hasFlyableTrack, inspectCourse, publishCurrentCourse, pushOwnedListing, seatedCourseKey, suggestRemixName, syncOwnedIdentity } from './share/listing.js';
-import { captureSource, createFlightStats, pingVisit } from './share/stats.js';
+import {
+  captureSource, createFlightStats, pingVisit, sendEvent,
+} from './share/stats.js';
 import { sendCardAnimation } from './share/cardgif.js';
 import { nameRules, readPilotName, writePilotName } from './share/pilot.js';
 import { stampFor, writeStamp } from './share/stamps.js';
@@ -4054,6 +4059,86 @@ export async function boot({ loading, bootStart, mapId }) {
   }
 
   /*
+   * THE PARTNERS' MARKS (`marks` in src/maps/README.md), found the way the
+   * STF mark was, by the same seesMark with the same camera, and it is an
+   * achievement again for them (PARTNER_FINDS in src/game/egg.js): the
+   * stamp under the mark's own key, EGG_POINTS into the combo once a run
+   * for each partner (score.partner), the callout and the panel with the
+   * partner's sign in it, and a count on the partner's dashboard on the
+   * board.
+   *
+   * AND SEEN, which is the other number a partner is shown: the mark was in
+   * the picture at a size a pilot can read (glimpsesMark), once for each
+   * partner each time a map is flown, however many runs that is, because a
+   * sighting in every run of a session would be the same pilot counted
+   * over and over. A find is always a sighting too, so a mark found before
+   * the slower sighting test came round is counted seen as well.
+   *
+   * Both go to the board as a closed word with the partner and the kind of
+   * map (MARK_MAP_WORDS), through sendEvent, which sends nothing at all
+   * for a pilot who opted out or whose browser asks not to be tracked
+   * (src/share/stats.js). Nothing about the pilot, the place or the time
+   * goes with them.
+   */
+  const marksFound = new Set();
+  let marksSeen = new Set();
+  let marksSeenView = null;
+  /* The sighting walks up to SEEN_RANGE_MAX of sight line, so it is asked
+   * a third as often as the find. */
+  const MARKS_SEEN_EVERY = EGG_EVERY * 3;
+  /* chooseDocument's sources in src/maps/built/index.js, as the board's
+   * MARK_MAPS words: the starter is Hibari Yard, an injected document is a
+   * map from the board, and the builder's seat is the pilot's own. The town
+   * keys its marks 'city#'. */
+  const MARK_MAP_WORDS = { starter: 'yard', injected: 'board', canvas: 'own' };
+  function markMapWord(mark) {
+    return String(mark.key).startsWith('city#') ? 'city' : (MARK_MAP_WORDS[view.source] || null);
+  }
+  function markSeen(mark) {
+    marksSeen.add(mark.slug);
+    const map = markMapWord(mark);
+    if (map) {
+      sendEvent({ kind: 'mark', partner: mark.slug, what: 'seen', map });
+    }
+  }
+  function findMarks(glimpse) {
+    if (marksSeenView !== view) {
+      marksSeenView = view;
+      marksSeen = new Set();
+    }
+    eggFwd.set(0, 0, -1).applyQuaternion(fpvQuat);
+    for (const mark of view.marks) {
+      if (glimpse && !marksSeen.has(mark.slug) && glimpsesMark(fpvPos, eggFwd, mark, view.colliders)) {
+        markSeen(mark);
+      }
+      if (!marksFound.has(mark.slug) && seesMark(fpvPos, eggFwd, mark, view.colliders)) {
+        marksFound.add(mark.slug);
+        if (!marksSeen.has(mark.slug)) {
+          markSeen(mark);
+        }
+        partnerFound(mark);
+      }
+    }
+  }
+  function partnerFound(mark) {
+    const partner = partnerBySlug(mark.slug);
+    if (!partner) {
+      return;
+    }
+    writeStamp(mark.key);
+    score.partner(partner.slug, partner.short, simTimeMs);
+    const map = markMapWord(mark);
+    if (map) {
+      sendEvent({ kind: 'mark', partner: partner.slug, what: 'found', map });
+    }
+    /* The panel's picture is the partner's sign, which the map that painted
+     * it has already loaded, as findEgg's is. */
+    import('./art/partnermark.js')
+      .then((m) => ui.partnerFound(partner, m.partnerDataUrl(partner)))
+      .catch(() => ui.partnerFound(partner, null));
+  }
+
+  /*
    * THE CHASE BONUS. Every chase event that pays (a tail banked, a thread,
    * a hurdle: pays() in src/game/chase.js) is handed here once, from the
    * feed that settled it (chaseToCounter), and goes into the counter's
@@ -4108,8 +4193,9 @@ export async function boot({ loading, bootStart, mapId }) {
      * next fault is a new one and deserves to be reported in its turn. See
      * the frame boundary. */
     frameFault = null;
-    /* A new run, so the mark is there to be found again. */
+    /* A new run, so the mark is there to be found again, and the partners'. */
     eggFound = false;
+    marksFound.clear();
     /* The pack charge a run flies on is fixed when the run starts. It is
      * a setting, and settings are reachable from the pause menu, so
      * without this a player could change packs mid run and have the lap
@@ -8266,6 +8352,12 @@ export async function boot({ loading, bootStart, mapId }) {
       if (MARK_FINDS && view.egg && !eggFound && ui.screen === 'flight' && frames % EGG_EVERY === 0) {
         findEgg();
       }
+      /* The partners' marks, every map that carries them: see findMarks. A
+       * frame after the STF mark's, so the two never land on one frame. */
+      if (PARTNER_FINDS && view.marks && view.marks.length && ui.screen === 'flight'
+        && frames % EGG_EVERY === 1) {
+        findMarks(frames % MARKS_SEEN_EVERY === 1);
+      }
       if (view.mode === 'freestyle') {
         const wasOver = score.over();
         /* What waited out its window while nothing stepped, then the
@@ -10205,6 +10297,13 @@ export async function boot({ loading, bootStart, mapId }) {
   };
   /* Harness: the STF mark on this map (null where it carries none),
    * whether this run has found it, and this browser's stamp for it. */
+  /* The partners' marks, the same way. Harness only. */
+  window.__marks = () => ({
+    marks: view.marks ?? [],
+    found: [...marksFound],
+    seen: marksSeenView === view ? [...marksSeen] : [],
+    stamped: (view.marks ?? []).map((m) => ({ slug: m.slug, stamp: stampFor(m.key) })),
+  });
   window.__egg = () => ({
     egg: view.egg ?? null,
     foundThisFlight: eggFound,

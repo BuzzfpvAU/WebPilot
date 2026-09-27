@@ -14,7 +14,10 @@
  *
  * where key is the map's `egg.key` (src/maps/README.md): 'city' for the
  * town, 'built:starter' for Hibari Yard, 'built:' and the document's id for
- * a map somebody built, and atUtc is when this browser first found it. A
+ * a map somebody built, and a partner's mark keys the same with '#' and the
+ * partner's slug ('city#gds', `marks` in src/maps/README.md). No card shows
+ * a partner's stamp; it is kept so a find is a find once, the way the STF
+ * mark's was. atUtc is when this browser first found it. A
  * second find keeps the first date, because the stamp is for having found
  * it, and the first time is the one worth keeping.
  *

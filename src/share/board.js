@@ -202,6 +202,18 @@ export function boardPageUrl(origin, craft) {
   return craft ? `${base}/?craft=${encodeURIComponent(craft)}` : `${base}/`;
 }
 
+/*
+ * The board's partners page (/partners there), opened on one partner's card
+ * when a slug is given. The same origin rule as boardPageUrl, because it is
+ * the same board.
+ */
+export function partnersPageUrl(origin, slug) {
+  const base = usableBoardOrigin(origin)
+    || usableBoardOrigin(boardOrigin())
+    || defaultBoardOrigin();
+  return slug ? `${base}/partners#${encodeURIComponent(slug)}` : `${base}/partners`;
+}
+
 async function readJson(res) {
   const text = await res.text();
   let body = null;

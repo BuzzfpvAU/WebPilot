@@ -115,7 +115,7 @@ import {
   setPidsExpert,
 } from '../../configs/pids.js';
 import {
-  boardPageUrl, fetchMapList, fetchTrackList, fetchTrackTimes, mapCardUrl, pickFeaturedTracks,
+  boardPageUrl, fetchMapList, fetchTrackList, fetchTrackTimes, mapCardUrl, partnersPageUrl, pickFeaturedTracks,
   pickNewestMaps, wikiPageUrl,
 } from '../share/board.js';
 import { PATTERNS } from '../game/trickdetect.js';
@@ -127,6 +127,7 @@ import { BUG_KINDS, submitBug } from '../share/bugs.js';
 import { nameRules, readPilotName, writePilotName } from '../share/pilot.js';
 import { stampFor, stampKeyForMap } from '../share/stamps.js';
 import { MARK_FINDS } from '../game/egg.js';
+import { PARTNERS, roleTitle } from '../partners/roster.js';
 import { courseChip, hasFlyableTrack, inspectCourse, isEmptyCanvas } from '../share/listing.js';
 import { isoLapMs, drawIso, drawPlan, fieldSize, planCanvas, planFromDocument } from '../share/plan.js';
 import { activeCourseSummary } from '../share/summary.js';
@@ -208,7 +209,7 @@ import {
  * appear here renders as a plain action, which is the safe default: it gets no
  * chevron it has not earned.
  */
-const LINK_ACTIONS = new Set(['leaderboard', 'wiki', 'support']);
+const LINK_ACTIONS = new Set(['leaderboard', 'wiki', 'support', 'partners']);
 /* mapbuilder is the builder's freestyle door, and it opens the same page
  * trackbuilder does, so it wears the same chevron: the pause menu's Back to
  * the track builder is one or the other depending on what is being flown,
@@ -699,6 +700,19 @@ function counterRows(s) {
     out.push(['STF mark', 'Found']);
   }
   return out;
+}
+
+/*
+ * The partners' marks this run found, as one results row, [label, value],
+ * or none. A row and not a manga panel: the page's panels are the run's
+ * flying, and a find is a credit to the partner, so it is listed under the
+ * page whether the page is drawn or not. The roster's order rather than
+ * the order they were found, so the row reads the same way every time.
+ */
+function partnerRows(s) {
+  const found = s && Array.isArray(s.partnersFound) ? s.partnersFound : [];
+  const partners = PARTNERS.filter((p) => found.includes(p.slug));
+  return partners.length ? [['Partner marks found', partners.map((p) => p.short).join(', ')]] : [];
 }
 
 /* The best counter total this browser has for the map, from the summary,
@@ -6341,7 +6355,7 @@ export class Ui {
         {
           label: 'Credits',
           action: 'credits',
-          note: 'Who made this, who flew it, and whose work it stands on.',
+          note: 'Who made this, who flew it, whose work it stands on, and the partners who back it.',
         },
         /*
          * THE WAY BACK TO THE GATE, AND IT IS A ROW NOW.
@@ -6371,8 +6385,22 @@ export class Ui {
     if (this.screen === 'howto') {
       return [{ label: 'Back', action: 'back' }];
     }
+    /*
+     * THE PARTNERS' ROW lives here, under the roll that names them, and not
+     * on the front page, which has had no room for an eleventh row since
+     * the gate's row came (see THE WAY BACK TO THE GATE). Credits is where
+     * the front page already sends a pilot asking who is behind this, and
+     * its note says the partners are in it.
+     */
     if (this.screen === 'credits') {
-      return [{ label: 'Back', action: 'back' }];
+      return [
+        {
+          label: 'Partners',
+          action: 'partners',
+          note: `${PARTNERS.map((p) => p.name).join(', ').replace(/, ([^,]*)$/, ' and $1')}. Opens their page on the board in a new tab.`,
+        },
+        { label: 'Back', action: 'back' },
+      ];
     }
     /*
      * Courses. ONE SCREEN WHERE THERE WERE THREE.
@@ -12042,6 +12070,46 @@ export class Ui {
     }, STF_FOUND_MS + 200);
   }
 
+  /*
+   * A PARTNER'S MARK, FOUND: stfFound's moment, in the same place, for the
+   * same three seconds and in the same clothes, because the owner asked for
+   * the partners' marks to be found "like the old STF one". The word is the
+   * partner's short name in the callout's lettering, the line under it is
+   * what they are to WebFPV (roleTitle), and the panel is their sign as it
+   * is painted in the world (partnerDataUrl in src/art/partnermark.js), so
+   * the pilot sees whose it was even if they saw it for a quarter of a
+   * second. A second find while one is up replaces it, as stfFound's does:
+   * two marks are never within PARTNER_SEP of each other
+   * (src/maps/built/egg.js), so two finds a frame apart do not happen.
+   */
+  partnerFound(partner, imageUrl) {
+    const layer = this.stfLayer;
+    if (!layer || !partner) {
+      return;
+    }
+    layer.textContent = '';
+    const call = el('div', 'stf-call');
+    call.append(
+      el('div', 'stf-call-burst'),
+      el('span', 'stf-call-word partner-call-word', partner.short),
+      el('div', 'stf-call-line', `${roleTitle(partner)} \u00b7 found`),
+    );
+    layer.append(call);
+    if (imageUrl) {
+      const panel = el('div', 'stf-panel');
+      const img = el('img', 'stf-panel-mark');
+      img.alt = `${partner.name}'s mark`;
+      img.src = imageUrl;
+      panel.append(el('div', 'stf-panel-burst'), img);
+      layer.append(panel);
+    }
+    this.announce(`${partner.name} mark found.`);
+    clearTimeout(this.stfTimer);
+    this.stfTimer = setTimeout(() => {
+      layer.textContent = '';
+    }, STF_FOUND_MS + 200);
+  }
+
   /* The freestyle board's answer, so the results row can say what happened
    * rather than staying on the verb. */
   markRunPosted(posted) {
@@ -12146,6 +12214,7 @@ export class Ui {
       if (!this.manga) {
         this.appendCounterRows(summary);
       }
+      this.appendResultRows(partnerRows(summary));
       const rows = summary.rows || [];
       const top = rows.length ? rows[0].points : 0;
       /*
@@ -12246,7 +12315,13 @@ export class Ui {
   /* The counter's bests as plain rows in the results list, at its head
    * when `first`, or where the list has got to. */
   appendCounterRows(summary, first) {
-    const lines = counterRows(summary || {}).map(([label, value]) => {
+    this.appendResultRows(counterRows(summary || {}), first);
+  }
+
+  /* Plain [label, value] rows in the results list, at its head when
+   * `first`, or where the list has got to. */
+  appendResultRows(pairs, first) {
+    const lines = pairs.map(([label, value]) => {
       const line = el('div', 'result-row');
       const main = el('div', 'result-main');
       main.append(el('span', 'result-label', label), el('span', 'result-time', value));
@@ -14168,6 +14243,12 @@ export class Ui {
     /* Patreon, which is not one of our sites, so not a named tab. */
     if (action === 'support') {
       openSupport();
+      return;
+    }
+    /* The board's partners page, which is one of our sites, in the board's
+     * own named tab. */
+    if (action === 'partners') {
+      openNamedWindow(partnersPageUrl(this.share && this.share.board), BOARD_WINDOW);
       return;
     }
     /*

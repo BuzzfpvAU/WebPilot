@@ -71,6 +71,7 @@ A MapInstance is:
     dispose()
     stats()       optional, harness only
     egg           optional: where the STF mark is painted, see below
+    marks         optional: where each partner's mark is painted, see below
     gaps          optional: the author's named gaps, src/game/gaps.js
                   namedGaps(placeDocument(doc).zones); the counter flies them
 
@@ -134,6 +135,29 @@ found it (within its range, 4 m for a mark up to 1.8 m wide and further for
 a bigger one, in front of the paint and at least 15 degrees off it, looking
 at it, a clear line), and keeps the stamp in `src/share/stamps.js`
 under `key`.
+
+### `marks` is where the partners' marks are painted
+
+Every freestyle map also carries one mark for each partner in
+`src/partners/roster.js`, painted by `src/art/partnermark.js` as a sign in
+the partner's own artwork. `marks` is a list of them, in the roster's
+order, each the `egg` shape with the partner's slug:
+
+    marks = [{ slug, key, p, n, up, w, h }, ...]
+
+    slug  the partner, as the roster names them
+    key   the found stamp's key: the map's `egg` key, '#' and the slug
+
+They are paint like the STF mark, found by the same `seesMark`, and
+finding one is an achievement: a callout with the partner's name, a stamp,
+the combo's bonus once a run, a row on the results and a count on the
+partner's own dashboard on the board. The town's are three constants,
+`PARTNER_SPOTS` in `city/places/index.js`, measured by hand: Mantis FPV
+over the street the pilot starts in, Global Drone Solutions and the club
+on the practice field's tap wall, front and back. A built map's are chosen
+by `built/egg.js` after the STF mark's, one wall each and never the STF
+mark's, by the same rules with three more (rules 8 to 10 there). A map
+that paints none leaves `marks` out or empty.
 
 ### Renderer state belongs to the map
 

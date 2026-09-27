@@ -102,6 +102,7 @@ export const MAP_PRELOAD = {
     'maps/city/places/training.js',
     'maps/city/places/blossom.js',
     'art/stf.js',
+    'art/partnermark.js',
     'maps/city/drawn.js',
   ],
   built: [
@@ -130,6 +131,7 @@ export const MAP_PRELOAD = {
     'props/course.js',
     'props/solids.js',
     'art/stf.js',
+    'art/partnermark.js',
     'maps/built/place.js',
     'maps/built/starter.js',
     'maps/built/looks.js',

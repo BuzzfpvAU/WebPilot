@@ -43,7 +43,10 @@
  * as `egg`. It is paint, so no solid comes of it. The builder imports
  * neither this file nor ./egg.js, so it never shows where the mark will be:
  * the person who built a map sees it from the pads when they fly it, like
- * everybody else.
+ * everybody else. The partners' marks (src/partners/roster.js) come the
+ * same way, one each, on walls ./egg.js chooses after the STF mark's
+ * (choosePartnerSpots), painted by paintPartnerMarks and handed over as
+ * `marks`.
  *
  * THE CARS MOVE, AND NOTHING ELSE DOES. A map's roads and vehicles
  * (./traffic.js) are drawn by ./roadmesh.js and ./cars.js, and the physics
@@ -91,10 +94,12 @@ import { addSolids } from '../../props/solids.js';
 import { poleWireAnchors } from '../../props/street.js';
 import { sincos } from '../../props/trig.js';
 import { makeStfMark } from '../../art/stf.js';
+import { makePartnerMark, signAspect } from '../../art/partnermark.js';
+import { PARTNERS } from '../../partners/roster.js';
 import { placeDocument, groundUnder, topUnder, PLATFORM_REACH } from './place.js';
 import { starterMap } from './starter.js';
 import { lookOf, kitLook, paintLights, paintSky, paintPost } from './looks.js';
-import { chooseStfSpot } from './egg.js';
+import { chooseStfSpot, choosePartnerSpots } from './egg.js';
 import { trafficOf, uploadTraffic, roadKeepOut } from './traffic.js';
 import { buildRoadMesh, roadCover } from './roadmesh.js';
 import { buildCars } from './cars.js';
@@ -826,19 +831,58 @@ function chunkKeyOf(item) {
  * shape the town hands the shell.
  */
 function paintStfMark(props, placed, spot, look) {
+  return paintMark(props, placed, spot, look, (opts) => makeStfMark(THREE, opts));
+}
+
+/*
+ * THE PARTNERS' MARKS, one each where ./egg.js chose (choosePartnerSpots),
+ * painted exactly as the STF mark is, by the same paintMark, with each
+ * partner's sign (src/art/partnermark.js) in place of the stencil. Returns
+ * the MapInstance's `marks` (src/maps/README.md): the `egg` shape with the
+ * partner's slug on it, one per partner the roster lists, in its order. A
+ * sign that cannot be painted leaves that partner out and the rest in.
+ */
+function paintPartnerMarks(props, placed, spots, look) {
+  const out = [];
+  for (const spot of spots) {
+    const partner = PARTNERS.find((p) => p.slug === spot.slug);
+    if (!partner) {
+      continue;
+    }
+    try {
+      const mark = paintMark(props, placed, spot, look, (opts) => makePartnerMark(THREE, partner, opts), 1);
+      out.push({ ...mark, slug: partner.slug });
+    } catch (e) {
+      console.error(`partners: ${partner.slug}'s mark could not be painted on this map`, e);
+    }
+  }
+  return out;
+}
+
+/*
+ * Either mark, painted by `make({ width, height, look, shade })`. `share` is
+ * how far up the probed depths the paint stands (drawnRelief): the STF
+ * mark's STF_PROBE_SHARE, in front of most relief and behind the odd proud
+ * thing, as paint on a wall is; and all of it for a partner's sign, which is
+ * a panel mounted on the wall and stands in front of every window frame
+ * and door leaf under it. Measured on the starter's office block, where a
+ * sign at three quarters had the frames of the windows over and under it
+ * drawn across its edges.
+ */
+function paintMark(props, placed, spot, look, make, share = STF_PROBE_SHARE) {
   const n = new THREE.Vector3(...spot.n);
   const up = new THREE.Vector3(...spot.up);
   const right = new THREE.Vector3().crossVectors(up, n);
   const item = spot.elementId ? placed.items.find((it) => it.el.id === spot.elementId) : null;
   const name = `props:${chunkKeyOf(item || { x: spot.p[0], z: spot.p[2] })}`;
   let chunk = props.children.find((g) => g.name === name);
-  const lift = drawnRelief(chunk, spot, right) + STF_LIFT;
+  const lift = drawnRelief(chunk, spot, right, share) + STF_LIFT;
   const p = spot.p.map((v, k) => v + spot.n[k] * lift);
   /* In shade when the face is turned away from the look's sun: no direct
    * light reaches it at this time of day (see makeStfMark). */
   const sun = look.time && look.time.sun ? look.time.sun.at : null;
   const shade = Boolean(sun) && spot.n[0] * sun[0] + spot.n[1] * sun[1] + spot.n[2] * sun[2] <= 0;
-  const mark = makeStfMark(THREE, {
+  const mark = make({
     width: spot.w, height: spot.h, look: kitLook(look.timeId), shade,
   });
   mark.geometry.applyMatrix4(new THREE.Matrix4().makeBasis(right, up, n).setPosition(p[0], p[1], p[2]));
@@ -856,7 +900,7 @@ function paintStfMark(props, placed, spot, look) {
 /* How far the drawn surface under the mark stands off the solid face the
  * spot is on, in metres: see STF_PROBE. 0 where nothing is drawn proud of
  * it, which is the ground and a plain slab. */
-function drawnRelief(chunk, spot, right) {
+function drawnRelief(chunk, spot, right, share = STF_PROBE_SHARE) {
   if (!chunk) {
     return 0;
   }
@@ -878,7 +922,7 @@ function drawnRelief(chunk, spot, right) {
     }
   }
   depths.sort((a, b) => a - b);
-  return depths[Math.floor((depths.length - 1) * STF_PROBE_SHARE)];
+  return depths[Math.floor((depths.length - 1) * share)];
 }
 
 function trianglesOf(root) {
@@ -921,6 +965,15 @@ export async function buildMap(shell, onProgress, options) {
     stfSpot = chooseStfSpot(placed, doc, chosen.source);
   } catch (e) {
     console.error('stf: no spot for the mark on this map', e);
+  }
+  /* And the partners', after it and never on its wall (./egg.js, rule 8),
+   * for the same reason read only and for the same reason forgiving. */
+  let partnerSpots = [];
+  try {
+    partnerSpots = choosePartnerSpots(placed, doc, chosen.source, stfSpot,
+      PARTNERS.map((p) => ({ slug: p.slug, aspect: signAspect(p) })));
+  } catch (e) {
+    console.error('partners: no spots for the marks on this map', e);
   }
   /* Its time of day and its ground (./looks.js): golden over concrete for
    * a map that never chose, which is this map as it always was. */
@@ -1037,6 +1090,7 @@ export async function buildMap(shell, onProgress, options) {
       console.error('stf: the mark could not be painted on this map', e);
     }
   }
+  const marks = paintPartnerMarks(props, placed, partnerSpots, look);
   scene.add(props);
   progress(0.8);
 
@@ -1267,6 +1321,9 @@ export async function buildMap(shell, onProgress, options) {
      * found it: see paintStfMark and `egg` in src/maps/README.md. Paint
      * only; nothing about it is solid. */
     egg,
+    /* Where each partner's mark is painted, the same shape with the slug:
+     * see paintPartnerMarks and `marks` in src/maps/README.md. */
+    marks,
     /* The author's named gaps as world rectangles, for the counter
      * (src/game/gaps.js): placeDocument's zones, placed by the one
      * conversion everything on this map goes through. Nothing solid and
@@ -1314,6 +1371,20 @@ export async function buildMap(shell, onProgress, options) {
         part: stfSpot.part,
         painted: Boolean(egg),
       } : null,
+      /* The partners' spots the same way, one per partner, for the harness
+       * and the checks. Never shown either. */
+      marks: partnerSpots.map((s) => ({
+        slug: s.slug,
+        key: s.key,
+        step: s.step,
+        kind: s.kind,
+        elementId: s.elementId,
+        type: s.type,
+        part: s.part,
+        w: s.w,
+        h: s.h,
+        painted: marks.some((m) => m.slug === s.slug),
+      })),
       lamps: lampGlow ? { lamps: lampGlow.lamps, pools: lampGlow.pools } : null,
       cullRadius,
       fog: { near: fogNear, far: fogFar },

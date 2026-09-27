@@ -2559,6 +2559,9 @@ export async function buildMap(shell, onProgress, options) {
      * spawn's street: see STF_SPOT in ./places/index.js and `egg` in
      * src/maps/README.md. Paint only; nothing about it is solid. */
     egg: places.egg,
+    /* Where the partners' marks are painted, one each, by hand: see
+     * PARTNER_SPOTS in ./places/index.js and `marks` in src/maps/README.md. */
+    marks: places.marks,
     setNextGate() {},
     /* No gates, so nothing is ever the next one. Present so the shell has
      * one call shape for both maps and the target mark stays off here. */

@@ -744,6 +744,10 @@
           5px 6px 0 #0b1116;
       }
       .stf-t { color: #3cc04f; }
+      /* A partner's find letters their short name the same way, in caps,
+         and in the mark's white rather than a colour of theirs: the panel
+         under it carries their livery. */
+      .partner-call-word { text-transform: uppercase; }
       .stf-call-line {
         position: relative; margin-top: 6px;
         font-size: clamp(14px, 1.7vw, 20px); font-weight: 800;
@@ -4291,6 +4295,20 @@
       }
       @media (min-width: 640px) {
         .credit-row.pair { grid-template-columns: 1fr 1fr; }
+      }
+      /* The partners: three cards abreast where there is room, each mark
+         the roster's one colour file at one height, the way a grid of
+         partner marks is set anywhere that sets them well. The role is the
+         line an instrument would carry, so it is amber and small. */
+      @media (min-width: 900px) {
+        .credit-row.partners { grid-template-columns: repeat(3, 1fr); }
+      }
+      .credit.partner .credit-logo img, .credit.partner .credit-logo svg { height: 44px; }
+      .credit-copy .credit-role {
+        margin: 0 0 6px;
+        font: 700 11px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--amber);
       }
       /* The beta roll is one panel of ruled rows rather than four
          floating cards, because a start list is a list. Four identical

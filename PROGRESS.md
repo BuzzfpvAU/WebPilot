@@ -55390,3 +55390,113 @@ owner's link and says so beside it.
     fpv-repair-and-build-service and one-to-one-fpv-coaching pages,
     westcoastmultirotors.com.au; each claim found in their text
     npm run verify              not run: copy only, no physics
+
+## 2026-09-27 | partners | The partners' marks in every freestyle map, found like the STF mark was
+
+### What changed
+
+The owner's ask, built to the plan they approved ("go with your
+recommendations"): the partners in src/partners/roster.js painted into
+every freestyle map, and "finding one pops an achievement like the old STF
+one (logic still in code)". Then "build it all out and push to main".
+
+- src/art/partnermark.js (new). A partner's mark is a painted sign: their
+  own colour artwork, whole and at its own aspect, on a panel of the
+  roster's `mark.field` with the town's ink line round it and a little
+  weather, lit by the STF mark's own cel material and glow (stf.js now
+  exports paintMaterial and paintGlow for it; makeStfMark is unchanged in
+  what it makes). The files are fetched and made into a picture from the
+  bytes, so a server with no MIME table cannot stop an SVG drawing, and
+  resolved from the module rather than the page, so the board's thumbnail
+  page at src/share/orbit.html finds them too.
+- src/maps/built/egg.js. partnerSearch and choosePartnerSpots: the STF
+  mark's spot is chosen first and exactly as before (fitScale, makeFace and
+  groundSpot take a size and default to the STF mark's, and every
+  STF assertion in props-check passes unchanged), then one spot per partner
+  by the same rules and three more: one mark a wall and 10 m between any two
+  middles (rule 8), the sign's own shape at no less than half its full
+  size (rule 9; at the STF mark's three tenths Mantis FPV's wordmark came
+  out 0.5 m high on a container's end on the starter), and a 'wall' step
+  and a 'ground' step for a map with too few walls turned to the pads
+  (rule 10).
+- src/maps/built/index.js paints them with the STF mark's painter
+  (paintMark, one function now for both) and hands them over as `marks`.
+  A sign stands in front of ALL the relief the probe finds rather than
+  three quarters of it: on the starter's office block the window frames
+  were drawn across a sign's edges at three quarters.
+- The town: three spots measured by hand in city/places/index.js
+  (PARTNER_SPOTS). Mantis FPV over the pilot's street, on the flank of
+  the house 15 m ahead and 13 m right of the pads, in the first frame
+  beside the STF mark; GDS on the practice field's tap wall, beside the
+  target under the tap line; the club on the same wall's back, over the
+  Split-S and the free practice box. Collider faces read from the town's
+  own list: 39.30, 152.325 and 152.875.
+- Finds: src/game/egg.js gains PARTNER_FINDS (on; MARK_FINDS for the STF
+  mark stays off) and glimpsesMark, seesMark's tests with a longer range,
+  for "seen" on a partner's dashboard. main.js findMarks: the stamp under
+  'city#gds' and the like, score.partner (EGG_POINTS into the combo once a
+  run each, the STF mark's price), ui.partnerFound (stfFound's callout and
+  panel with the partner's short name, their role and their sign), and a
+  'mark' event to the board, seen once a map load and found once a run,
+  through sendEvent, so nothing goes for a pilot who opted out or whose
+  browser sends Global Privacy Control. Results list a "Partner marks
+  found" row, drawn page or not. No map card badge, as the plan said.
+- Credits: a Partners block under the maker, the three marks in cream,
+  role and blurb, each linked to the partner with utm tags; and a Partners
+  row under the roll that opens the board's partners page. NOT on the front
+  page as the plan said, "beside Credits and Support": that list has had no
+  room for an eleventh row since the gate's row came (its own comment says
+  so), so the row is on the screen the Credits row opens, and the Credits
+  row's note now says the partners are in it.
+- props-check's egg block judges the partners' spots with the same eggRules
+  (a sign's shape for rule 1, and for the 'wall' step only the near half of
+  rule 5 and not rule 4) on the starter, one of everything, fifty random
+  maps and every step map, and adds partnermark.js to what the builder must
+  never reach.
+
+### The baseline moved, and this is the argument
+
+tests/shell-baseline.json: credits belowFold 1100 to the measured figure
+in the run log, edited by hand. The Partners block is a deliberate
+addition to a roll that already scrolled (its Back row was 1100 px under
+the fold before this), the same argument as the Clean FPV, Stick mode,
+Check sticks, Keyboard throttle and Impact frame rows: the file is today's
+overflow and not a target, and both rows stay reachable by key.
+
+### What went wrong
+
+- The first minimum for a partner's sign was the STF mark's, and it put
+  Mantis FPV on a container's end at 2.2 by 0.5 m. Half is the floor now.
+- Signs at the STF mark's probe share sat behind the window frames of the
+  starter's office block. All of the relief now, for signs only.
+
+### RUN LOG
+
+    node scripts/props-check.js     all passed; the partners' block: the
+                                    starter, one of everything, 50 of 50
+                                    random maps (seen 16, wall 80, ground 54
+                                    of 150 spots), every step map; the STF
+                                    mark's assertions unchanged
+    npm run lint:shell              PASS after the credits number above; it
+                                    failed at 1518 against 1100 first
+    npm run lint:devices            PASS, every row and note reachable
+    npm run lint:preload            up to date: boot 116, city 75, built 35
+    npm run lint:memory             PASS, every world lazy and freed
+    npm run lint:boot               9 of 9
+    npm run lint:partners           42 passed
+    npm run lint:responsive, lint:board, lint:attract, lint:quality,
+      lint:input (160), lint:frame (34), check:fresh (18),
+      check:counter, score:selftest, stats:selftest (79),
+      link:selftest                 all pass
+    node scripts/noun-lint.js       FAIL, 1: src/maps/built/showpiece.js:149,
+                                    on main before this change
+    headless Chromium on this checkout, with a scratch board on 3100:
+      the town, the three signs from close and the practice field from
+      the air; the craft placed in front of GDS's and Mantis FPV's signs
+      found both (stamps written, two 1000 point partner events in the
+      counter), and the scratch board counted one sighting and one find
+      on the town for each; the yard's three signs from close; the
+      Credits screen at 1440 and 430
+    dash scan of every added line   none
+    npm run verify                  not run: no physics, plant, ABI or build
+                                    change; the marks are paint

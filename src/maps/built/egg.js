@@ -852,18 +852,21 @@ function axisVec(a, s) {
   return [a === 0 ? s : 0, a === 1 ? s : 0, a === 2 ? s : 0];
 }
 
+/* The STF mark's full size. A partner's is its own (partnerSize). */
+const STF_SIZE = Object.freeze({ w: MARK_W, h: MARK_H, min: MARK_MIN_SCALE });
+
 /* How big a mark fits on a face `across` wide and `tall` high, as a share
  * of the full mark, or 0 when not even the smallest does. */
-function fitScale(across, tall) {
-  let s = (across - 2 * EDGE_INSET) / MARK_W;
-  const v = (tall - 2 * EDGE_INSET) / MARK_H;
+function fitScale(across, tall, size = STF_SIZE) {
+  let s = (across - 2 * EDGE_INSET) / size.w;
+  const v = (tall - 2 * EDGE_INSET) / size.h;
   if (v < s) {
     s = v;
   }
   if (s > 1) {
     s = 1;
   }
-  return s >= MARK_MIN_SCALE ? s : 0;
+  return s >= size.min ? s : 0;
 }
 
 /* The places a mark is tried on a face, as whole steps from its middle:
@@ -917,7 +920,7 @@ function reach(pads, x, z) {
  * that fits its face and then none at all. A single container's side, 2.59
  * m from the paving, takes a 4.2 m mark.
  */
-function makeFace(S, i, f, pads) {
+function makeFace(S, i, f, pads, size = STF_SIZE, loose = false) {
   const a = f >> 1;
   const sg = f & 1 ? 1 : -1;
   const o = i * 7;
@@ -927,12 +930,12 @@ function makeFace(S, i, f, pads) {
   const ra = 2 - a;
   const floor = lo[1] + EDGE_INSET > GROUND_CLEAR + EDGE_INSET ? lo[1] + EDGE_INSET : GROUND_CLEAR + EDGE_INSET;
   const band = hi[1] - EDGE_INSET - floor;
-  const s = fitScale(hi[ra] - lo[ra], band + 2 * EDGE_INSET);
+  const s = fitScale(hi[ra] - lo[ra], band + 2 * EDGE_INSET, size);
   if (!s) {
     return null;
   }
-  const w = MARK_W * s;
-  const h = MARK_H * s;
+  const w = size.w * s;
+  const h = size.h * s;
   const c = [0, 0, 0];
   c[a] = plane;
   c[ra] = (lo[ra] + hi[ra]) / 2;
@@ -943,7 +946,7 @@ function makeFace(S, i, f, pads) {
   const ez = pads.eye[2] - c[2];
   const dist = Math.sqrt(ex * ex + ey * ey + ez * ez);
   const toward = sg * (a === 0 ? ex : ez);
-  if (!(dist > 0) || !(toward >= FACE_COS * dist)) {
+  if (!(dist > 0) || (!loose && !(toward >= FACE_COS * dist))) {
     return null;
   }
   const at = reach(pads, c[0], c[2]);
@@ -951,8 +954,9 @@ function makeFace(S, i, f, pads) {
   const Rv = band / 2 - h / 2;
   const R = Ru > 0 ? Ru : 0;
   /* Rule 5's reach cannot hold anywhere on a wall whose nearest and
-   * farthest places are both out of it. */
-  if (at.ground + R < NEAR_MIN || at.ground - R > NEAR_MAX) {
+   * farthest places are both out of it. The partners' loose pass keeps only
+   * the near half of it: never found from the pads. */
+  if (at.ground + R < NEAR_MIN || (!loose && at.ground - R > NEAR_MAX)) {
     return null;
   }
   return {
@@ -964,8 +968,9 @@ function makeFace(S, i, f, pads) {
     /* How big it looks from the pads: its width, times how square it
      * stands to them, over its distance. Near enough an angle, in radians. */
     looks: (w * toward) / (dist * dist),
-    /* And how easily it is seen: that, weighed by the turn (rule 6). */
-    score: ((w * toward) / (dist * dist)) * (TURN + at.cos),
+    /* And how easily it is seen: that, weighed by the turn (rule 6). The
+     * partners' loose pass takes the nearest wall first instead. */
+    score: loose ? -at.ground : ((w * toward) / (dist * dist)) * (TURN + at.cos),
     cr: c[ra],
     cu: c[1],
     Ru: R,
@@ -1084,7 +1089,7 @@ function faceSpot(key, face, p, placed) {
  * carries the mark. A plot too small for the whole mark takes it smaller,
  * down to the smallest wall mark.
  */
-function groundSpot(key, S, G, placed, pads) {
+function groundSpot(key, S, G, placed, pads, size = STF_SIZE, around = null, taken = null) {
   const W = placed.W;
   const D = placed.D;
   const alongX = (pads.fx < 0 ? -pads.fx : pads.fx) >= (pads.fz < 0 ? -pads.fz : pads.fz);
@@ -1095,8 +1100,8 @@ function groundSpot(key, S, G, placed, pads) {
   /* The scale the plot has room for: the mark's width lies across the
    * heading's axis and its height along it. */
   const full = GROUND_SCALE;
-  const spanX = (alongX ? MARK_H : MARK_W) * full;
-  const spanZ = (alongX ? MARK_W : MARK_H) * full;
+  const spanX = (alongX ? size.h : size.w) * full;
+  const spanZ = (alongX ? size.w : size.h) * full;
   let s = 1;
   const roomX = (W - 2 * GROUND_INSET) / spanX;
   const roomZ = (D - 2 * GROUND_INSET) / spanZ;
@@ -1106,11 +1111,11 @@ function groundSpot(key, S, G, placed, pads) {
   if (roomZ < s) {
     s = roomZ;
   }
-  if (!(s >= MARK_MIN_SCALE / full)) {
-    s = MARK_MIN_SCALE / full;
+  if (!(s >= size.min / full)) {
+    s = size.min / full;
   }
-  const w = MARK_W * full * s;
-  const h = MARK_H * full * s;
+  const w = size.w * full * s;
+  const h = size.h * full * s;
   const hx = (alongX ? h : w) / 2;
   const hz = (alongX ? w : h) / 2;
   const inside = (v, half, size) => {
@@ -1120,17 +1125,26 @@ function groundSpot(key, S, G, placed, pads) {
     }
     return v < -lim ? -lim : (v > lim ? lim : v);
   };
-  const tries = GROUND_AHEAD.map((d) => [pads.x + pads.fx * d, pads.z + pads.fz * d]);
+  /* `around`, for a partner, is a list of [along, across] offsets from the
+   * pads in place of GROUND_AHEAD; `taken` the marks it keeps PARTNER_SEP
+   * from. With neither, this is the STF mark's step as it always was. */
+  const tries = around
+    ? around.map(([d, c]) => [pads.x + pads.fx * d - pads.fz * c, pads.z + pads.fz * d + pads.fx * c])
+    : GROUND_AHEAD.map((d) => [pads.x + pads.fx * d, pads.z + pads.fz * d]);
   tries.push([0, 0]);
   let pick = null;
+  let pickApart = false;
   for (const [tx, tz] of tries) {
     const x = inside(tx, hx, W);
     const z = inside(tz, hz, D);
     const clear = prismClear(S, G, [x - hx, 0, z - hz], [x + hx, AIR, z + hz]);
-    if (clear || !pick) {
+    const apart = farFrom(taken, x, 0, z);
+    if (!pick || (apart && !pickApart)) {
       pick = { x, z, clear };
+      pickApart = apart;
     }
-    if (clear) {
+    if (clear && apart) {
+      pick = { x, z, clear };
       break;
     }
   }
@@ -1269,4 +1283,191 @@ export function stfSearch(placed, doc, source) {
  */
 export function chooseStfSpot(placed, doc, source) {
   return stfSearch(placed, doc, source).spot;
+}
+
+/* ------------------------------------------------------------------ */
+/* The partners' marks                                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * THE PARTNERS' MARKS (src/partners/roster.js), one each, on every built
+ * map, the owner's ask of 2026-09-27. The STF mark keeps the wall it always
+ * had: its spot is chosen first, by the rules above, and nothing here moves
+ * it. Then each partner in the roster's order takes the next wall, by the
+ * same rules and the same pick, with three more:
+ *
+ *   8. ONE MARK A WALL, AND APART. Never on an element that already carries
+ *      a mark, STF's or a partner's, and never with its middle within
+ *      PARTNER_SEP of another mark's middle, so two marks are never found in
+ *      one look (FIND_COS in src/game/egg.js) and never read as one clutter.
+ *   9. THE PARTNER'S OWN SHAPE. A sign as wide as its artwork makes it
+ *      (signAspect in src/art/partnermark.js), PARTNER_W across at most and
+ *      never taller than the STF mark, shrunk on a smaller wall to no less
+ *      than PARTNER_MIN_SCALE of that. Half, where the STF mark goes to
+ *      three tenths, because a partner's artwork is a whole wordmark, not
+ *      three letters: Mantis FPV's is nearly six times as wide as it is
+ *      tall, and at three tenths it came out 0.5 m high on a container's
+ *      end on the starter, which is a label and not a sign. At half it is
+ *      3 m across and never goes on anything narrower.
+ *  10. ALWAYS A SPOT, in three steps. 'seen' is rules 1 to 6 with 8 and 9.
+ *      'wall', when no wall keeps rule 4 or 5 for this partner: any wall
+ *      with open air in front (rules 1 to 3, 8 and 9) whose middle is
+ *      NEAR_MIN or more from the pads, nearest first, because a partner's
+ *      mark is there to be found and a small map has only so many walls
+ *      turned to the pads. 'ground', when there is no such wall: flat on
+ *      the paving like the STF mark's last step, tried at PARTNER_AROUND
+ *      from the pads rather than straight ahead, where the STF mark's is.
+ *
+ * Every rule is the arithmetic the STF mark's is, in the same order, so the
+ * same map gives the same spots in every engine and every time it is flown.
+ */
+export const PARTNER_W = 6;
+export const PARTNER_MIN_SCALE = 0.5;
+export const PARTNER_SEP = 10;
+export const PARTNER_STEP = Object.freeze({ SEEN: 'seen', WALL: 'wall', GROUND: 'ground' });
+
+/* The ground step's places, as [along the pads' heading, across it] in
+ * metres: beside the pads to either hand and behind them, then further out
+ * ahead to either side, then the plot's middle (groundSpot adds it). */
+const PARTNER_AROUND = Object.freeze([[0, 14], [0, -14], [-14, 0], [22, 12], [22, -12]]);
+
+/* A partner's full sign, in metres: PARTNER_W across, and as tall as its
+ * artwork makes it, no taller than MARK_H. `aspect` is the sign's width over
+ * its height. */
+export function partnerSize(aspect) {
+  const a = aspect > 0 ? aspect : MARK_W / MARK_H;
+  let w = PARTNER_W;
+  let h = w / a;
+  if (h > MARK_H) {
+    h = MARK_H;
+    w = h * a;
+  }
+  return { w, h, min: PARTNER_MIN_SCALE };
+}
+
+/* Is (x, y, z) PARTNER_SEP or more from every mark in `taken`? Always, for
+ * none. Squared, so no root is taken. */
+function farFrom(taken, x, y, z) {
+  if (!taken) {
+    return true;
+  }
+  for (const t of taken) {
+    const dx = x - t.p[0];
+    const dy = y - t.p[1];
+    const dz = z - t.p[2];
+    if (dx * dx + dy * dy + dz * dz < PARTNER_SEP * PARTNER_SEP) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/* The key a partner's found mark stamps: the map's own, and the slug. */
+export function partnerKey(doc, source, slug) {
+  return `${stfKey(doc, source)}#${slug}`;
+}
+
+/* One pass of rule 10 for one partner: the first place on the first wall
+ * the pass lets through, or null. */
+function partnerWall(S, G, placed, pads, size, loose, used, taken, stats) {
+  const W = placed.W;
+  const D = placed.D;
+  const faces = [];
+  for (let i = 0; i < S.n; i += 1) {
+    if (!S.paint[i] || used.has(S.item[i])) {
+      continue;
+    }
+    for (const f of WALLS) {
+      const face = makeFace(S, i, f, pads, size, loose);
+      if (face) {
+        faces.push(face);
+      }
+    }
+  }
+  faces.sort(byView);
+  stats.faces += faces.length;
+  for (const face of faces) {
+    const Ku = stepsFor(face.Ru);
+    const Kv = stepsFor(face.Rv);
+    for (const [ku, kv] of ORDER) {
+      if (ku < -Ku || ku > Ku || kv < -Kv || kv > Kv) {
+        continue;
+      }
+      stats.tried += 1;
+      const p = placeAt(face, ku, kv, Ku, Kv);
+      const at = reach(pads, p[0], p[2]);
+      if (!(at.ground >= NEAR_MIN) || (!loose && !(at.ground <= NEAR_MAX))) {
+        continue;
+      }
+      if (!farFrom(taken, p[0], p[1], p[2])) {
+        continue;
+      }
+      if (!airClear(S, G, face, p, W, D)) {
+        continue;
+      }
+      if (loose || seenFrom(S, G, face, p, pads.eyes, stats)) {
+        return { face, p };
+      }
+    }
+  }
+  return null;
+}
+
+/*
+ * Where each partner's mark goes on a placed built map.
+ *
+ *   placed    placeDocument(doc) from ./place.js
+ *   doc       the normalized document
+ *   source    chooseDocument's source, for the keys (stfKey)
+ *   stf       the STF mark's spot, chooseStfSpot's answer, or null
+ *   partners  [{ slug, aspect }], the roster's order, `aspect` the sign's
+ *             width over its height (signAspect in src/art/partnermark.js)
+ *
+ * Returns { spots, stats }: a spot per partner, in the order given, the
+ * shape chooseStfSpot's has with `slug` added, `key` the stamp's
+ * (partnerKey) and `step` one of PARTNER_STEP; and what the search counted.
+ */
+export function partnerSearch(placed, doc, source, stf, partners) {
+  const S = readSolids(placed);
+  const G = buildGrid(S, placed.W, placed.D);
+  const pads = padsOf(placed);
+  const stats = { faces: 0, tried: 0, lines: 0 };
+  const used = new Set();
+  const taken = [];
+  if (stf) {
+    taken.push(stf);
+    if (stf.elementId) {
+      const k = placed.items.findIndex((it) => it.el && it.el.id === stf.elementId);
+      if (k >= 0) {
+        used.add(k);
+      }
+    }
+  }
+  const spots = [];
+  for (const partner of partners || []) {
+    const size = partnerSize(partner.aspect);
+    const key = partnerKey(doc, source, partner.slug);
+    let spot = null;
+    for (const loose of [false, true]) {
+      const hit = partnerWall(S, G, placed, pads, size, loose, used, taken, stats);
+      if (hit) {
+        spot = faceSpot(key, hit.face, hit.p, placed);
+        spot.step = loose ? PARTNER_STEP.WALL : PARTNER_STEP.SEEN;
+        used.add(hit.face.item);
+        break;
+      }
+    }
+    if (!spot) {
+      spot = groundSpot(key, S, G, placed, pads, size, PARTNER_AROUND, taken);
+    }
+    spot.slug = partner.slug;
+    taken.push(spot);
+    spots.push(spot);
+  }
+  return { spots, stats };
+}
+
+/* The spots alone, which is what src/maps/built/index.js paints. */
+export function choosePartnerSpots(placed, doc, source, stf, partners) {
+  return partnerSearch(placed, doc, source, stf, partners).spots;
 }

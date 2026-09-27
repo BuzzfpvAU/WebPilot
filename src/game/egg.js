@@ -72,6 +72,16 @@
 export const MARK_FINDS = false;
 
 /*
+ * WHETHER A PARTNER'S MARK IS FOUND. On: the owner's ask of 2026-09-27 was
+ * that the partners' marks (src/partners/roster.js, `marks` in
+ * src/maps/README.md) be found "like the old STF one", and the machinery
+ * kept for that above is what finds them, by this same seesMark. The STF
+ * mark stays paint while MARK_FINDS is false; the two switches are apart so
+ * either can come back or go without the other.
+ */
+export const PARTNER_FINDS = true;
+
+/*
  * How near, in metres: the plan's "about 4 m", for a mark FIND_REF_W wide
  * or smaller. From there a 1.8 m mark spans about a fifth of the default
  * frame's width, which is near enough to have come looking and far enough
@@ -163,6 +173,40 @@ export const FIND_STEP = 0.1;
  * false, which is what a craft that has gone to NaN deserves.
  */
 export function seesMark(eye, forward, egg, colliders) {
+  return sees(eye, forward, egg, colliders, findRange(egg));
+}
+
+/*
+ * SEEN, as a partner's counter means it: the mark was in the picture at a
+ * size a pilot can read, which is what a partner is told when their
+ * dashboard says their mark was seen in a flight. Every test seesMark
+ * makes, the same cone, the same slant and the same clear line, with a
+ * longer range: as far as the mark spans SEEN_SPAN of the eye's distance
+ * across, a little under 5 degrees, which on the default field of view is
+ * about a twentieth of the frame, big enough to read a wordmark; never
+ * further than SEEN_RANGE_MAX, the far end of NEAR_MAX in
+ * src/maps/built/egg.js, and never nearer than findRange, so a mark that
+ * is found has always been seen.
+ */
+export const SEEN_SPAN = 0.08;
+export const SEEN_RANGE_MAX = 60;
+
+export function seenRange(egg) {
+  const w = egg && egg.w > 0 ? egg.w : FIND_REF_W;
+  const r = w / SEEN_SPAN;
+  const near = findRange(egg);
+  if (r < near) {
+    return near;
+  }
+  return r < SEEN_RANGE_MAX ? r : SEEN_RANGE_MAX;
+}
+
+export function glimpsesMark(eye, forward, egg, colliders) {
+  return sees(eye, forward, egg, colliders, seenRange(egg));
+}
+
+/* seesMark's four tests, with the range handed in. */
+function sees(eye, forward, egg, colliders, range) {
   if (!egg || !egg.p || !egg.n || !eye || !forward) {
     return false;
   }
@@ -173,7 +217,6 @@ export function seesMark(eye, forward, egg, colliders) {
   const dy = py - eye.y;
   const dz = pz - eye.z;
   const d2 = dx * dx + dy * dy + dz * dz;
-  const range = findRange(egg);
   if (!(d2 <= range * range)) {
     return false;
   }

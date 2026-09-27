@@ -748,7 +748,9 @@ const TOON_PATCH = `
 	vec3 celBand = getGradientIrradiance( geometryNormal, directLight.direction );
 	vec3 irradiance = celBand * mix( uShadowTint, vec3( 1.0 ), celBand ) * directLight.color;`;
 
-function paintMaterial(THREE, map) {
+/* Exported for src/art/partnermark.js, whose painted signs take the light the
+ * same way this mark does and share its program. */
+export function paintMaterial(THREE, map) {
   const data = new Uint8Array(RAMP.length * 4);
   RAMP.forEach((v, i) => data.set([v, v, v, 255], i * 4));
   const ramp = new THREE.DataTexture(data, RAMP.length, 1, THREE.RGBAFormat);
@@ -794,6 +796,14 @@ function paintMaterial(THREE, map) {
 const STF_GLOW = { dusk: 0.3, overcast: 0.12 };
 const STF_SHADE_GLOW = 0.3;
 
+/* The share this paint gives back for a look and a face, the more of the
+ * two; 0 for sunlit paint at golden hour and noon. Exported for the same
+ * reason as paintMaterial. */
+export function paintGlow(look, shade) {
+  const byLook = (look && STF_GLOW[look.key]) || 0;
+  return shade && STF_SHADE_GLOW > byLook ? STF_SHADE_GLOW : byLook;
+}
+
 export function makeStfMark(THREE, { width, height, look = null, shade = false } = {}) {
   const map = new THREE.CanvasTexture(stfCanvas());
   map.colorSpace = THREE.SRGBColorSpace;
@@ -814,8 +824,7 @@ export function makeStfMark(THREE, { width, height, look = null, shade = false }
   map.addEventListener('dispose', () => LIVE.delete(map));
 
   const mat = paintMaterial(THREE, map);
-  const byLook = (look && STF_GLOW[look.key]) || 0;
-  const glow = shade && STF_SHADE_GLOW > byLook ? STF_SHADE_GLOW : byLook;
+  const glow = paintGlow(look, shade);
   if (glow) {
     mat.emissive.set(0xffffff);
     mat.emissiveMap = map;

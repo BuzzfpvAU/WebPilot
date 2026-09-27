@@ -2519,7 +2519,26 @@ const EGG = {
   STRESS_MS: 200,
   STRESS_SOLIDS: 10000,
   RANDOM_MAPS: 50,
+  /* The partners' marks (rules 8 to 10 there): the widest sign, the least
+   * share of it, the gap between any two marks' middles, the artwork's
+   * share of a sign's height (src/art/partnermark.js), and the ground
+   * step's places as [along, across] the pads' heading. */
+  PARTNER: {
+    W: 6, MIN: 0.5, SEP: 10, SHARE: 0.7, AROUND: [[0, 14], [0, -14], [-14, 0], [22, 12], [22, -12]],
+  },
 };
+
+/* A partner's sign as egg.js sizes it: its aspect, and the full size. */
+function partnerSign(aspect) {
+  const a = EGG.PARTNER.SHARE * aspect + (1 - EGG.PARTNER.SHARE);
+  let w = EGG.PARTNER.W;
+  let h = w / a;
+  if (h > EGG.H) {
+    h = EGG.H;
+    w = h * a;
+  }
+  return { a, w, h };
+}
 
 function cross3(a, b) {
   return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -2754,7 +2773,7 @@ function groundPlan(placed, pads) {
  * broken rule and asks rule 5 first, the cheap one, for the walk over every
  * wall that scores higher.
  */
-function eggRules(placed, spot, quick = false) {
+function eggRules(placed, spot, quick = false, opts = {}) {
   const out = [];
   const say = (rule, ok, detail) => {
     out.push({ rule, ok: Boolean(ok), detail });
@@ -2774,6 +2793,19 @@ function eggRules(placed, spot, quick = false) {
   say('frame', !spot.right || spot.right.every((v, k) => sameValue(v, right[k])),
     `n ${spot.n.join(' ')}, up ${spot.up.join(' ')}, right ${right.map((v) => v + 0).join(' ')}`);
 
+  if (spot.step === 'ground' && opts.sign) {
+    /* A partner's ground step: flat, its sign's shape, inside the plot. */
+    const sign = opts.sign;
+    const flat = spot.n[0] === 0 && spot.n[1] === 1 && spot.n[2] === 0 && spot.p[1] === 0;
+    const shape = Math.abs(spot.w / spot.h - sign.a) < 1e-9 * sign.a
+      && spot.w <= sign.w * EGG.GROUND_SCALE + 1e-9 && spot.w >= sign.w * EGG.PARTNER.MIN - 1e-9;
+    const hx = Math.abs(right[0]) * spot.w / 2 + Math.abs(spot.up[0]) * spot.h / 2;
+    const hz = Math.abs(right[2]) * spot.w / 2 + Math.abs(spot.up[2]) * spot.h / 2;
+    const inside = inPlot([spot.p[0] - hx, 0, spot.p[2] - hz, spot.p[0] + hx, 0, spot.p[2] + hz]);
+    say('ground: flat on the paving, the sign\'s own shape, inside the plot', flat && shape && inside,
+      `${r3(spot.w)} by ${r3(spot.h)} m (aspect ${r3(sign.a)}), ${inside ? 'inside' : 'outside'} the plot, ${r3(eggReach(pads, spot.p))} m from the pads`);
+    return out;
+  }
   if (spot.step === 'ground') {
     const plan = groundPlan(placed, pads);
     const flat = spot.n[0] === 0 && spot.n[1] === 1 && spot.n[2] === 0 && spot.p[1] === 0
@@ -2826,7 +2858,10 @@ function eggRules(placed, spot, quick = false) {
     const d = sub(pads.eye, bandMid(host.box, a, spot.p[a]));
     turned = dot(spot.n, d) / Math.sqrt(dot(d, d));
   }
-  if (!say(5, spot.kind === 'wall' && (turned === null || turned >= EGG.FACE_COS) && reach >= EGG.NEAR_MIN && reach <= EGG.NEAR_MAX,
+  if (opts.loose) {
+    /* A partner's 'wall' step keeps only the near half of rule 5. */
+    say(5, spot.kind === 'wall' && reach >= EGG.NEAR_MIN, `${spot.kind}, ${r3(reach)} m from the pads (at least ${EGG.NEAR_MIN}); turned and far are not asked`);
+  } else if (!say(5, spot.kind === 'wall' && (turned === null || turned >= EGG.FACE_COS) && reach >= EGG.NEAR_MIN && reach <= EGG.NEAR_MAX,
     `${spot.kind}, turned ${turned === null ? 'unknown' : r3(turned)} of the way to the pads (at least ${EGG.FACE_COS}), `
     + `${r3(reach)} m from them (${EGG.NEAR_MIN} to ${EGG.NEAR_MAX})`) && quick) {
     return out;
@@ -2834,7 +2869,9 @@ function eggRules(placed, spot, quick = false) {
 
   /* 1. On an upright face of a drawn, solid, opaque box of its element,
    * inside it. */
-  const sizeOk = Math.abs(spot.w - 2 * spot.h) < 1e-9 && spot.w <= EGG.W + 1e-9 && spot.w >= EGG.W * EGG.MIN - 1e-9;
+  const sizeOk = opts.sign
+    ? Math.abs(spot.w / spot.h - opts.sign.a) < 1e-9 * opts.sign.a && spot.w <= opts.sign.w + 1e-9 && spot.w >= opts.sign.w * EGG.PARTNER.MIN - 1e-9
+    : Math.abs(spot.w - 2 * spot.h) < 1e-9 && spot.w <= EGG.W + 1e-9 && spot.w >= EGG.W * EGG.MIN - 1e-9;
   if (!say(1, sizeOk && host, `${r3(spot.w)} by ${r3(spot.h)} m, ${host ? `inside the face of ${it.el.id} ${it.el.type} ${host.part.name}` : `on no drawn upright box face of ${spot.elementId}`}`) && quick) {
     return out;
   }
@@ -2870,7 +2907,11 @@ function eggRules(placed, spot, quick = false) {
   }
 
   /* 4. No line from any eye passes through a solid a pilot cannot see
-   * through. */
+   * through. Not asked of a partner's 'wall' step, which is the step for
+   * when no wall keeps it. */
+  if (opts.loose) {
+    return out;
+  }
   const hu = spot.w / 2 - EGG.INSET;
   const hv = spot.h / 2 - EGG.INSET;
   const pts = [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]
@@ -3285,10 +3326,114 @@ async function eggBlock() {
     judge(m.label, placed, doc, 'canvas', run);
   }
 
+  /* The partners' marks, on the same maps. */
+  await partnerMarks(egg, sDoc, sPlaced, eDoc, ePlaced);
+
   /* Finding it, on the starter, where its map paints it. */
   await eggFind(sPlaced, sSpot);
   /* And that the builder can never draw it. */
   await eggBuilderBlind();
+}
+
+/* ------------------------------------------------------------------ */
+/* The partners' marks                                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * THE PARTNERS' MARKS (src/maps/built/egg.js, rules 8 to 10), held to the
+ * same rules as the STF mark's by the same eggRules, with the sign's own
+ * shape for rule 1, and for the 'wall' step only the near half of rule 5
+ * and not rule 4: one spot per partner in the roster's order, keyed by the
+ * map's key and the slug, never on the STF mark's element or another
+ * partner's, every middle PARTNER.SEP from every other, the placement left
+ * as it was, and the same spots again on a second run and under a second
+ * id. On the starter, one of everything, fifty random maps and the maps
+ * built to reach each of the STF mark's steps.
+ */
+async function partnerMarks(egg, sDoc, sPlaced, eDoc, ePlaced) {
+  console.log("        the partners' marks (rules 8 to 10)");
+  const { chooseStfSpot, partnerSearch, stfKey } = egg;
+  const roster = await import(pathToFileURL(join(root, 'src/partners/roster.js')).href);
+  const list = roster.PARTNERS.map((p) => ({ slug: p.slug, aspect: EGG.PARTNER.SHARE * p.logo.aspect + (1 - EGG.PARTNER.SHARE) }));
+  const signs = new Map(roster.PARTNERS.map((p) => [p.slug, partnerSign(p.logo.aspect)]));
+  const judgePartners = (label, placed, doc, source, quiet = false) => {
+    const hash = placementHash(placed);
+    const stf = chooseStfSpot(placed, doc, source);
+    const run = partnerSearch(placed, doc, source, stf, list);
+    const problems = [];
+    if (run.spots.length !== list.length || run.spots.some((sp, k) => sp.slug !== list[k].slug)) {
+      problems.push(`spots for ${run.spots.map((sp) => sp.slug).join(', ')}, not the roster's ${list.map((p) => p.slug).join(', ')}`);
+    }
+    const all = [stf, ...run.spots];
+    const elements = new Set(stf.elementId ? [stf.elementId] : []);
+    for (const sp of run.spots) {
+      if (sp.key !== `${stfKey(doc, source)}#${sp.slug}`) {
+        problems.push(`${sp.slug}: key ${sp.key}`);
+      }
+      if (!['seen', 'wall', 'ground'].includes(sp.step)) {
+        problems.push(`${sp.slug}: step ${sp.step}`);
+      }
+      const broken = eggRules(placed, sp, false, { sign: signs.get(sp.slug), loose: sp.step === 'wall' }).filter((r) => !r.ok);
+      for (const r of broken) {
+        problems.push(`${sp.slug} ${sp.step} on ${sp.elementId ?? 'the paving'} ${sp.part ?? ''}: rule ${r.rule}: ${r.detail}`);
+      }
+      if (sp.elementId) {
+        if (elements.has(sp.elementId)) {
+          problems.push(`${sp.slug}: on ${sp.elementId}, which already carries a mark`);
+        }
+        elements.add(sp.elementId);
+      }
+    }
+    for (let i = 0; i < all.length; i += 1) {
+      for (let j = i + 1; j < all.length; j += 1) {
+        const d = Math.hypot(all[i].p[0] - all[j].p[0], all[i].p[1] - all[j].p[1], all[i].p[2] - all[j].p[2]);
+        if (d < EGG.PARTNER.SEP - 1e-9) {
+          problems.push(`${all[i].slug ?? 'STF'} and ${all[j].slug} ${r3(d)} m apart`);
+        }
+      }
+    }
+    const again = partnerSearch(placed, doc, source, stf, list).spots;
+    const copy = { ...doc, id: `${doc.id}-copy` };
+    const other = partnerSearch(placed, copy, source, chooseStfSpot(placed, copy, source), list).spots;
+    run.spots.forEach((sp, k) => {
+      const d1 = again[k] ? spotDifference(sp, again[k]) : 'missing';
+      const d2 = other[k] ? spotDifference({ ...sp, key: '' }, { ...other[k], key: '' }) : 'missing';
+      if (d1 || d2) {
+        problems.push(`${sp.slug}: not the same spot again (${d1 || d2})`);
+      }
+    });
+    if (placementHash(placed) !== hash) {
+      problems.push('the placement changed');
+    }
+    if (!quiet || problems.length) {
+      check(`${label}: every partner has a spot that keeps its rules, apart and on its own wall, the same every time`, problems.length === 0,
+        problems.slice(0, 3).join(' | ') || run.spots.map((sp) => `${sp.slug} ${sp.step} ${sp.kind} on ${sp.elementId ?? 'the paving'} ${sp.type ?? ''}, ${r3(sp.w)} by ${r3(sp.h)} m`).join('; '));
+    }
+    return { ok: problems.length === 0, run };
+  };
+
+  const t0 = performance.now();
+  const s = judgePartners('the starter', sPlaced, sDoc, 'starter');
+  const ms = performance.now() - t0;
+  check(`quick: the partners' spots on the starter in under ${EGG.STARTER_MS} ms, warm`, ms < EGG.STARTER_MS * 4,
+    `${r3(ms)} ms for the search, a second run and a second id, three searches; ${s.run.stats.faces} walls, ${s.run.stats.tried} places, ${s.run.stats.lines} sight lines`);
+  judgePartners('one of everything', ePlaced, eDoc, 'canvas');
+  const steps = {};
+  let good = 0;
+  for (let k = 0; k < EGG.RANDOM_MAPS; k += 1) {
+    const doc = normalize(randomEggMap(k)).doc;
+    const r = judgePartners(`random map ${k}`, placeDocument(doc), doc, 'canvas', true);
+    for (const sp of r.run.spots) {
+      steps[sp.step] = (steps[sp.step] || 0) + 1;
+    }
+    good += r.ok ? 1 : 0;
+  }
+  check(`${EGG.RANDOM_MAPS} random maps: every partner's spot keeps its rules`, good === EGG.RANDOM_MAPS,
+    `${good} of ${EGG.RANDOM_MAPS}; steps ${Object.entries(steps).map(([st, n]) => `${st} ${n}`).join(', ')}`);
+  for (const m of eggStepMaps()) {
+    const doc = normalize(m.doc).doc;
+    judgePartners(m.label, placeDocument(doc), doc, 'canvas');
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -3497,7 +3642,7 @@ async function reachableFrom(entries) {
 /* The files that draw the mark, choose where it goes or find it, none of
  * which the builder may reach: the person who built a map has to find the
  * mark too (FREESTYLE-MAPS-PLAN.md section 12, decision 3). */
-const EGG_BUILDER_BLIND = ['src/art/stf.js', 'src/maps/built/egg.js', 'src/maps/built/index.js', 'src/game/egg.js'];
+const EGG_BUILDER_BLIND = ['src/art/stf.js', 'src/art/partnermark.js', 'src/maps/built/egg.js', 'src/maps/built/index.js', 'src/game/egg.js'];
 
 async function eggBuilderBlind() {
   const dir = 'src/trackbuilder';

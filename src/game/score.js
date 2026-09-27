@@ -74,6 +74,7 @@
  *   { kind: 'chase-thread', name }           chase.js: 'Thread'
  *   { kind: 'hurdle', name }                 chase.js: 'Hurdle', 'Leapfrog'
  *   { kind: 'egg', name: 'STF' }             once a run
+ *   { kind: 'partner', name, slug }          a partner's mark, once a run each
  *
  * A close call is sent when it ends and pays, not while it is held; the
  * held skim is view().skim, { on, holdMs, clearance }, for a meter.
@@ -264,6 +265,7 @@ export class FreestyleScore {
      */
     this.gapPriors = new Map();
     this.eggFound = false;
+    this.partnersFound = [];
     this.gapsFlown = 0;
     this.bestGap = null;
     this.longestSkim = null;
@@ -763,6 +765,20 @@ export class FreestyleScore {
     });
   }
 
+  /* A PARTNER'S MARK, found: EGG_POINTS into the combo, once a run for each
+   * partner, the STF mark's price and rule, because the owner asked for the
+   * partners' marks to be found "like the old STF one". `name` is what the
+   * callout and the combo show, the roster's short name. */
+  partner(slug, name, atMs) {
+    if (this.partnersFound.includes(slug) || !this.geometryOpen(atMs)) {
+      return null;
+    }
+    this.partnersFound.push(slug);
+    return this.addGeometry({
+      kind: 'partner', name, slug, repeat: 0, points: EGG_POINTS, atMs,
+    });
+  }
+
   /*
    * A HELD SKIM OR A HELD TAIL, at `atMs`: the open combo's window is held
    * open for COMBO_WINDOW_MS from here, the way a manual keeps a skate
@@ -971,6 +987,7 @@ export class FreestyleScore {
       longestSkim: this.longestSkim ? { ms: this.longestSkim.ms, name: this.longestSkim.name } : null,
       bestTail: this.bestTail ? { ms: this.bestTail.ms, drift: this.bestTail.drift } : null,
       eggFound: this.eggFound,
+      partnersFound: [...this.partnersFound],
       gaps: this.gapsFlown,
       closeCalls: { ...this.closeCalls },
     };
@@ -1104,6 +1121,10 @@ export class Counter {
     return this.run.egg(atMs);
   }
 
+  partner(slug, name, atMs) {
+    return this.run.partner(slug, name, atMs);
+  }
+
   hold(atMs) {
     this.run.hold(atMs);
   }
@@ -1143,6 +1164,7 @@ export class Counter {
     s.longestSkim = r.longestSkim;
     s.bestTail = r.bestTail;
     s.eggFound = r.eggFound;
+    s.partnersFound = r.partnersFound;
     s.gaps = r.gaps;
     s.closeCalls = r.closeCalls;
     return s;

@@ -323,6 +323,7 @@ export function stackCall(e) {
       /* Called out once, by the chase HUD: see THE COUNTER above. */
       return null;
     case 'egg':
+    case 'partner':
       return {
         word: `${e.name || 'STF'} mark`,
         pts,

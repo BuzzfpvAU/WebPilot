@@ -26,6 +26,14 @@
  * Claude's starburst. The faces are the channels' own pictures, at the
  * size YouTube serves them. All of them are used only to name the work.
  *
+ * THE PARTNERS (src/partners/roster.js) have a block of their own under the
+ * maker, because they back the project rather than having built it, and
+ * their marks are the one colour chrome files the roster names, from
+ * assets/partners, so the roll adds no colour the palette does not have.
+ * Each card links to the partner, tagged (partnerHref) so they see WebFPV
+ * in their own numbers, and the Partners row under the roll opens their
+ * page on the board.
+ *
  * This file is part of WebFPVSimulator.
  *
  * WebFPVSimulator is free software: you can redistribute it and/or modify
@@ -41,6 +49,8 @@
  * You should have received a copy of the GNU General Public License
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
+
+import { LOGO_DIR, PARTNERS, partnerHref, roleTitle } from '../partners/roster.js';
 
 /*
  * The beta roll. Slot numbers are a start list's: the order they turned
@@ -296,6 +306,42 @@ function personCard({ cls, src, slot, name, nameNode, note, channel, handle }) {
   return n;
 }
 
+/*
+ * A partner's card: their one colour mark as the heading, linked to their
+ * own site, the role in words over what they do. The mark goes through
+ * logo() when it is a vector, like every other mark here, and is an <img>
+ * when it is a picture, which the local server's MIME table serves.
+ */
+function partnerCard(p) {
+  const n = el('article', 'credit project partner');
+  const h = el('h4', 'credit-title');
+  const file = p.logo.mono;
+  const src = new URL(`${LOGO_DIR}/${file}`, document.baseURI).href;
+  let mark;
+  if (/\.svg$/i.test(file)) {
+    mark = logo(src, p.name, null, false);
+  } else {
+    mark = el('span', 'credit-logo');
+    const img = el('img');
+    img.src = src;
+    img.alt = p.name;
+    mark.append(img);
+  }
+  const first = p.links[0];
+  if (first) {
+    const a = link(partnerHref(first.href, 'sim_credits'), null);
+    a.append(mark);
+    h.append(a);
+  } else {
+    h.append(mark);
+  }
+  n.append(h);
+  const copy = el('div', 'credit-copy');
+  copy.append(el('p', 'credit-role', roleTitle(p)), el('p', null, p.about));
+  n.append(copy);
+  return n;
+}
+
 function section(kicker, heading) {
   const n = el('section', 'credit-block');
   const k = el('div', 'credit-kicker');
@@ -331,6 +377,14 @@ export function fillCredits(host, { assetBase = 'assets/credits' } = {}) {
     handle: 'youtube.com/@andAgainFPV',
   }));
   host.append(made);
+
+  const partners = section('Partners', 'They back WebFPV.');
+  const partnerRow = el('div', 'credit-row partners');
+  for (const p of PARTNERS) {
+    partnerRow.append(partnerCard(p));
+  }
+  partners.append(partnerRow);
+  host.append(partners);
 
   const pilots = section('Beta test pilots', 'They flew it until it felt like a quad.');
   const row = el('div', 'credit-row pilots');
@@ -437,7 +491,7 @@ export function fillCredits(host, { assetBase = 'assets/credits' } = {}) {
 
   const legal = el('p', 'credits-legal');
   legal.append(
-    document.createTextNode('Betaflight, Track Draw, Grok, Claude, Dutch Drone Squad, and their marks belong to their owners. The channel pictures belong to the pilots. Using them here is credit, not a claim they endorse this page. WebFPV is free software under '),
+    document.createTextNode('Betaflight, Track Draw, Grok, Claude, Dutch Drone Squad, and their marks belong to their owners. The channel pictures belong to the pilots. Using them here is credit, not a claim they endorse this page. The partners\' marks belong to the partners, shown with their agreement. WebFPV is free software under '),
     link('https://www.gnu.org/licenses/gpl-3.0.html', 'GPLv3'),
     document.createTextNode('.'),
   );
