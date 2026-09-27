@@ -55500,3 +55500,39 @@ overflow and not a target, and both rows stay reachable by key.
     dash scan of every added line   none
     npm run verify                  not run: no physics, plant, ABI or build
                                     change; the marks are paint
+
+## 2026-09-27 | partners | The owner's answer: self verify, and the partners' passwords
+
+### The owner's answers
+
+Asked which verification pass to run, the owner answered "complete
+everything perfectly, make it polished and self verfiy", and asked for the
+partners' passwords to be "admin" and three digits. The passwords are the
+board's business (its src/partners.js and CLAUDE.md say what a short
+password does and does not protect); here the answer covered the pass.
+
+Scale chosen from the ladder: shots, the one for a change a pilot sees on
+screen. verify was not run: nothing in this work touches the physics, the
+plant, the module ABI or the build, and the marks are paint.
+
+### RUN LOG
+
+    node scripts/shots.js, the town, from this checkout:
+      three marks, gds, mantisfpv, wcmrc; the craft placed in front of
+      Mantis FPV's sign and then GDS's found both, stamps written, two
+      1000 point partner events in the counter; console errors 0 (ten
+      AudioContext warnings, the autoplay policy, as on every run)
+    node scripts/shots.js, the yard:
+      all three marks painted (gds seen on the office block, mantisfpv and
+      wcmrc wall on containers), the STF mark still built:starter on el-2
+      bando wall; console errors 0
+    the live site, headless Chromium, webfpv.org/sim at d6ef340:
+      the town carries the three marks, and the craft placed in front of
+      Mantis FPV's sign found it
+    the live board, webfpv.org/board at 97e3481: each partner signs in
+      with the new password, reads its own dashboard (200) and not
+      another partner's (403)
+    the live front door, webfpv.org at 912ff0a, 1440 wide: the partner
+      row in the footer, GDS under the close's line, the club under the
+      lap clock in the race act, and every mark linking to
+      webfpv.org/board/partners#slug
