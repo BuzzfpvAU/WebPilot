@@ -55724,3 +55724,118 @@ says so.
     documentation only here: NOTICE and this entry
     board: npm test all passed; the roll looked at at 1440 and 430
     npm run verify              not run: no code changed here
+
+## 2026-09-27 | board, shell | A time goes up at any weight, and says so
+
+### What changed and why
+
+The owner, 2026-09-27: "i should be able to record times to the board no
+mater what my weight slider is at". Until now `submitBoardTime` and
+`submitFreestyleRun` refused anything flown off Weight 100, because the board
+had nowhere to say what a lap was flown at and a row from 60 would have sat
+beside a stock row looking identical. Five entries in this file since
+2026-09-18 said the fix was a column on the board and the refusal becoming a
+label. This is that.
+
+- **The board** (WebFPVSimulator-LeaderBoard) keeps a `weight` on every time
+  and every freestyle run: a column on `times` and on `runs`, NOT NULL
+  DEFAULT 100, so every row already stored reads as the 100 it was flown at.
+  `normaliseWeight` in its `src/validate.js` takes 60 to 140 in steps of 5,
+  mirroring `WEIGHT_MIN`, `WEIGHT_MAX` and `WEIGHT_STEP` here, reads an
+  absent weight as 100 (every older simulator only ever posted 100), and
+  refuses one off the band with a 400 rather than folding it. It is a LABEL,
+  not a rank: rows are ordered on the clock exactly as before. The board page
+  prints `Weight 60%` in amber beside the pilot on any row that is not 100:
+  the card's record and podium, the sheet's hero and table, and the rail's
+  Times posted. A stock row looks exactly as it did.
+- **The lap carries its own weight.** `Race` stamps every clean lap in its
+  log with `race.weight`, which `applySettings` keeps equal to `runWeight`
+  after its void, and a new race is handed it. `race.boardRow()` is what a
+  run puts on the board: `{ lapMs, threeMs, weight }`, all from ONE weight.
+  A field posts its fastest lap with that lap's weight; a room posts its
+  fastest three with the fastest lap flown at their weight beside it. Three
+  laps in a row are always one weight, because the change voids the running
+  lap and between two consecutive laps a lap is always running; a window
+  whose stamps disagree is not counted anyway, so the rule breaking would
+  cost a row rather than mislabel one.
+- **The slider as it stands is not the weight sent.** It used to be:
+  `runWeight` at the moment of the press. That was a hole in the old refusal
+  as well: fly laps at 60, move the slider back to 100 mid race (which voids
+  only the running lap), and the 60 lap went up as stock. The pending lap a
+  later visit uploads carries its weight too (`writePendingTime`), and a
+  pending record from before this reads as 100, which is what that build
+  would have sent. Weights are clamped against no airframe, the widest band,
+  because a pending five inch lap at 140 would otherwise be pulled to the
+  whoop's 120 when uploaded from the whoop.
+- **Freestyle** has no laps to void, so the shell notes the weight each kept
+  trick landed at (`trickWeight`). A run landed at one weight goes up with
+  it. A run landed at two has no one weight to be labelled with, and its Post
+  this run row greys with that sentence; `submitFreestyleRun` refuses the
+  same case as the backstop. That is the one weight refusal left and it is
+  about the run, not the number.
+- **The words.** The sentence under Fly, the pause menu's Weight row and the
+  feel form's hint all said a lap off 100 stays off the public board. They
+  say it goes up with its weight beside the name now. The Upload row's note
+  says `It goes up marked Weight 120%` before it is pressed, the upload's
+  notice repeats it, the in game Standings print the same amber label, and a
+  board ghost's note says what weight it was flown at.
+- **Deploy the board first.** A board that has not learned the key ignores
+  it and would store a lap flown at 60 as stock. DEPLOY.md's "the board goes
+  first" section says so now, and the band note in `src/ui/ui.js` says a
+  change to the slider's band is a board change first.
+
+### Not done, and said plainly
+
+- **Every weight is ranked together.** That is what the owner asked for and
+  what the label is for, and a light lap can hold a track record: the card
+  says so beside the name. A "stock only" filter on the board, the way the
+  arcade style was once argued to deserve one, is not built. It is a small
+  addition to the page if the owner wants it.
+- **The edge cache.** Through webfpv.org a returning visitor's browser can
+  hold the board's old `app.js` for up to four hours (the same TTL measured
+  above for this simulator). For that window, a weighted row is shown
+  without its label. The board has no address stamps to move, so this is
+  said rather than worked round.
+- **Nobody has flown it.** The upload path was checked by reading it, by
+  unit checks on the real `Race` class, and against the real board, not by
+  posting a flown lap from the simulator in a browser.
+
+### RUN LOG
+
+    board: npm test                   all passed, 17 new weight checks among
+                                      them (unit, file store, HTTP, runs)
+    board: npm run lint:licence       29 of 29 carry the header
+    board: npm run lint:nouns         PASS
+    board: Postgres 16, scratch db    old schema seeded with a time and a run,
+                                      then the new store's start migrated it:
+                                      16 of 16, both columns NOT NULL DEFAULT
+                                      100, old rows read 100, a lap at 60
+                                      ranked on the clock, the card and sheet
+                                      records carry it, a worse run at 120
+                                      leaves the 80 row standing, a second
+                                      start is harmless
+    board: the page, looked at        served from a scratch file store with
+                                      laps at 60, 85, 140 and stock, at
+                                      1440x900 and 430x932: the tag beside
+                                      the name on the card record and
+                                      podium, the sheet hero and table and
+                                      the rail; a long name gives way and
+                                      the tag stays whole; no page errors
+    node --check                      main.js, ui.js, race.js, board.js,
+                                      session.js clean
+    scratch Race.boardRow             13 of 13 on the real class, including a
+                                      room whose fastest lap and fastest
+                                      three are at different weights
+    npm run check:clip                948 passed, 0 failed (builds races)
+    npm run lint:boot                 9 of 9 clean
+    npm run lint:quality              56 of 56 clean
+    npm run lint:preload              STALE src/fresh.js, and the same on main
+                                      without this change: not this change's
+    npm run lint:nouns                FAIL, "Drift course" at
+                                      src/maps/built/showpiece.js:149, and the
+                                      same on main: not this change's
+    lint:shell, lint:board, shots     not run: they drive headless Chromium
+                                      through the simulator, and the rule
+                                      here is to ask before spending that
+    npm run verify                    not run: nothing in the physics, the
+                                      plant, the module ABI or the build
