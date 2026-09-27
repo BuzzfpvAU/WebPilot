@@ -52,6 +52,17 @@ mark to five. The board accepts 1 and 2. Whenever
 teach `inspectDocument` in the board's `src/validate.js` the new number and
 deploy the board before the simulator, the same way round as the URL above.
 
+The Weight slider is the same shape of problem the other way round, and
+quieter. Since 2026-09-27 a time or a freestyle run carries the `weight` it
+was flown at, and the simulator no longer refuses one off 100. A board that
+has not learned the key ignores it and stores the lap as stock, so a lap
+flown at 60 would sit on the board looking like a lap flown at 100, and
+nothing would say so. The board's side is `normaliseWeight` in its
+`src/validate.js` and a `weight` column its `schema.sql` adds on start. Deploy
+the board first. Its band has to hold the simulator's, `WEIGHT_MIN` to
+`WEIGHT_MAX` in `src/ui/ui.js`, so widening the slider is a board change
+first as well, or the new end is refused with a sentence about a weight.
+
 ## By hand, rather than from the blueprints
 
 The blueprints below are the short path. If you would rather create each

@@ -356,12 +356,20 @@ export function writePendingTime(payload) {
    * what RaceGOW scores, and it is optional in exactly the way the board
    * treats it: absent when the run never put three together, and absent on
    * every run flown on the sixty metre field, which is scored on one lap.
+   *
+   * weight is the Weight slider the lap was flown at, because the board
+   * labels a time with it and the slider may have moved by the time this
+   * goes up. Null when the caller had none, and a record from before the
+   * field existed has none either: both read as 100, which is the only
+   * weight the board took when they were written.
    */
   const three = Number(payload.threeMs);
+  const weight = Number(payload.weight);
   return writeJson(PENDING_KEY, {
     trackId: String(payload.trackId),
     lapMs: Math.round(payload.lapMs),
     threeMs: Number.isFinite(three) && three > 0 ? Math.round(three) : null,
+    weight: payload.weight != null && Number.isInteger(weight) ? weight : null,
   });
 }
 

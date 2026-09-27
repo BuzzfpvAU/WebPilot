@@ -55725,6 +55725,412 @@ says so.
     board: npm test all passed; the roll looked at at 1440 and 430
     npm run verify              not run: no code changed here
 
+## 2026-09-27 | art | The R32 and the E82 sculpted: two cars that read as what they are
+
+The owner, 2026-09-27: "go to work on the car models, make the e82 and r32
+cars perfect in the art style, at the moment they are not recognisable, then
+update all existing implementations of those cars if need be. self verify
+and iterate until perfect". No physics model change, no module ABI, no
+build: dist/sim.wasm, src/native, vendor/betaflight and tests/goldens are
+untouched, and so is every table a car's solid comes from (CAR_KINDS,
+CAR_BODY_W and CAR_H in src/props, VEHICLE_KINDS, LATERAL and STYLE_DIMS).
+One file changed, src/art/cars.js.
+
+### Why they did not read
+
+Both were the town's kind of car: a side profile extruded across the car
+with its edges bevelled, a second prism for the glasshouse, and flat panels
+for lamps and grilles. That is right for a box on wheels, and it cannot make
+the shapes these two are known by. The R32's blistered arches came out as
+slabs stuck on a flat door, its nose as a flat board with two lamp
+rectangles, its tail lamps as discs in a black strip. The E82's round nose
+was a flat face with a grille glued on, its lamps could not sweep round the
+corners, its flank had no hollow and its glasshouse no arch, so from any
+distance it read as a generic saloon. They were also still on the first
+pass's details (no rims round the lamps, no glass band, no wipers, a far
+wheel drawn as a black blade), because the second pass left them alone.
+
+### How they are drawn now
+
+The two coupes are sculpted (THE SCULPTED BODY in src/art/cars.js); the
+nine town kinds and the kei truck are drawn exactly as before.
+
+- **Rows, lofted.** Each body is a set of rows running the length of the
+  car, each one line of the body (the skirt, the bumper's top line, the
+  character line, the shoulder, the bonnet's edge, its crown, the centre
+  line), each with its own height and half width along the car and its own
+  rounded plan corner at either end. Row to row they are joined into bands;
+  at the ends the rows close across the car into the faces the lamps sit
+  on. The arches cut the low rows, which stack on the arch's edge; the
+  R32's flare rows stand out over the arches and ease back into the doors.
+  The glasshouse is a second loft on the waist whose ends are the
+  windscreen and the backlight. Normals are smooth along a row and break
+  across the rows marked as creases, so the cel ramp draws the shoulder and
+  the character line as lines of light.
+- **Measured, not guessed.** The rows' heights and the glasshouses come off
+  side views of the real cars (Wikimedia Commons photographs, looked at
+  and not committed), put into metres through a homography fitted to the
+  wheel centres and rims at the tables' own axles and radii (reprojection
+  error 2.5 px on the R32's photograph, 1.0 px on the E82's). So the R32's
+  windscreen runs from the cowl at x 0.62 to its header at -0.08, its
+  quarter window ends at -1.08, its deck is at 1.0 m; the E82's windscreen
+  runs from 0.93 to 0.25, its waist rises from 0.99 to 1.045 at the kink,
+  its nose's edge is at 0.81 over lamps that sweep back and down to a point
+  on the wing at 0.74.
+- **Laid on by projection.** Every lamp, grille, intake, window, plate and
+  shut line is a polygon drawn in a view (the side, the front, the rear, the
+  top, or a front or rear corner seen from 45 degrees), cut along the body's
+  own facets under it and set off the surface. So the E82's headlamp and the
+  R32's amber wrap round their corners in one piece, a lens laid over its
+  housing stays over it on any curve, and the left side is the right side
+  reflected by the mesher.
+
+### What says which car it is
+
+No badge, roundel, maker's name or model name anywhere, as before.
+
+- **The R32**: slim headlamps under the bonnet's edge in dark glass with the
+  lit lens and projector, the amber running round the corners onto the
+  wings; the body coloured slatted grille between them; a deep bumper with
+  a wide mesh mouth, slatted ducts at the corners and a dark lip; blistered
+  flares under the character line along the waist; a short glasshouse on a
+  high waist with the thick sloping C pillar and the small quarter window;
+  four big round tail lamps, two to a body coloured housing, a dark bezel
+  and a small dark square between each pair; the plate in a dark recess on
+  the bumper with the reversing lamps beside it; the hoop wing on end
+  plates on the high deck; one fat tailpipe on the left; five broad spokes
+  swept round the wheel (the real car's; it was ten straight spokes).
+- **The E82**: two rounded grilles side by side in bright surrounds with
+  upright slats; headlamps under the bonnet's edge with a ring round each of
+  their two lamps (the rings light at dusk, which is what the car is known
+  by at night), swept back round the corners along the wings to a point;
+  the bonnet's two creases running down to the grilles; a bumper of three
+  mouths; the long bonnet and the glasshouse set back on a high waist,
+  frameless door glass and the rear side window kinked forward at the
+  pillar's foot; the lower line rising from behind the front wheel and the
+  shoulder rising to the tail with the side hollow between them; wedge tail
+  lamps across the corners onto the wings with a pale strip along their
+  foot; the plate in a recess on the boot lid; a dark diffuser and twin tips
+  on the left; double spoke wheels.
+
+### Liveries
+
+The same seven R32 liveries and five E82 colours by variant, so every map
+that names one gets the car it named: Hibari Yard's drift car is still red
+over charcoal with the cream pinstripe and bronze wheels (variant 4), the
+tandem's lead white with the blue stripe (5) and its chase mustard (7). A
+two tone now paints the body's own bands below the bumper's top line, round
+the nose and the tail with the body, and a stripe is a band along that
+line. Wheels that sat dark against a dark tyre are lighter: the R32's gun
+grey, white, white with stripe, silver and mustard liveries' rims, and
+every E82 colour now has bright silver rims (they had the default).
+
+### Dimensions are physics, and the drawing keeps to the solids
+
+No table moved, so every parked and moving solid is where it was, and the
+world golden, the town's colliders and Hibari Yard's are untouched. The
+drawing was fitted to the solids, not the other way round, and measured: a
+scratch page sampled the faces of every box carLayout gives a parked r32 and
+e82 and took each point's distance to the painted surface when it is
+outside it (the arch openings, which the solids fill on purpose as before,
+left out).
+
+    solid box                    most outside the paint
+    r32 body, tail half          3.8 cm, the plan corner at the tail
+    r32 body, nose half          5.1 cm, the top of the nose's corner
+    r32 roof                     3.9 cm, the roof's back edge
+    e82 body, tail half          7.5 cm, the plan corners
+    e82 body, nose half          8.6 cm, the top of the nose's corner
+    e82 roof                     3.4 cm
+    both, the glass boxes' lower halves    inside the paint
+
+The old prisms' corner bevels left about 4 cm (r32) and 7.7 cm (e82) at the
+same corners, so this is the same standard. The first drawings did not meet
+it (below), and meeting it cost the E82 some of the roundness of its real
+corners; how much is a choice between the likeness and the solid, which is
+put to the owner at the end of this entry. Where paint stands outside a
+solid it is as before: the flares and bumpers past the box, and on a parked
+car the boot deck and the wing over the body box, which a craft can clip.
+
+### What went away
+
+Only the R32 and the E82 were drawn by the first pass's path, so its parts
+that nothing else reached are gone: frontEnd, rearEnd, the R32's flare and
+wing, the two tone overlay, the first pass's arch lips, mirrors and wipers,
+the E82's crease strips and the kink clip in sideGlass, the ten spoke wheel.
+A fingerprint of every buffer of every other kind at both details and two
+variants (40 in all, scratch fingerprint page) is the same before and after.
+
+### Triangles and time, a car
+
+    kind   parked, wheels in     moving body, no wheels
+           before    after       before    after
+    r32     1,841    4,376        1,201    3,748     (livery 4)
+    e82     1,655    4,745        1,055    4,097
+
+About three times the triangles, spent where the shapes are. Neither car is
+parked in the town, so the town's counts are unchanged. On the two shipped
+maps, read from window.__map() in the real shell on High, the tree before
+this change against this one:
+
+    Hibari Yard           before      after
+      moving cars         57 meshes   58 meshes
+                          9,286 tris  14,815 tris
+      the whole view      124,332     129,861 triangles
+      batches             439         440
+    Hibari Yard Tandem
+      moving cars         70 meshes   73 meshes
+                          11,635      19,166 tris
+      the whole view      151,697     159,228 triangles
+      batches             549         552
+
+So 4.4 and 5.0 per cent more triangles in view, and a draw call more for
+each car whose livery has a two tone or a stripe. The static
+scene is the same to the triangle. A build takes 20 to 30 ms on this
+container once warm (the town's kinds 4 to 6), once per car as a map is
+built.
+
+### Pictures, looked at, in the session's scratchpad (not committed)
+
+Under /tmp/claude-0/-home-user-WebFPVSimulator/5491f610-334b-546c-8615-5eb52263e2e0/scratchpad:
+ref/ holds the photographs; pics/ the renders:
+
+- before/: the old two from five sides.
+- the comparisons stacking a photograph over a render from the same angle:
+  r3/cmp1, r4/cmp1 and cmp2, r6/cmp-side, e2/cmp-side3, e3/cmp-perf and
+  cmp-rear, c1/cmp-perf.
+- lv/: every livery of both, front and rear three quarters.
+- v1/ and v2/ sheet.png: the finished pair from four sides.
+- yard4/, yard5/: the real shell on Hibari Yard, paused, the camera set off
+  window.__vehicles: the R32 sliding through a bend with its smoke, from
+  behind, ahead and the side; the E82 from ahead and behind.
+- yard6/: the same at dusk: the R32's slim lamps lit with the pool ahead,
+  the E82's ringed lamps lit, its tail lamps and the red pool behind.
+
+What they show: at thirty metres the R32 is the wing, the four round lamps,
+the flares and the stance, and the E82 the twin grilles, the ringed lamps
+and the wedge tail lamps; at ten metres the E82's kink and hollow flank and
+the R32's slim lamps and slatted grille read; at dusk the E82's rings are
+the brightest thing on it.
+
+### What went wrong
+
+- The first E82 nose was 6 cm too low: its bonnet edge at 0.74 against the
+  photograph's 0.80, which also left the parked solid standing up to 9 cm
+  over the paint at the nose. Found by measuring the photograph again, not
+  by looking; the nose and everything on it went up.
+- The first corners were the real cars' and too round for their solids:
+  the E82's parked box stood 24 cm outside its nose's corners and 16 cm
+  outside its tail's, the R32's 7 cm. Found by the solid fit measurement,
+  whose first version reported corners as infinitely far because it only
+  looked along the three axes; it measures true distances now.
+- Laying a lens on a curved face by cutting it into a fixed grid let a
+  lens's chords sink under its housing's; cutting adaptively fixed that and
+  took a moving body to 11,500 triangles. Cutting along the body's own
+  facets fixed both (4,500, then 3,800 once the arch rings went).
+- Decals on the left flank were missing at first: the shell took a
+  mirrored triangle's facing from its winding, which a reflection turns
+  over. It takes it from the shading normals now.
+- A ring round each arch, meant to read as the lip's roll, cost about 800
+  triangles a car and could not be seen at any distance a pilot flies; it
+  was taken out after an A and B pair of pictures.
+- The R32 first stood on six spokes, a drift car's wheel; the photographs
+  show the real car's five swept ones.
+- Deleting the old path, a cut ran on from the two tone overlay to the kei
+  truck's header and took the whole sculpted engine with it. It was
+  restored from a copy taken earlier in the session and the edits since
+  were replayed onto it one by one (21 of them, each checked to apply); the
+  fingerprints above and the fit numbers came out the same as before the
+  cut.
+
+### Found, not fixed
+
+- `npm run lint:preload` fails on main as it stands (517c1da):
+  src/art/partnermark.js, from the partners' work, is served but missing
+  from src/fresh.js's list. Not this change's, and left for its own commit.
+
+### Checks, run in this session
+
+On the finished src/art/cars.js:
+
+    npm run check:props          all passed
+    npm run check:roads          all passed; the tandem's two r32s hold
+                                 450.171 ms apart, nearest 0.754 m
+    npm run check:clip           948 passed, 0 failed
+    npm run check:world          all passed
+    npm run check:world-golden   all passed, tests/goldens untouched
+    npm run check:world-engines  Node and Chromium agree to the bit on every
+                                 step of every run
+    npm run check:chase          all passed
+    npm run check:counter        all passed
+    npm run lint:boot            9 of 9 clean
+    npm run lint:memory          PASS, every world lazy and freed (built
+                                 61 -> 246 -> 61 geometries)
+    npm run lint:quality         56 of 56 clean
+    npm run lint:shell           PASS
+    npm run lint:preload         FAIL, the stale list above, the same on
+                                 517c1da without this change
+    other kinds' fingerprints    40 of 40 unchanged
+    solid fit (scratch)          the table above
+    dash scan of the diff        none
+
+Not run: npm run verify (not asked, and not physics, the plant, the ABI or
+the build), shots.js (the pictures above were taken with its driver on a
+scratch page and on the real shell).
+
+### For the owner, when flying
+
+Spawn on Hibari Yard and find the red R32 on the loop: from behind, the
+wing, the four round lamps in their two housings and the bronze wheels on
+their camber as it slides; from ahead, the slim lamps and amber round the
+corners. Half a lap behind it the blue E82: the two rounded grilles and the
+ringed lamps from ahead, the wedge tail lamps and twin tips from behind.
+Hibari Yard Tandem has two more R32s, white with a blue stripe and mustard.
+At dusk the E82's rings light. What would be wrong: a lamp or a window
+floating off the body or sunk into it, a gap in a lamp where it turns a
+corner, one side of a car missing something the other has, or meeting a
+parked coupe more than a few centimetres before its paint.
+
+### Put to the owner, not acted on
+
+A parked coupe's solid is boxes (carLayout), so a car drawn with the real
+E82's round corners leaves a box's corner standing well outside the paint:
+24 cm at the nose. The drawing gave way (8.6 cm, the old model's standard),
+which makes the E82's corners squarer than the real car's. If the rounder
+corners are wanted, the parked r32 and e82 solids would need cut corners in
+carLayout, which changes the world golden's "one of everything" world (it
+parks one of each style) and so needs the owner's yes first. Not done.
+
+### The owner's answer, 2026-09-27
+
+Verification scale: none, after the before and after pictures and the two
+in-game shots. The owner asked for this work to be pushed to `main`. The
+question above about the parked solids' corners was not answered and stays
+open.
+
+## 2026-09-27 | board, shell | A time goes up at any weight, and says so
+
+### What changed and why
+
+The owner, 2026-09-27: "i should be able to record times to the board no
+mater what my weight slider is at". Until now `submitBoardTime` and
+`submitFreestyleRun` refused anything flown off Weight 100, because the board
+had nowhere to say what a lap was flown at and a row from 60 would have sat
+beside a stock row looking identical. Five entries in this file since
+2026-09-18 said the fix was a column on the board and the refusal becoming a
+label. This is that.
+
+- **The board** (WebFPVSimulator-LeaderBoard) keeps a `weight` on every time
+  and every freestyle run: a column on `times` and on `runs`, NOT NULL
+  DEFAULT 100, so every row already stored reads as the 100 it was flown at.
+  `normaliseWeight` in its `src/validate.js` takes 60 to 140 in steps of 5,
+  mirroring `WEIGHT_MIN`, `WEIGHT_MAX` and `WEIGHT_STEP` here, reads an
+  absent weight as 100 (every older simulator only ever posted 100), and
+  refuses one off the band with a 400 rather than folding it. It is a LABEL,
+  not a rank: rows are ordered on the clock exactly as before. The board page
+  prints `Weight 60%` in amber beside the pilot on any row that is not 100:
+  the card's record and podium, the sheet's hero and table, and the rail's
+  Times posted. A stock row looks exactly as it did.
+- **The lap carries its own weight.** `Race` stamps every clean lap in its
+  log with `race.weight`, which `applySettings` keeps equal to `runWeight`
+  after its void, and a new race is handed it. `race.boardRow()` is what a
+  run puts on the board: `{ lapMs, threeMs, weight }`, all from ONE weight.
+  A field posts its fastest lap with that lap's weight; a room posts its
+  fastest three with the fastest lap flown at their weight beside it. Three
+  laps in a row are always one weight, because the change voids the running
+  lap and between two consecutive laps a lap is always running; a window
+  whose stamps disagree is not counted anyway, so the rule breaking would
+  cost a row rather than mislabel one.
+- **The slider as it stands is not the weight sent.** It used to be:
+  `runWeight` at the moment of the press. That was a hole in the old refusal
+  as well: fly laps at 60, move the slider back to 100 mid race (which voids
+  only the running lap), and the 60 lap went up as stock. The pending lap a
+  later visit uploads carries its weight too (`writePendingTime`), and a
+  pending record from before this reads as 100, which is what that build
+  would have sent. Weights are clamped against no airframe, the widest band,
+  because a pending five inch lap at 140 would otherwise be pulled to the
+  whoop's 120 when uploaded from the whoop.
+- **Freestyle** has no laps to void, so the shell notes the weight each kept
+  trick landed at (`trickWeight`). A run landed at one weight goes up with
+  it. A run landed at two has no one weight to be labelled with, and its Post
+  this run row greys with that sentence; `submitFreestyleRun` refuses the
+  same case as the backstop. That is the one weight refusal left and it is
+  about the run, not the number.
+- **The words.** The sentence under Fly, the pause menu's Weight row and the
+  feel form's hint all said a lap off 100 stays off the public board. They
+  say it goes up with its weight beside the name now. The Upload row's note
+  says `It goes up marked Weight 120%` before it is pressed, the upload's
+  notice repeats it, the in game Standings print the same amber label, and a
+  board ghost's note says what weight it was flown at.
+- **Deploy the board first.** A board that has not learned the key ignores
+  it and would store a lap flown at 60 as stock. DEPLOY.md's "the board goes
+  first" section says so now, and the band note in `src/ui/ui.js` says a
+  change to the slider's band is a board change first.
+
+### Not done, and said plainly
+
+- **Every weight is ranked together.** That is what the owner asked for and
+  what the label is for, and a light lap can hold a track record: the card
+  says so beside the name. A "stock only" filter on the board, the way the
+  arcade style was once argued to deserve one, is not built. It is a small
+  addition to the page if the owner wants it.
+- **The edge cache.** Through webfpv.org a returning visitor's browser can
+  hold the board's old `app.js` for up to four hours (the same TTL measured
+  above for this simulator). For that window, a weighted row is shown
+  without its label. The board has no address stamps to move, so this is
+  said rather than worked round.
+- **Nobody has flown it.** The upload path was checked by reading it, by
+  unit checks on the real `Race` class, and against the real board, not by
+  posting a flown lap from the simulator in a browser.
+
+### RUN LOG
+
+    board: npm test                   all passed, 17 new weight checks among
+                                      them (unit, file store, HTTP, runs)
+    board: npm run lint:licence       29 of 29 carry the header
+    board: npm run lint:nouns         PASS
+    board: Postgres 16, scratch db    old schema seeded with a time and a run,
+                                      then the new store's start migrated it:
+                                      16 of 16, both columns NOT NULL DEFAULT
+                                      100, old rows read 100, a lap at 60
+                                      ranked on the clock, the card and sheet
+                                      records carry it, a worse run at 120
+                                      leaves the 80 row standing, a second
+                                      start is harmless
+    board: the page, looked at        served from a scratch file store with
+                                      laps at 60, 85, 140 and stock, at
+                                      1440x900 and 430x932: the tag beside
+                                      the name on the card record and
+                                      podium, the sheet hero and table and
+                                      the rail; a long name gives way and
+                                      the tag stays whole; no page errors
+    node --check                      main.js, ui.js, race.js, board.js,
+                                      session.js clean
+    scratch Race.boardRow             13 of 13 on the real class, including a
+                                      room whose fastest lap and fastest
+                                      three are at different weights
+    npm run check:clip                948 passed, 0 failed (builds races)
+    npm run lint:boot                 9 of 9 clean
+    npm run lint:quality              56 of 56 clean
+    npm run lint:preload              STALE src/fresh.js, and the same on main
+                                      without this change: not this change's
+    npm run lint:nouns                FAIL, "Drift course" at
+                                      src/maps/built/showpiece.js:149, and the
+                                      same on main: not this change's
+    lint:shell, lint:board, shots     not run: they drive headless Chromium
+                                      through the simulator, and the rule
+                                      here is to ask before spending that
+    npm run verify                    not run: nothing in the physics, the
+                                      plant, the module ABI or the build
+
+### The owner's answer, 2026-09-27
+
+"Push to main for all", in answer to the verification question above, with
+no scale chosen, so nothing beyond the RUN LOG above ran before it went. The
+board went to `main` first, as DEPLOY.md asks, then this repository, after
+merging the coupes from `main`. The front door had nothing of this change to
+push.
+
 ## 2026-09-27 | shell | Tracks: a card is chosen where it is, and a double click flies it
 
 The owner: "when i select a 5 inch race track in tracks i should be able to

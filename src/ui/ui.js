@@ -497,6 +497,13 @@ export const FLIGHT_STYLES = ['expert', 'arcade'];
  * whoop, and the slider's top is per airframe: the module refuses a gravity
  * above 2.5, so the whoop stops at 120, 2.43. WEIGHT_MAX is the widest any
  * airframe offers and configs/airframes.js weightMax is each one's own.
+ *
+ * THE BOARD HOLDS THIS BAND TOO. A time and a freestyle run carry the weight
+ * they were flown at, and the board refuses one off 60 to 140 in steps of 5
+ * (normaliseWeight in WebFPVSimulator-LeaderBoard's src/validate.js, which
+ * mirrors these four as NAME_RE mirrors pilot.js). Widen the band or change
+ * the step here and it changes there first, or a lap at the new end is
+ * refused by the board with a sentence about a weight.
  */
 export const WEIGHT_MIN = 60;
 export const WEIGHT_MAX = 140;
@@ -2136,7 +2143,10 @@ function recordSentence(s, trackName) {
       : s.flightStyle === 'arcade'
         ? ' Arcade times stay off the public board, so this run will not count there.'
         : weight !== WEIGHT_STOCK
-          ? ' Times flown at a weight that is not 100 percent stay off the public board, so this run will not count there.'
+          /* It used to say a time off 100 stays off the public board. The
+           * board takes it now and prints the weight beside the name, the
+           * owner's ask of 2026-09-27, so the sentence says that instead. */
+          ? ` This run is on ${link}, and a time from it goes on the public board marked Weight ${weight}%.`
           : ` This run is on ${link}.`);
 }
 
@@ -2553,12 +2563,16 @@ function builderReturnItem(s, sharedMap) {
  *
  * `disabled` is honoured by select(), and renderMenu paints it as row-grey.
  */
-function uploadAction(listing, { fastestMs, timePosted, practice = false }) {
+function uploadAction(listing, { row = null, timePosted, practice = false }) {
   const pending = readPendingTime();
   const shareId = listing && listing.shareId;
-  const ms = Number.isFinite(fastestMs)
-    ? fastestMs
-    : (shareId && pending && pending.trackId === shareId ? pending.lapMs : null);
+  /* The lap this row would send, the run's own or the one kept from an
+   * earlier visit, and the weight it was flown at, which goes with it. */
+  const held = row && Number.isFinite(row.lapMs)
+    ? row
+    : (shareId && pending && pending.trackId === shareId ? pending : null);
+  const ms = held ? held.lapMs : null;
+  const weight = held && held.weight != null ? clampWeight(held.weight, null) : WEIGHT_STOCK;
   if (timePosted && shareId) {
     const rank = timePosted.rank != null ? ` Rank ${timePosted.rank}.` : '';
     return {
@@ -2599,12 +2613,17 @@ function uploadAction(listing, { fastestMs, timePosted, practice = false }) {
   }
   const best = readPostedBest(shareId);
   const isNew = best != null && ms < best;
+  /* A lap off 100 goes up like any other, and the board prints its weight
+   * beside the name, so the row says so before it is pressed. */
+  const marked = weight !== WEIGHT_STOCK
+    ? ` It goes up marked Weight ${weight}%, the weight it was flown at.`
+    : '';
   return {
     label: isNew ? `Upload new best, ${formatTime(ms)}` : `Upload ${formatTime(ms)}`,
     action: 'posttime',
-    note: isNew
+    note: (isNew
       ? 'Faster than the last time you uploaded from this browser. Sends this lap to the public board.'
-      : 'Send this lap to the public board under your name.',
+      : 'Send this lap to the public board under your name.') + marked,
   };
 }
 
@@ -3034,7 +3053,7 @@ function weightItem(s) {
   const set = (v) => { s.weight = clampWeight(v, s.airframe); };
   const it = number(
     'Weight',
-    `How heavy the quad feels. Right is heavier: it drops when you chop the throttle and stops hanging at the top of a jump. Left is lighter, and it floats. ${WEIGHT_STOCK} is the quad as it ships; changing it mid lap voids the lap, and a lap flown off ${WEIGHT_STOCK} stays off the public board.`,
+    `How heavy the quad feels. Right is heavier: it drops when you chop the throttle and stops hanging at the top of a jump. Left is lighter, and it floats. ${WEIGHT_STOCK} is the quad as it ships; changing it mid lap voids the lap, and a lap flown off ${WEIGHT_STOCK} goes on the public board with its weight beside your name.`,
     spec,
     cur,
     set,
@@ -3712,6 +3731,12 @@ export class Ui {
     this.freestyleRun = null;
     this.runPosted = null;
     this.resultsFastest = null;
+    /* What the results screen offers the board: { lapMs, threeMs, weight }
+     * from the race's boardRow, the lap it would post and the weight it was
+     * flown at, or null. resultsFastest stays the run's fastest lap, which
+     * is what this screen reports; the two differ only on a room run that
+     * changed weight between laps. */
+    this.resultsBoard = null;
     this.resultsDocId = null;
     this.coursePublished = null;
     this.padPrev = { up: false, down: false, left: false, right: false, select: false, back: false };
@@ -5925,7 +5950,7 @@ export class Ui {
       airHint.hidden = !show;
       if (show) {
         const f = WEIGHT_FEEL[af] ?? WEIGHT_FEEL['5inch'];
-        airHint.textContent = `The Weight slider between the sticks on the flight screen is this exact complaint: it scales the weight the quad carries, so it drops when you chop the throttle instead of hanging. Yours is at ${weight} percent. From a hover with the throttle cut, the stock quad falls 10 metres in ${f.fall[0]} s and balloons ${f.balloon[0]} m after a short punch; at ${top} percent that is ${f.fall[1]} s and ${f.balloon[1]} m. Hover moves up the stick with it, ${f.hover[0]} percent at stock to ${f.hover[1]} at ${top}. Worth dragging before you wait on us, and a lap flown on it stays off the public board.`;
+        airHint.textContent = `The Weight slider between the sticks on the flight screen is this exact complaint: it scales the weight the quad carries, so it drops when you chop the throttle instead of hanging. Yours is at ${weight} percent. From a hover with the throttle cut, the stock quad falls 10 metres in ${f.fall[0]} s and balloons ${f.balloon[0]} m after a short punch; at ${top} percent that is ${f.fall[1]} s and ${f.balloon[1]} m. Hover moves up the stick with it, ${f.hover[0]} percent at stock to ${f.hover[1]} at ${top}. Worth dragging before you wait on us, and a lap flown on it goes on the public board with its weight beside your name.`;
       }
     };
     const refreshCapHint = () => {
@@ -7357,14 +7382,20 @@ export class Ui {
                * why it is off is the same answer given before it is needed.
                */
               disabled: built || nothing || Boolean(run && run.assisted)
-                || (run && run.timed === false),
+                || (run && run.timed === false) || Boolean(run && run.weightMixed),
               note: built ? (this.sharedMap ? BOARD_MAP_OFF_BOARD : BUILT_OFF_BOARD) : (nothing
                 ? 'A run with no tricks in it is not a score. Fly one and it appears here.'
                 : (run && run.timed === false
                   ? 'Free flight has no clock, so there is nothing for a board to compare it against. Switch Run to Scored on the Freestyle screen and fly it again.'
                   : (run && run.assisted
                     ? 'This run used the harness hooks, so it is not a flown score and the board will not take it.'
-                    : `${formatScore(run.total)} from ${run.tricks} tricks. One entry per pilot on the board, and only your best.`))),
+                    /* The weight goes up with the run and the board prints
+                     * it; a run whose tricks landed at two weights has no
+                     * one weight to print, so it is the one weight refusal
+                     * left. See submitFreestyleRun in main.js. */
+                    : (run.weightMixed
+                      ? 'The weight changed during this run, so it has no one weight for the board to show. Fly it again at one weight.'
+                      : `${formatScore(run.total)} from ${run.tricks} tricks${Number.isInteger(run.weight) && run.weight !== WEIGHT_STOCK ? `, marked Weight ${run.weight}%` : ''}. One entry per pilot on the board, and only your best.`)))),
             },
           /*
            * THE SHARE CARD, the run's manga page beside its score. A row of
@@ -7407,7 +7438,7 @@ export class Ui {
       return [
         { label: 'Fly again', action: 'restart', primary: true },
         uploadAction(listing, {
-          fastestMs: this.resultsFastest,
+          row: this.resultsBoard,
           timePosted: this.timePosted,
         }),
         publishAction(listing, this.coursePublished),
@@ -10041,6 +10072,12 @@ export class Ui {
       }
       line.append(el('span', 'standings-rank', String(i + 1)));
       const who = el('span', 'standings-pilot', row.name || 'Unnamed pilot');
+      /* A time flown off 100 says so, as the board's own table does. The
+       * board ranks every weight on the clock, so the label is the only
+       * thing that tells two rows apart. */
+      if (Number.isInteger(row.weight) && row.weight !== WEIGHT_STOCK) {
+        who.append(' ', el('span', 'standings-weight', `Weight ${row.weight}%`));
+      }
       if (row.hasGhost) {
         /* A ghost is the difference between reading a time and racing it,
          * so the rows that carry one say so. */
@@ -11654,6 +11691,12 @@ export class Ui {
     this.timePosted = null;
     this.coursePublished = null;
     this.resultsFastest = fastest;
+    /* The row the board would be sent, from the race (boardRow). The one
+     * caller always hands it; one that did not would get the fastest lap
+     * and the three with no weight, which every reader takes as stock. */
+    this.resultsBoard = fastest == null
+      ? null
+      : (opts.board || { lapMs: fastest, threeMs: Number.isFinite(opts.threeMs) ? opts.threeMs : null, weight: null });
     /* Which course this lap was flown on. The time and the document have to
      * travel together: publishing a DIFFERENT course while these results are
      * still on screen used to hand the new course this lap. */
@@ -11665,11 +11708,14 @@ export class Ui {
         if (listing && listing.canPostTime && listing.shareId) {
           writePendingTime({
             trackId: listing.shareId,
-            lapMs: fastest,
+            lapMs: this.resultsBoard.lapMs,
             /* Carried with the lap, because the upload can happen on a later
              * visit and by then the race is gone. Null on the field, which
              * is scored on one lap and always will be. */
-            threeMs: opts.trackClass === 'micro' ? opts.threeMs : null,
+            threeMs: opts.trackClass === 'micro' ? this.resultsBoard.threeMs : null,
+            /* And the weight it was flown at, for the same reason: the
+             * slider may be somewhere else by the time it goes up. */
+            weight: this.resultsBoard.weight,
           });
         }
       } catch (e) {
@@ -12975,16 +13021,17 @@ export class Ui {
     /*
      * SLATE AT STOCK, AMBER OFF IT. Slate is the colour this shell uses for
      * type that should recede, and at 100 there is nothing to say: the pilot
-     * is on the machine every record and every board time was set on. Off
-     * stock the number is an instrument reading, which is what amber means
-     * everywhere else on this overlay.
+     * is on the machine the board prints no weight for. Off stock the number
+     * is an instrument reading, which is what amber means everywhere else on
+     * this overlay, and it is the colour the board's weight label is in.
      *
      * IT USED TO SAY ", off the board" AND THE PILOT HAD IT REMOVED: "this
      * means nothing". They are right about where it belongs. A pilot mid
-     * flight is feeling the quad, not filing a time, and the board rule is
-     * already said twice in the places somebody is actually deciding about a
+     * flight is feeling the quad, not filing a time, and what the board does
+     * with a weight, which is now to take the time and print the weight
+     * beside the name, is said where somebody is actually deciding about a
      * record: the sentence under the Fly button, read immediately before a
-     * run, and the refusal on the upload itself. A third copy riding the
+     * run, and the note on the Upload row. A third copy riding the
      * instrument all flight is noise, and noise on an overlay is how a pilot
      * learns to stop reading it.
      */
