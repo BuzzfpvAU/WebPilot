@@ -4897,6 +4897,32 @@
       .loading-joke.is-error {
         font-style: normal; color: #ff8f8f;
       }
+      /* POWERED BY BETAFLIGHT, at the foot of the loading screen, where a
+         game names what it runs on. Betaflight gave the owner permission on
+         2026-09-27 to use its name and logo in the game, because WebFPV is
+         free, and said it has nothing to do with the project and will not
+         publicise it (NOTICE). So the mark is here and in the credits, and
+         not on the front door or the board, which are the pages that
+         publicise the project; it says "Powered by" because the control
+         loop is Betaflight's, and never "partner". It is Betaflight's logo
+         in the palette's cream (scripts/partners.js), held back, and it is
+         not a link: the loading screen is not a page anybody should leave
+         from, and the credits carry the link. It stands aside for a failure,
+         which is the one thing on this screen that has to be read, and for
+         a phone on its side, where the bar and the joke need the height. */
+      .loading-powered {
+        position: absolute; left: 0; right: 0;
+        bottom: clamp(18px, 5vh, 44px);
+        display: flex; flex-direction: column; align-items: center; gap: 8px;
+        pointer-events: none;
+      }
+      .loading-powered span {
+        font-size: 10px; font-weight: 700; letter-spacing: 0.24em;
+        text-transform: uppercase; color: var(--slate);
+      }
+      .loading-powered img { display: block; width: auto; height: 26px; opacity: 0.72; }
+      #loading:has(.loading-help:not([hidden])) .loading-powered { display: none; }
+      @media (max-height: 480px) { .loading-powered { display: none; } }
       .loading-track {
         position: relative;
         width: min(420px, 68vw); height: 6px; border-radius: 3px;
@@ -5310,6 +5336,13 @@
            out, which is a dead end on the one screen a stranded visitor is
            looking at. aria-live so a screen reader hears the failure. -->
       <div class="loading-help" hidden role="alert" aria-live="assertive"></div>
+      <!-- Powered by Betaflight: see .loading-powered for why here and
+           only here and the credits. Low priority, so it never queues
+           ahead of the renderer the stage above is waiting on. -->
+      <div class="loading-powered">
+        <span>Powered by</span>
+        <img src="assets/credits/betaflight-mono.svg" width="861" height="167" alt="Betaflight" decoding="async" fetchpriority="low" />
+      </div>
     </div>
   </body>
 </html>

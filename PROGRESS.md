@@ -55614,3 +55614,51 @@ No behaviour changed here: a comment in a script and a document.
     npm run verify                  not run: a comment and DEPLOY.md, with
                                     nothing to fly and no check that reads
                                     prose
+
+## 2026-09-27 | Betaflight | The logo in the game only
+
+### What changed and why
+
+The owner answered the question the entry before last put to them: move
+Betaflight's logo into the game only. Betaflight's permission was for its
+name and logo "in the game", and the front door and the board are the pages
+that publicise the project.
+
+- The loading screen carries "Powered by" and Betaflight's cream mark at its
+  foot, `.loading-powered` in `index.html`: the place a game names what it
+  runs on, and a screen every pilot sees on every load. It is static markup
+  like the rest of the screen, fetched at low priority so it never queues
+  ahead of the renderer, and not a link, because the loading screen is not a
+  page to leave from and the credits already link to betaflight.com. It
+  stands aside for a failure, the one thing on that screen that has to be
+  read, and under 480 px of height, where the bar and the joke need it.
+- The credits keep the colour logo in "The controller", unchanged.
+- `scripts/partners.js` still makes `assets/credits/betaflight-mono.svg`;
+  its header and the file's comment now say it is for the loading screen.
+- NOTICE says the logo is used in the game only, that it stood on the front
+  door and the board for a day and came off both, that the board's credits
+  roll mirrors these credits as their fallback, and that the name still
+  appears in words wherever a page says what the control loop is, as the
+  licence's attribution.
+- The front door and the board drop the mark and stop copying the file.
+
+### RUN LOG
+
+    npm run gen:partners        regenerated the mark: only its comment changed
+    npm run lint:partners       45 passed, 0 failed
+    npm run lint:shell          PASS
+    npm run lint:boot           9 of 9 clean
+    npm run lint:devices        PASS
+    npm run lint:responsive     PASS
+    npm run lint:preload        STALE src/fresh.js, and the same on main
+                                without this change: not this change's
+    npm run lint:nouns          FAIL, "Drift course" at
+                                src/maps/built/showpiece.js:149, and the same
+                                on main without this change: not this
+                                change's, left for whoever owns the showpiece
+    loading screen, looked at   1440 by 900, 900 by 900 and 430 by 932 show
+                                the mark at the foot, 26 px, clear of the bar
+                                by 290 px or more; 932 by 430 and a forced
+                                failure panel hide it, as meant
+    npm run verify              not run: markup and a comment, nothing in the
+                                physics, the plant, the ABI or the build

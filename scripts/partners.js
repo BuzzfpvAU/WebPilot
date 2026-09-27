@@ -26,12 +26,14 @@
  *   assets/credits/betaflight-mono.svg
  *                       Betaflight's logo from the credits, its two colours
  *                       (the yellow of the bird and BETA, the white of
- *                       FLIGHT) both set to cream. The owner asked on
- *                       2026-09-27 for Betaflight's mark to stand with the
- *                       partners' on the front door and the board, under
- *                       "Powered by", because the control loop is Betaflight.
- *                       It is not in the roster: Betaflight has no card on
- *                       the partners page, no login and no painted wall.
+ *                       FLIGHT) both set to cream, for "Powered by" at the
+ *                       foot of the loading screen. It stood with the
+ *                       partners' on the front door and the board for a day
+ *                       on 2026-09-27 and came off both: Betaflight's
+ *                       permission covers its logo in the game, and those
+ *                       pages publicise the project (NOTICE). It is not in
+ *                       the roster: Betaflight has no card on the partners
+ *                       page, no login and no painted wall.
  *
  * gds/mono.svg is NOT made here. It is the redraw's own one colour version,
  * recoloured cream once by hand, because the colour file carries a gradient,
@@ -263,7 +265,7 @@ function betaflightMono(src) {
   const svg = body
     .replace('.st1{fill:#FFBB00;}', `.st1{fill:${CREAM};}`)
     .replace('.st2{fill:#FFFFFF;}', `.st2{fill:${CREAM};}`);
-  return `<!-- Betaflight's mark, one colour: the logo in betaflight.svg in this folder with both of its colours set to the palette's cream, for the partner strips on the front door and the board. Made by scripts/partners.js; regenerate, do not edit. The mark is the Betaflight project's (NOTICE). -->\n${svg}`;
+  return `<!-- Betaflight's mark, one colour: the logo in betaflight.svg in this folder with both of its colours set to the palette's cream, for Powered by on the loading screen. Made by scripts/partners.js; regenerate, do not edit. The mark is the Betaflight project's (NOTICE). -->\n${svg}`;
 }
 
 /* ------------------------------------------------------------------ */
