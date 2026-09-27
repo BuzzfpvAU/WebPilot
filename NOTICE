@@ -144,12 +144,17 @@ Betaflight gave the owner permission on 2026-09-27 to use the Betaflight
 name and logo in the game, because WebFPV is free. They also said the
 project has nothing to do with WebFPV and will not publicise it. So
 Betaflight is never called a partner, a sponsor or a supporter, and nothing
-says or implies they endorse WebFPV: where the mark appears it is under
-"Powered by", which is a statement about the code, because the control loop
-is Betaflight compiled to WebAssembly. It appears in the credits, and under
-"Powered by" beside the partners on the front door and the board. The
-owner keeps the message itself. The copies in the front door's and the
-board's repositories are these files, copied byte for byte.
+says or implies they endorse WebFPV. The logo is used in the game only: in
+the credits, and under "Powered by" at the foot of the loading screen,
+which is a statement about the code, because the control loop is Betaflight
+compiled to WebAssembly. It stood beside the partners on the front door and
+the board for a day and the owner took it off both, because those are the
+pages that publicise the project. The board's credits roll mirrors these
+credits as their fallback, and on the owner's word it names and links
+Betaflight without the logo. The name still appears
+in words wherever a page says what the control loop is, because that is a
+fact about the code and the attribution the licence asks for. The owner
+keeps the message itself.
 
 ## Music, and an open question
 

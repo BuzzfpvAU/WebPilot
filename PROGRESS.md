@@ -55615,6 +55615,116 @@ No behaviour changed here: a comment in a script and a document.
                                     nothing to fly and no check that reads
                                     prose
 
+## 2026-09-27 | Betaflight | The logo in the game only
+
+### What changed and why
+
+The owner answered the question the entry before last put to them: move
+Betaflight's logo into the game only. Betaflight's permission was for its
+name and logo "in the game", and the front door and the board are the pages
+that publicise the project.
+
+- The loading screen carries "Powered by" and Betaflight's cream mark at its
+  foot, `.loading-powered` in `index.html`: the place a game names what it
+  runs on, and a screen every pilot sees on every load. It is static markup
+  like the rest of the screen, fetched at low priority so it never queues
+  ahead of the renderer, and not a link, because the loading screen is not a
+  page to leave from and the credits already link to betaflight.com. It
+  stands aside for a failure, the one thing on that screen that has to be
+  read, and under 480 px of height, where the bar and the joke need it.
+- The credits keep the colour logo in "The controller", unchanged.
+- `scripts/partners.js` still makes `assets/credits/betaflight-mono.svg`;
+  its header and the file's comment now say it is for the loading screen.
+- NOTICE says the logo is used in the game only, that it stood on the front
+  door and the board for a day and came off both, that the board's credits
+  roll mirrors these credits as their fallback, and that the name still
+  appears in words wherever a page says what the control loop is, as the
+  licence's attribution.
+- The front door and the board drop the mark and stop copying the file.
+
+### RUN LOG
+
+    npm run gen:partners        regenerated the mark: only its comment changed
+    npm run lint:partners       45 passed, 0 failed
+    npm run lint:shell          PASS
+    npm run lint:boot           9 of 9 clean
+    npm run lint:devices        PASS
+    npm run lint:responsive     PASS
+    npm run lint:preload        STALE src/fresh.js, and the same on main
+                                without this change: not this change's
+    npm run lint:nouns          FAIL, "Drift course" at
+                                src/maps/built/showpiece.js:149, and the same
+                                on main without this change: not this
+                                change's, left for whoever owns the showpiece
+    loading screen, looked at   1440 by 900, 900 by 900 and 430 by 932 show
+                                the mark at the foot, 26 px, clear of the bar
+                                by 290 px or more; 932 by 430 and a forced
+                                failure panel hide it, as meant
+    npm run verify              not run: markup and a comment, nothing in the
+                                physics, the plant, the ABI or the build
+
+## 2026-09-27 | catalog | Five settings that do nothing here, a feature that does not exist, and plain notes
+
+### What changed and why
+
+The owner asked for the front door's wiki to be fixed, and the wiki's
+settings pages are built from this catalog, copied. Checking the pages
+against Betaflight 4.5.1's source and against the list of files
+`scripts/build-wasm.sh` compiles turned up three things that are this
+catalog's to fix, because it is the copy of record.
+
+- Five settings were LIVE and nothing in this build reads them. The wiki's
+  pages for two of them said so in their own words, under a Works here
+  label. `pid_at_min_throttle` and `airmode_start_throttle_percent` are read
+  only by `fc/core.c`, which is not compiled. `dyn_idle_start_increase`
+  applies only while `isAirmodeActivated()` is false, and `bf_stubs.c`
+  returns true. `ez_landing_speed` is multiplied by a GPS ground speed that is
+  always zero. `max_check` is read only by the stick commands in `core.c` and
+  by the RPM limiter, which does not run. All five are APPLIED_INERT now,
+  with the reason. LIVE goes from 161 to 156 and APPLIED_INERT from 14 to 19;
+  the settings screen greys the five, which is what they do.
+- The feature list had `SERVO`. Betaflight's CLI has no such feature; it is
+  `SERVO_TILT` (`featureNames` in `cli/cli.c`).
+- Every reason is a plain sentence now, with a full stop. They are shown on
+  the settings screen and at the foot of each grey wiki page, and "Plant
+  owns pack current", "No UART grid. The sim is not a radio link" and
+  "Configurator chrome" were this project's shorthand, not something a
+  reader could use. The facts are the same.
+
+The front door recopies the catalog and records the rest of the wiki's
+corrections in its `docs/wiki-betaflight-2026-09.md`.
+
+### RUN LOG
+
+    npm run lint:catalog        ok, covers valueTable, LIVE keys are in
+                                bf_settings.c
+    npm run lint:fc             33 of 33 traces clean
+    npm run lint:presets        4 of 4 presets clean
+    npm run lint:shell          PASS
+    git diff --stat vendor/betaflight
+                                empty (checked out at 77d01ba to read it)
+    npm run verify              not run: the catalog decides what the
+                                settings screen greys and what its notes
+                                say, not what flies
+
+## 2026-09-27 | Betaflight | Off the board's credits roll too
+
+### What changed and why
+
+The owner asked for Betaflight's logo to come off the board's credits roll
+as well. That roll is the board's copy of this simulator's credits, kept as
+a fallback for when the simulator cannot be reached (the board's Credits
+links open this simulator's #credits). The board's card now shows
+Betaflight's name, linked, and the licence line, with no logo, and the board
+no longer ships the file. These credits, in the game, keep the logo. NOTICE
+says so.
+
+### RUN LOG
+
+    documentation only here: NOTICE and this entry
+    board: npm test all passed; the roll looked at at 1440 and 430
+    npm run verify              not run: no code changed here
+
 ## 2026-09-27 | art | The R32 and the E82 sculpted: two cars that read as what they are
 
 The owner, 2026-09-27: "go to work on the car models, make the e82 and r32
