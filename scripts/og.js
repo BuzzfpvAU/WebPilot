@@ -25,8 +25,11 @@
  * REGENERATE, DO NOT EDIT, the same rule as the icons:
  *
  *     npm run gen:og                                  # this repo
- *     node scripts/og.js . ../landingpage-WebFPVSimulator- \
- *                          ../WebFPVSimulator-LeaderBoard/public
+ *     node scripts/og.js . ../WebFPVSimulator-LeaderBoard/public
+ *
+ * Not the front door. Its card is its own first screen, drawn by its own
+ * scripts/og.js since 2026-09-27, and a copy of this one over it would put
+ * back the card its owner replaced.
  *
  * This file is part of WebFPVSimulator.
  *

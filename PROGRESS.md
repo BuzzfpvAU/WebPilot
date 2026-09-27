@@ -55587,3 +55587,30 @@ call, and the logo can be moved into the simulator only if they say so.
     documentation only: NOTICE and this entry
     dash scan of the added lines   none
     npm run verify                 not run: no code changed
+
+## 2026-09-27 | share card | The front door's card is its own now
+
+### What changed and why
+
+The owner asked for a link to webfpv.org to show the front door's first
+screen, the manga page with the quad built, instead of the composed card it
+carried. The landing repository now draws that card itself, `og.jpg`, with
+its own `scripts/og.js`, which captures the page in headless Chromium once
+the build order reads seven of seven. So this repository's `scripts/og.js`
+no longer writes into that checkout.
+
+DEPLOY.md's share card section and the usage comment at the top of
+`scripts/og.js` both said to copy the race field card into all three
+checkouts, and following either would have put the old picture back over
+the new one. Both now name the simulator and the board only, and say where
+the front door's card comes from; DEPLOY.md's list of card addresses names
+the front door's as `og.jpg` under its `?v=`.
+
+No behaviour changed here: a comment in a script and a document.
+
+### RUN LOG
+
+    dash scan of every added line   none
+    npm run verify                  not run: a comment and DEPLOY.md, with
+                                    nothing to fly and no check that reads
+                                    prose

@@ -673,13 +673,19 @@ LinkedIn, WhatsApp or iMessage renders a 1200 by 630 card. Before this there
 were no Open Graph tags at all on any of the three, so a shared link was a bare
 URL with no picture.
 
-`og.png` is that card, and it is a frame of the real shell rather than a
-drawing of one: `scripts/og.js` drives `scripts/shots.js`, which drives the
-actual page in headless Chromium, so the card cannot disagree with the product.
-It is the title screen on the race field with the menu, the chips and the body
-copy hidden, leaving the wordmark over the world, a camera parked low and to
-the right of the course, and the lit start gate centre with the parked quad in
-the near left.
+`og.png` is that card for the simulator and the board, and it is a frame of
+the real shell rather than a drawing of one: `scripts/og.js` drives
+`scripts/shots.js`, which drives the actual page in headless Chromium, so the
+card cannot disagree with the product. It is the title screen on the race field
+with the menu, the chips and the body copy hidden, leaving the wordmark over
+the world, a camera parked low and to the right of the course, and the lit
+start gate centre with the parked quad in the near left.
+
+**The front door's card is its own.** Since 2026-09-27 it is the landing
+page's first screen, the manga page with the quad built, drawn from that page
+by the landing repository's own `scripts/og.js` in the same way, so this
+script no longer writes into that checkout: a copy of the race field over it
+would put back the card the owner replaced.
 
 Regenerate, do not edit, the same rule as the icons:
 
@@ -687,9 +693,11 @@ Regenerate, do not edit, the same rule as the icons:
 # This repo.
 npm run gen:og
 
-# All three, from a checkout of each beside this one.
-node scripts/og.js . ../landingpage-WebFPVSimulator- \
-                     ../WebFPVSimulator-LeaderBoard/public
+# This repo and the board, from a checkout of the board beside this one.
+node scripts/og.js . ../WebFPVSimulator-LeaderBoard/public
+
+# The front door, from its own checkout.
+node scripts/og.js
 ```
 
 The camera is six numbers at the top of `scripts/og.js`. Change them and the
@@ -697,10 +705,11 @@ card changes, which is why they live in a file rather than in somebody's shell
 history.
 
 **Every `og:image` is an absolute URL.** A crawler does not resolve a relative
-one against the page it found it on, so each page names its own copy in full:
-`https://webfpv.org/og.png`, `https://webfpv.org/sim/og.png`,
-`https://webfpv.org/board/og.png`. Each service therefore carries its own copy
-of the file, exactly as each carries its own icon set.
+one against the page it found it on, so each page names its own card in full:
+`https://webfpv.org/sim/og.png` and `https://webfpv.org/board/og.png`, a copy
+each of this one, exactly as each service carries its own icon set, and the
+front door's `https://webfpv.org/og.jpg`, under a `?v=` that moves with every
+redraw.
 
 **No animated card, and it is not for want of trying.** Facebook, Messenger, X,
 LinkedIn, WhatsApp, Slack and iMessage all flatten a link preview to one still
