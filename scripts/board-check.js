@@ -378,6 +378,203 @@ async function main() {
     }
 
     /*
+     * A TRACK IS CHOSEN WHERE IT IS AND A DOUBLE CLICK FLIES IT. The owner,
+     * 2026-09-27: "i should be able to double click on a track to start
+     * racing it, at the moment i click on it, then the page scrolls a bit
+     * the i have to scroll down to fly the track".
+     *
+     * Pressed through the browser's own input, not ui.select(), because
+     * what was wrong was where the page went when a real pointer pressed a
+     * real card: the cursor's scroll took the page 822 px and parked Fly it
+     * under the command bar, with a different card under the pointer for
+     * the second press to land on. Measured at the foot of the page, which
+     * is the hard case: choosing swaps the list under the strip for a
+     * shorter one, and a shorter page there is taken off the scroll.
+     *
+     * The keys come first and stay in the room. From the keys the whole of
+     * the chosen card's list comes into view, and its Fly it has to be
+     * clear of both bars rather than behind one.
+     *
+     * The gate is answered the way a pilot answers it, both halves. The
+     * setup above only set the mode, and the grid is reached off the title,
+     * which is still the gate while the aircraft half is open: nothing may
+     * fly from behind a question that has not been answered (flyIfLinked).
+     */
+    await page.evaluate(`(() => {
+      const ui = window.__ui;
+      ui.act('way-race-5inch');
+      ui.show('courses');
+      return 1;
+    })()`);
+    await page.until(`window.__ui.screen === 'courses' && (window.__ui.courseCards || []).length >= ${TRACKS.length}`, 25000);
+    const keysChoose = JSON.parse(await page.evaluate(`(() => {
+      const ui = window.__ui;
+      const i = ui.items().findIndex((it) => it.course && it.course.kind === 'board');
+      if (i < 0) { return JSON.stringify({ missing: true }); }
+      ui.setCursor(i);
+      return JSON.stringify({ name: ui.items()[i].label });
+    })()`));
+    let keysSeen = null;
+    if (keysChoose.missing) {
+      failures.push('no board track card in the Race room to choose from the keys');
+    } else {
+      await page.tap('Enter');
+      await page.until('Boolean(window.__ui.cardSubject)', 5000);
+      keysSeen = JSON.parse(await page.evaluate(`(() => {
+        const ui = window.__ui;
+        const row = ui.menuRows.find((r) => r.classList.contains('row') && r.textContent === 'Fly it');
+        const box = row ? row.getBoundingClientRect() : null;
+        const top = ui.frameTop.getBoundingClientRect();
+        const bot = ui.frameBot.getBoundingClientRect();
+        const seen = {
+          row: box ? { top: Math.round(box.top), bottom: Math.round(box.bottom) } : null,
+          clear: Boolean(box) && box.top >= top.bottom && box.bottom <= bot.top,
+          cursor: (ui.items()[ui.cursor] || {}).label || null,
+          bar: ui.framePrimary.hidden ? null : ui.framePrimary.textContent,
+        };
+        ui.back();
+        seen.after = ui.screen;
+        seen.subject = ui.cardSubject;
+        return JSON.stringify(seen);
+      })()`));
+      if (!keysSeen.clear) {
+        failures.push(`Enter on ${keysChoose.name} left its Fly it at ${JSON.stringify(keysSeen.row)}, not clear of the bars`);
+      }
+      if (keysSeen.cursor !== 'Fly it') {
+        failures.push(`Enter on a track card put the cursor on "${keysSeen.cursor}" rather than Fly it`);
+      }
+      if (keysSeen.bar !== 'Fly it') {
+        failures.push(`with ${keysChoose.name} chosen the command bar offers ${keysSeen.bar === null ? 'nothing' : `"${keysSeen.bar}"`} rather than Fly it`);
+      }
+      if (keysSeen.after !== 'courses' || keysSeen.subject) {
+        failures.push(`Escape from a chosen track card left "${keysSeen.after}" with ${keysSeen.subject} chosen, not the track list`);
+      }
+    }
+
+    const pointer = (type, at, clickCount = 1) => page.cdp.send('Input.dispatchMouseEvent', {
+      type, x: at.x, y: at.y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount,
+    }, page.sessionId);
+    const press = async (at, clickCount) => {
+      await pointer('mouseMoved', at);
+      await pointer('mousePressed', at, clickCount);
+      await pointer('mouseReleased', at, clickCount);
+    };
+
+    /*
+     * Two quick presses on two DIFFERENT cards are two choices and not a
+     * double click, whatever the browser counts: Android counts two taps up
+     * to 100 dp apart as one double tap, and two cards are 16 px apart.
+     * Sent here as the browser reports them, the second with a count of
+     * two. Read the moment the presses are handled, because flying starts
+     * synchronously with the fetch it waits on: nothing may be fetching.
+     */
+    const pair = JSON.parse(await page.evaluate(`(() => {
+      const ui = window.__ui;
+      ui.screens.courses.scrollTop = 0;
+      const at = (c) => {
+        const r = c.card.getBoundingClientRect();
+        return { key: c.key, x: Math.round(r.left + (r.width / 2)), y: Math.round(r.top + (r.height / 3)) };
+      };
+      const board = (ui.courseCards || []).filter((c) => c.kind === 'board');
+      return JSON.stringify(board.length >= 2 ? { a: at(board[0]), b: at(board[1]) } : { missing: true });
+    })()`));
+    let after = null;
+    if (pair.missing) {
+      failures.push('fewer than two board track cards, so two quick presses were not tried');
+    } else {
+      await press(pair.a, 1);
+      await press(pair.b, 2);
+      after = JSON.parse(await page.evaluate(`(() => {
+        const ui = window.__ui;
+        const seen = {
+          screen: ui.screen,
+          subject: ui.cardSubject,
+          fetching: Boolean(ui.openingBoardCourse) || Boolean(ui.flyingCard),
+        };
+        ui.back();
+        return JSON.stringify(seen);
+      })()`));
+      if (after.fetching || after.screen !== 'courses') {
+        failures.push(`a quick press on a second card flew one of the two: the room is "${after.screen}", fetching ${after.fetching}`);
+      }
+      if (after.subject !== pair.b.key) {
+        failures.push(`after a quick press on a second card ${after.subject} is chosen, not ${pair.b.key}`);
+      }
+    }
+
+    /* The pointer, at the foot of the page, in the middle of whatever is on
+     * screen there of the last board card that shows a good part of itself.
+     * A shorter page taken off the scroll moves everything by the rows the
+     * list lost, so the scroll is what is compared, not only the card. */
+    const aim = JSON.parse(await page.evaluate(`(() => {
+      const ui = window.__ui;
+      const scr = ui.screens.courses;
+      scr.scrollTop = scr.scrollHeight;
+      const top = ui.frameTop.getBoundingClientRect().bottom;
+      const bot = ui.frameBot.getBoundingClientRect().top;
+      let pick = null;
+      for (const c of ui.courseCards || []) {
+        const r = c.card.getBoundingClientRect();
+        const from = Math.max(r.top, top);
+        const to = Math.min(r.bottom, bot);
+        if (c.kind === 'board' && to - from >= 60) {
+          pick = { c, x: r.left + (r.width / 2), y: (from + to) / 2 };
+        }
+      }
+      if (!pick) {
+        const c = ui.courseCards.filter((x) => x.kind === 'board').pop();
+        c.card.scrollIntoView({ block: 'end' });
+        const r = c.card.getBoundingClientRect();
+        pick = { c, x: r.left + (r.width / 2), y: r.top + (r.height / 2) };
+      }
+      return JSON.stringify({
+        key: pick.c.key,
+        name: pick.c.card.querySelector('.map-card-name').textContent,
+        x: Math.round(pick.x),
+        y: Math.round(pick.y),
+        scrollTop: Math.round(scr.scrollTop),
+        atFoot: Math.abs(scr.scrollTop - (scr.scrollHeight - scr.clientHeight)) < 1,
+      });
+    })()`));
+    await press(aim, 1);
+    await page.until('Boolean(window.__ui.cardSubject)', 5000);
+    const chose = JSON.parse(await page.evaluate(`(() => {
+      const ui = window.__ui;
+      const under = document.elementFromPoint(${aim.x}, ${aim.y});
+      const card = under && under.closest('.course-card');
+      return JSON.stringify({
+        scrollTop: Math.round(ui.screens.courses.scrollTop),
+        under: card ? card.querySelector('.map-card-name').textContent : null,
+        subject: ui.cardSubject,
+        screen: ui.screen,
+        bar: ui.framePrimary.hidden ? null : ui.framePrimary.textContent,
+      });
+    })()`));
+    if (chose.screen !== 'courses' || chose.subject !== aim.key) {
+      failures.push(`one click on ${aim.name} left "${chose.screen}" with ${chose.subject} chosen`);
+    }
+    if (Math.abs(chose.scrollTop - aim.scrollTop) > 1) {
+      failures.push(`one click on ${aim.name} moved the page from ${aim.scrollTop} to ${chose.scrollTop} px`);
+    }
+    if (chose.under !== aim.name) {
+      failures.push(`after one click on ${aim.name} the pointer is on ${chose.under || 'no card'}, so a second press lands elsewhere`);
+    }
+    if (chose.bar !== 'Fly it') {
+      failures.push(`one click on ${aim.name} put ${chose.bar === null ? 'nothing' : `"${chose.bar}"`} on the command bar rather than Fly it`);
+    }
+    /* The second press of the double click, as the browser counts it. */
+    await press(aim, 2);
+    let flewTo = null;
+    try {
+      await page.until(`window.__ui.screen === 'flight' && window.__map().ready && window.__map().id === 'custom' && window.__map().name === ${JSON.stringify(aim.name)}`, 90000);
+      flewTo = aim.name;
+    } catch (e) {
+      const where = JSON.parse(await page.evaluate(`JSON.stringify({ screen: window.__ui.screen, map: window.__map().name })`));
+      failures.push(`a double click on ${aim.name} did not reach the starting blocks on it: the screen is "${where.screen}" on ${where.map}`);
+    }
+    await page.evaluate(`(() => { window.__ui.act('title'); return 1; })()`);
+
+    /*
      * THE FREESTYLE ROOM LISTS THE BOARD'S MAPS, the owner's ask of
      * 2026-09-26: "the top 10 available freestyle maps like with the race
      * tracks". Ten, newest first, because a map has no times to rank by
@@ -474,6 +671,10 @@ async function main() {
     console.log(`  Race room     ${room.listed} tracks listed, ${room.cards} cards drawn`);
     console.log(`  strip labels  ${room.stripLabels.join(', ') || '(none)'}`);
     console.log(`  rows          ${room.rows.join(', ')}`);
+    console.log(`  Enter         ${keysSeen ? `${keysChoose.name}, Fly it at ${keysSeen.row ? `${keysSeen.row.top} to ${keysSeen.row.bottom}` : 'nowhere'}, bar "${keysSeen.bar}"` : 'not tried'}`);
+    console.log(`  two cards     ${after ? `${after.subject} chosen, ${after.fetching ? 'FETCHING' : 'nothing flown'}` : 'not tried'}`);
+    console.log(`  one click     ${aim.name}${aim.atFoot ? ' at the foot of the page' : ''}, page ${aim.scrollTop} to ${chose.scrollTop} px, under the pointer ${chose.under}`);
+    console.log(`  double click  ${flewTo ? `flying ${flewTo}` : 'did not fly'}`);
     console.log(`  Freestyle     ${fsRoom.listed.length} of ${PUBLISHED_MAPS.length} maps listed, ${fsRoom.cards} cards drawn`);
     console.log(`  chose         ${flown ? `${pick.name}, Map row "${flown.map}"` : 'nothing built'}`);
     console.log(`  then Your map ${own ? own.name : 'not rebuilt'}`);
@@ -492,7 +693,7 @@ async function main() {
     }
     return 1;
   }
-  console.log('\nPASS, every track is listed, the ten newest maps are, and the board is a screen in the game');
+  console.log('\nPASS, every track is listed, a track is chosen where it is and a double click flies it, the ten newest maps are listed, and the board is a screen in the game');
   return 0;
 }
 

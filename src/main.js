@@ -1966,8 +1966,19 @@ export async function boot({ loading, bootStart, mapId }) {
    */
   let obstacles = null;
   const trickDetector = new TrickDetector((trick) => {
-    score.land(trick);
+    /* Only a trick the run kept, so one landing after the clock stopped
+     * does not mark a run mixed that was flown at one weight. */
+    if (score.land(trick)) {
+      noteTrickWeight();
+    }
   });
+  function noteTrickWeight() {
+    if (trickWeight == null) {
+      trickWeight = runWeight;
+    } else if (trickWeight !== runWeight) {
+      trickWeightMixed = true;
+    }
+  }
   /*
    * Rebuild the obstacle list for the map now loaded. Freestyle only: a
    * race map has a course, and nothing on a course is a powerloop object.
@@ -2135,9 +2146,16 @@ export async function boot({ loading, bootStart, mapId }) {
       if (ghostBoardBusy) {
         return 'Fetching that lap from the board.';
       }
-      return ghostBoardLap
-        ? 'A recorded lap from the public board flies beside you as a translucent pacer.'
-        : 'That lap could not be fetched from the board.';
+      if (!ghostBoardLap) {
+        return 'That lap could not be fetched from the board.';
+      }
+      /* A lap flown off 100 was flown on a lighter or heavier quad, and the
+       * board says so beside the name; so does this, where there is room. */
+      const picked = (ghostBoardTimes || []).find((t) => `board:${t.id}` === ghostChoice);
+      const light = picked && picked.weight !== WEIGHT_STOCK
+        ? ` It was flown at Weight ${picked.weight}%.`
+        : '';
+      return `A recorded lap from the public board flies beside you as a translucent pacer.${light}`;
     }
     const key = ghostCourseKey();
     const have = ghostChoice === 'previous' ? ghostBook.previous(key) : ghostBook.best(key);
@@ -2949,9 +2967,29 @@ export async function boot({ loading, bootStart, mapId }) {
    * scale the plant is holding rather than from the slider, so it survives
    * the base moving again. Same trick runAirframe below uses for the same
    * reason: boot must not grow a second path of its own.
+   *
+   * AND IT GOES TO THE BOARD WITH THE LAP. The public board took Weight 100
+   * only until the owner asked, on 2026-09-27, to post a time whatever the
+   * slider is at, and it keeps the weight on the row and prints it beside
+   * the pilot. The race stamps every clean lap with the weight it was flown
+   * at (race.setWeight, below), so a run that changed weight between laps
+   * still sends the right number: see boardRow in src/game/race.js. A
+   * freestyle run has no laps to void, so it notes the weight each trick
+   * landed at instead (trickWeight).
    */
   let runWeight = WEIGHT_STOCK;
   let runGravityScale = 1;
+  /*
+   * The weight the scored freestyle run's tricks were landed at: null
+   * before the first, and `trickWeightMixed` once one lands at another.
+   * The slider is on the flight screen and applies at once, and in
+   * freestyle nothing is voided by it, so a run can be flown at two
+   * weights; the board row it would make has room for one, so such a run
+   * is not posted (submitFreestyleRun) and its results row says why. Set
+   * where a trick is landed, cleared by reset().
+   */
+  let trickWeight = null;
+  let trickWeightMixed = false;
   /*
    * The aircraft the RUN is on, which starts as the one buildShell drew and
    * NOT as the stored setting. That is deliberate: applySettings below is
@@ -4298,6 +4336,8 @@ export async function boot({ loading, bootStart, mapId }) {
      * geometry counts whatever this says. */
     score.tricks = scoringWanted();
     score.reset();
+    trickWeight = null;
+    trickWeightMixed = false;
     trickDetector.restart();
     ui.resetScore();
     /* The counter's gaps and close calls from nothing. */
@@ -4355,6 +4395,7 @@ export async function boot({ loading, bootStart, mapId }) {
     }
     if (!keepPlace) {
       race = new Race(view.gates, view.trackClass ?? 'full');
+      race.setWeight(runWeight);
       race.setRecordKey(recordKey());
       ui.setBest(race.bestMs, view.mode);
       adoptSpawn();
@@ -5127,6 +5168,11 @@ export async function boot({ loading, bootStart, mapId }) {
       /* And the slider follows, because an airframe swap can move its top
        * and pull a stored weight down to it. */
       ui.paintAir();
+      /* The race stamps the next lap with it. After the void above, so the
+       * lap the change landed in is thrown away under the old weight and
+       * the next one is counted under the new. At boot this is the first
+       * time the race hears it, before anything can be flown. */
+      race.setWeight(runWeight);
     }
     race.setRecordKey(recordKey());
     ui.setBest(race.bestMs, view.mode);
@@ -5331,16 +5377,16 @@ export async function boot({ loading, bootStart, mapId }) {
       };
       return;
     }
-    /* And the weight, for the same reason in a different number: the
-     * slider scales the weight the craft carries, so a lap flown off 100 is
-     * a lap flown on a quad nobody else on the board is flying. */
-    if (runWeight !== WEIGHT_STOCK) {
-      notice = {
-        text: `Laps flown at ${runWeight} percent weight stay off the public board.\nPut the Weight slider back to 100 and fly it again.`,
-        untilMs: performance.now() + 3600,
-      };
-      return;
-    }
+    /*
+     * THE WEIGHT IS NOT REFUSED, IT IS SENT. A lap flown off 100 is a lap on
+     * a quad that hovers, climbs and drops differently, and it used to be
+     * kept off the board for that, because the board had nowhere to say so.
+     * It does now (normaliseWeight in the board's src/validate.js), and the
+     * owner asked on 2026-09-27 to post a time whatever the slider is at, so
+     * the lap goes up with its weight and the board prints it beside the
+     * pilot. The weight is the LAP's, stamped when it was counted, not the
+     * slider's as it stands now: see boardRow in src/game/race.js.
+     */
     const listing = inspectCourse();
     const trackId = listing && listing.shareId;
     if (!trackId || !listing.canPostTime) {
@@ -5359,11 +5405,10 @@ export async function boot({ loading, bootStart, mapId }) {
      * can still go up: it was not flown in practice, and it is the lap the
      * Upload row names. */
     const practice = runLaps === PRACTICE_LAPS;
-    const fromRun = practice ? null : race.bestLapMs();
+    const fromRun = practice ? null : race.boardRow();
     const pending = readPendingTime();
-    const fastest = fromRun != null
-      ? fromRun
-      : (pending && pending.trackId === trackId ? pending.lapMs : null);
+    const held = pending && pending.trackId === trackId ? pending : null;
+    const fastest = fromRun != null ? fromRun.lapMs : (held ? held.lapMs : null);
     /*
      * The RaceGOW metric travels with the lap, from whichever of the two the
      * lap itself came from, so an upload from a later visit carries what the
@@ -5371,10 +5416,19 @@ export async function boot({ loading, bootStart, mapId }) {
      * scored on one lap and always will be.
      */
     const threeFrom = view.trackClass === 'micro'
-      ? (fromRun != null
-        ? (race.bestThreeMs ? race.bestThreeMs() : null)
-        : (pending && pending.trackId === trackId ? pending.threeMs : null))
+      ? (fromRun != null ? fromRun.threeMs : (held ? held.threeMs : null))
       : null;
+    /*
+     * And the weight, from the same one. A pending lap from a build before
+     * the pending record carried one was flown when only 100 could be
+     * posted, so it reads as 100, which is what that build would have sent.
+     * Clamped against no airframe, the widest band: the pending lap may have
+     * been flown on the other aircraft, and the whoop's top of 120 would pull
+     * a five inch lap at 140 down to a number it was not flown at.
+     */
+    const weight = fromRun != null
+      ? clampWeight(fromRun.weight ?? runWeight, null)
+      : clampWeight(held && held.weight != null ? held.weight : WEIGHT_STOCK, null);
     if (fastest == null) {
       notice = practice
         ? {
@@ -5425,6 +5479,7 @@ export async function boot({ loading, bootStart, mapId }) {
       lapMs: Math.round(fastest),
       threeMs: threeFrom,
       ghost,
+      weight,
       origin: boardNow,
     });
     try {
@@ -5472,14 +5527,15 @@ export async function boot({ loading, bootStart, mapId }) {
       }
       const rank = posted.rank != null ? ` Rank ${posted.rank}.` : '';
       const withGhost = ghost ? ' Ghost attached, ready to be chased.' : '';
+      const atWeight = weight !== WEIGHT_STOCK ? ` Marked Weight ${weight}%.` : '';
       /* A RaceGOW time on the board is the three lap total. A run that
        * never put three clean laps together is stored and not ranked, and
        * the notice says so rather than quoting a lap the sheet will not show. */
       const roomTime = view.trackClass === 'micro' && Number.isFinite(threeFrom) ? threeFrom : null;
       notice = {
         text: view.trackClass === 'micro' && roomTime == null
-          ? `Uploaded ${name}'s lap, ${formatTime(fastest)}. A RaceGOW time on the board is three laps in a row, and this run does not have that yet.${healed}`
-          : `Uploaded ${name}, ${formatTime(roomTime != null ? roomTime : fastest)}.${rank}${withGhost}${healed}`,
+          ? `Uploaded ${name}'s lap, ${formatTime(fastest)}.${atWeight} A RaceGOW time on the board is three laps in a row, and this run does not have that yet.${healed}`
+          : `Uploaded ${name}, ${formatTime(roomTime != null ? roomTime : fastest)}.${rank}${atWeight}${withGhost}${healed}`,
         untilMs: performance.now() + 3600,
       };
       ui.markTimePosted(posted);
@@ -5544,6 +5600,10 @@ export async function boot({ loading, bootStart, mapId }) {
       summary.counterBest = summary.counterBestBefore;
       summary.counterImproved = false;
     }
+    /* The weight the run's tricks were landed at, for the results row: the
+     * board labels a run with it, and a run landed at two has none. */
+    summary.weight = clampWeight(trickWeight ?? runWeight, null);
+    summary.weightMixed = trickWeightMixed;
     ui.showFreestyleResults(summary);
   }
 
@@ -5596,21 +5656,21 @@ export async function boot({ loading, bootStart, mapId }) {
       return;
     }
     /*
-     * AND THE WEIGHT, WHICH IS REFUSED HERE RATHER THAN LABELLED, unlike
-     * the arcade style two functions up.
+     * AND THE WEIGHT, WHICH IS LABELLED NOW RATHER THAN REFUSED, on the
+     * argument that let the arcade style onto this board: a reader can see
+     * what a row was flown on. It used to be refused, because a row from 140
+     * percent would have sat beside a stock row looking identical; the board
+     * carries the weight on every row now and prints it beside the pilot.
      *
-     * The argument for letting an arcade run onto this board is that arcade
-     * is a NAMED model the board carries on every row, so a reader can see
-     * it and filter it and the pilot who prefers that machine still has a
-     * board. This slider is not a model, it is a continuum, and the board
-     * has no column for it: a row posted from 140 percent weight would sit
-     * beside a stock row looking identical and there would be nothing to
-     * read. Putting the column on the board is the better answer and is owed
-     * in PROGRESS.md; until it exists, refusing is the honest half.
+     * One case is still refused, and it is not about the number: a run whose
+     * tricks landed at two weights has no one weight to be labelled with,
+     * because in freestyle the slider voids nothing. The results row greys
+     * itself for the same reason (weightMixed, endFreestyleRun), so this is
+     * the backstop for a press that reaches it some other way.
      */
-    if (runWeight !== WEIGHT_STOCK) {
+    if (trickWeightMixed) {
       notice = {
-        text: `Runs flown at ${runWeight} percent weight stay off the public board.\nPut the Weight slider back to 100 and fly it again.`,
+        text: 'The weight changed during this run, so it has no one weight to go on the board with.\nFly it again at one weight.',
         untilMs: performance.now() + 4200,
       };
       return;
@@ -5630,6 +5690,7 @@ export async function boot({ loading, bootStart, mapId }) {
         name,
         map: view.id,
         style: runStyle === 'arcade' ? 'arcade' : 'expert',
+        weight: clampWeight(trickWeight ?? runWeight, null),
         summary,
       });
       /* The board keeps one run per pilot and only their best, so a worse
@@ -5741,11 +5802,12 @@ export async function boot({ loading, bootStart, mapId }) {
        * was just published. Publishing course B with course A's results still
        * up used to attach A's lap to B, because resultsFastest is a bare
        * number with no course attached to it. */
-      if (ui.resultsFastest != null && ui.resultsDocId != null && ui.resultsDocId === listing.doc.id) {
+      if (ui.resultsBoard && ui.resultsDocId != null && ui.resultsDocId === listing.doc.id) {
         writePendingTime({
           trackId: result.posted.id,
-          lapMs: ui.resultsFastest,
-          threeMs: view.trackClass === 'micro' && race.bestThreeMs ? race.bestThreeMs() : null,
+          lapMs: ui.resultsBoard.lapMs,
+          threeMs: view.trackClass === 'micro' ? ui.resultsBoard.threeMs : null,
+          weight: ui.resultsBoard.weight,
         });
       }
       /*
@@ -7846,6 +7908,10 @@ export async function boot({ loading, bootStart, mapId }) {
              * race's log still knows where the voids were. */
             threeMs: race.bestThreeMs ? race.bestThreeMs() : null,
             trackClass: view.trackClass ?? 'full',
+            /* What the Upload row offers and what is kept for a later
+             * visit: the lap, the three and the weight they were flown at,
+             * all from one weight. See boardRow. */
+            board: race.boardRow(),
           });
         }
       }
@@ -8988,6 +9054,9 @@ export async function boot({ loading, bootStart, mapId }) {
       flyIfLinked();
     }
   }
+  /* The course a track card asked flyIfLinked for, beside the map in
+   * ui.flyOnLoad, or null for a link, which names only the map. */
+  let flyOnLoadCourse = null;
   /*
    * THE BUILDER'S FLY THIS MAP AND FLY THIS TRACK, carried the last step
    * into the air.
@@ -9005,8 +9074,15 @@ export async function boot({ loading, bootStart, mapId }) {
    */
   function flyIfLinked() {
     const wanted = ui.flyOnLoad;
+    const course = flyOnLoadCourse;
     ui.flyOnLoad = null;
+    flyOnLoadCourse = null;
     if (!wanted || view.id !== wanted || ui.settings.map !== wanted || ui.screen !== 'title' || ui.onGate()) {
+      return;
+    }
+    /* A track card names the course as well as the map, because every race
+     * track is `custom`: see onFlySeated below. */
+    if (course != null && loadedCourseKey(view) !== course) {
       return;
     }
     setTimeout(() => {
@@ -9014,15 +9090,48 @@ export async function boot({ loading, bootStart, mapId }) {
         return;
       }
       wakeAudio();
-      ui.act('fly');
-      /* A race seat stops on the launch card, which only restates what is
-       * already seated. The link asked for the grid, so it presses Go the
-       * way the card's own button does. */
-      if (ui.screen === 'launch') {
-        ui.act('launch-go');
-      }
+      flyToGrid();
     }, 0);
   }
+  /* Fly's own path, then past the launch card. A race seat stops on the
+   * card, which only restates what is already seated, and every caller here
+   * asked for the grid, so it presses Go the way the card's own button does. */
+  function flyToGrid() {
+    ui.act('fly');
+    if (ui.screen === 'launch') {
+      ui.act('launch-go');
+    }
+  }
+  /*
+   * FLY WHAT WAS JUST SEATED, from a track card in the Race room: a double
+   * click on it, the command bar's Fly it, or the Fly it row. The owner,
+   * 2026-09-27: "i should be able to double click on a track to start
+   * racing it". See flyCard in ui.js, which has already seated the track.
+   *
+   * Whether that seat changed the world is only known here. A track that is
+   * already the loaded world, which the card for the seated track is, flies
+   * now. Any other has just started the swap that builds it, and flying
+   * before that is on screen would fly the old world under the new name, so
+   * it parks the map where the builder's link parks it, in ui.flyOnLoad,
+   * and flyIfLinked takes it after the new world's first frame, off the
+   * title that the swap lands on.
+   *
+   * WITH THE COURSE BESIDE THE MAP, because a race track and the track
+   * before it are both `custom`. A load that fails puts the previous track
+   * back, and flying that would be the second surprise flyIfLinked exists to
+   * avoid. The key is the one the seat will build, and loadedCourseKey reads
+   * the one the world actually did.
+   */
+  ui.onFlySeated = () => {
+    const id = mapById(ui.settings.map).id;
+    if (mapReady && !swapInFlight && worldMatchesSettings()) {
+      wakeAudio();
+      flyToGrid();
+      return;
+    }
+    ui.flyOnLoad = id;
+    flyOnLoadCourse = wantedCourseKey(id);
+  };
   let worstBlockMs = 0;
   let worstShellMs = 0;
   let worstAudioMs = 0;

@@ -749,7 +749,9 @@ export async function adoptMapFromLocation() {
  * catalogue to recompute a score, and it deliberately imports neither. It
  * bounds the claim instead. See inspectRun in the board's src/validate.js.
  */
-export async function postFreestyleRun({ name, map, style, summary, origin }) {
+export async function postFreestyleRun({
+  name, map, style, weight, summary, origin,
+}) {
   const board = trimOrigin(origin || boardOrigin());
   const res = await fetch(`${board}/api/runs`, {
     method: 'POST',
@@ -758,6 +760,9 @@ export async function postFreestyleRun({ name, map, style, summary, origin }) {
       name,
       map,
       style,
+      /* The Weight slider the run was flown at, a label on the row like
+       * the style. See postTime. */
+      weight,
       score: summary.total,
       durationMs: summary.durationMs,
       tricks: summary.tricks,
@@ -788,7 +793,7 @@ export async function fetchFreestyleRuns(map, origin = boardOrigin()) {
 }
 
 export async function postTime({
-  trackId, name, lapMs, threeMs, ghost, origin,
+  trackId, name, lapMs, threeMs, ghost, weight, origin,
 }) {
   const board = trimOrigin(origin || boardOrigin());
   /*
@@ -806,6 +811,17 @@ export async function postTime({
   }
   if (ghost) {
     body.ghost = ghost;
+  }
+  /*
+   * The Weight slider the lap was flown at, always sent. The board keeps it
+   * on the row and prints it beside the pilot when it is not 100, and ranks
+   * every lap on the clock as before (normaliseWeight in the board's
+   * src/validate.js). A board that has not learned the key would store a
+   * lap flown off 100 as stock, which is why DEPLOY.md has the board go
+   * first.
+   */
+  if (Number.isInteger(weight)) {
+    body.weight = weight;
   }
   const res = await fetch(`${board}/api/tracks/${encodeURIComponent(trackId)}/times`, {
     method: 'POST',
@@ -832,6 +848,9 @@ export async function fetchTrackTimes(trackId, origin = boardOrigin()) {
     /* The three lap total, which is the ranked time on a RaceGOW room.
      * Null on a field and on a room post from before the board scored it. */
     threeMs: Number.isFinite(Number(t.threeMs)) ? Number(t.threeMs) : null,
+    /* The Weight slider it was flown at, 100 on a row from a board older
+     * than the column, which only ever took 100. */
+    weight: Number.isInteger(t.weight) ? t.weight : 100,
     hasGhost: Boolean(t.hasGhost),
   })).filter((t) => t.lapMs != null);
 }

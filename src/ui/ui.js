@@ -497,6 +497,13 @@ export const FLIGHT_STYLES = ['expert', 'arcade'];
  * whoop, and the slider's top is per airframe: the module refuses a gravity
  * above 2.5, so the whoop stops at 120, 2.43. WEIGHT_MAX is the widest any
  * airframe offers and configs/airframes.js weightMax is each one's own.
+ *
+ * THE BOARD HOLDS THIS BAND TOO. A time and a freestyle run carry the weight
+ * they were flown at, and the board refuses one off 60 to 140 in steps of 5
+ * (normaliseWeight in WebFPVSimulator-LeaderBoard's src/validate.js, which
+ * mirrors these four as NAME_RE mirrors pilot.js). Widen the band or change
+ * the step here and it changes there first, or a lap at the new end is
+ * refused by the board with a sentence about a weight.
  */
 export const WEIGHT_MIN = 60;
 export const WEIGHT_MAX = 140;
@@ -2171,7 +2178,10 @@ function recordSentence(s, trackName) {
       : s.flightStyle === 'arcade'
         ? ' Arcade times stay off the public board, so this run will not count there.'
         : weight !== WEIGHT_STOCK
-          ? ' Times flown at a weight that is not 100 percent stay off the public board, so this run will not count there.'
+          /* It used to say a time off 100 stays off the public board. The
+           * board takes it now and prints the weight beside the name, the
+           * owner's ask of 2026-09-27, so the sentence says that instead. */
+          ? ` This run is on ${link}, and a time from it goes on the public board marked Weight ${weight}%.`
           : ` This run is on ${link}.`);
 }
 
@@ -2588,12 +2598,16 @@ function builderReturnItem(s, sharedMap) {
  *
  * `disabled` is honoured by select(), and renderMenu paints it as row-grey.
  */
-function uploadAction(listing, { fastestMs, timePosted, practice = false }) {
+function uploadAction(listing, { row = null, timePosted, practice = false }) {
   const pending = readPendingTime();
   const shareId = listing && listing.shareId;
-  const ms = Number.isFinite(fastestMs)
-    ? fastestMs
-    : (shareId && pending && pending.trackId === shareId ? pending.lapMs : null);
+  /* The lap this row would send, the run's own or the one kept from an
+   * earlier visit, and the weight it was flown at, which goes with it. */
+  const held = row && Number.isFinite(row.lapMs)
+    ? row
+    : (shareId && pending && pending.trackId === shareId ? pending : null);
+  const ms = held ? held.lapMs : null;
+  const weight = held && held.weight != null ? clampWeight(held.weight, null) : WEIGHT_STOCK;
   if (timePosted && shareId) {
     const rank = timePosted.rank != null ? ` Rank ${timePosted.rank}.` : '';
     return {
@@ -2634,12 +2648,17 @@ function uploadAction(listing, { fastestMs, timePosted, practice = false }) {
   }
   const best = readPostedBest(shareId);
   const isNew = best != null && ms < best;
+  /* A lap off 100 goes up like any other, and the board prints its weight
+   * beside the name, so the row says so before it is pressed. */
+  const marked = weight !== WEIGHT_STOCK
+    ? ` It goes up marked Weight ${weight}%, the weight it was flown at.`
+    : '';
   return {
     label: isNew ? `Upload new best, ${formatTime(ms)}` : `Upload ${formatTime(ms)}`,
     action: 'posttime',
-    note: isNew
+    note: (isNew
       ? 'Faster than the last time you uploaded from this browser. Sends this lap to the public board.'
-      : 'Send this lap to the public board under your name.',
+      : 'Send this lap to the public board under your name.') + marked,
   };
 }
 
@@ -2816,6 +2835,17 @@ function courseCardKey(card) {
  * underneath the strip are untouched and still belong to the seat, because
  * publishing and uploading a time are things you do to the course you are
  * flying, not to a card you are pointing at.
+ *
+ * FLY IT IS THE SCREEN'S PRIMARY, and that is what puts it within reach of
+ * a mouse. This list is under every card on the board, thirty of them on a
+ * five inch, so from a card near the top it was a scroll away, and the
+ * scroll the choose used to make stopped with Fly it under the command bar.
+ * The owner, 2026-09-27: "at the moment i click on it, then the page
+ * scrolls a bit then i have to scroll down to fly the track". A primary row
+ * is also the filled button on the command bar (see primaryItem), which
+ * sits in the same pixels however far the page is scrolled, so choosing a
+ * card puts Fly it on screen without moving anything. A double click on the
+ * card is the same press: see flyCard.
  */
 function courseCardRows(subject) {
   const board = subject.course.kind === 'board';
@@ -2828,9 +2858,10 @@ function courseCardRows(subject) {
     {
       label: 'Fly it',
       action: 'card-fly',
+      primary: true,
       note: board
-        ? `Load ${name} from the board and fly it here.`
-        : `Fly ${name}.`,
+        ? `Load ${name} from the board and go straight to the starting blocks. A double click on its card does the same.`
+        : `Fly ${name}, straight from the starting blocks. A double click on its card does the same.`,
     },
     {
       label: 'Open in the track builder',
@@ -2855,6 +2886,12 @@ function courseCardRows(subject) {
   rows.push({ label: 'Back to the list', action: 'card-back' });
   return rows;
 }
+
+/* What pressing a course card does, said once for all three kinds of card so
+ * they cannot drift apart again. Each used to end "Choosing it loads the
+ * track and flies it here", which stopped being true on 2026-08-19, when
+ * choosing a card started listing what it can do. */
+const CARD_PRESS_NOTE = 'Choose it to see what you can do with it, or double click it to fly it.';
 
 /*
  * The tune, as named choices.
@@ -3051,7 +3088,7 @@ function weightItem(s) {
   const set = (v) => { s.weight = clampWeight(v, s.airframe); };
   const it = number(
     'Weight',
-    `How heavy the quad feels. Right is heavier: it drops when you chop the throttle and stops hanging at the top of a jump. Left is lighter, and it floats. ${WEIGHT_STOCK} is the quad as it ships; changing it mid lap voids the lap, and a lap flown off ${WEIGHT_STOCK} stays off the public board.`,
+    `How heavy the quad feels. Right is heavier: it drops when you chop the throttle and stops hanging at the top of a jump. Left is lighter, and it floats. ${WEIGHT_STOCK} is the quad as it ships; changing it mid lap voids the lap, and a lap flown off ${WEIGHT_STOCK} goes on the public board with its weight beside your name.`,
     spec,
     cur,
     set,
@@ -3713,8 +3750,17 @@ export class Ui {
      * second is where Back to the list puts the cursor. */
     this.cardSubject = null;
     this.lastCardKey = null;
+    /* The card the first press of a click chose, by courseCardKey, which is
+     * what a double click flies (cardDoubleClick); and the card whose track
+     * is being fetched to fly, which is the one that says Loading. */
+    this.cardPress = null;
+    this.flyingCard = null;
     this.onAction = null;    /* (action, settings) => void */
     this.onSettings = null;  /* (settings) => void */
+    /* () => void. Fly what was just seated from the starting blocks, now if
+     * its world is on screen and after the load if one is building. main.js
+     * owns the world, so only it can tell which. See flyCard. */
+    this.onFlySeated = null;
     this.onMusicSkip = null; /* (dir) => void, -1 previous, +1 next */
     /* (screen) => void, fired by show(). The shell hangs the music
      * context off this: the flight crate plays on a flight, the menu bed
@@ -3821,6 +3867,12 @@ export class Ui {
     this.freestyleRun = null;
     this.runPosted = null;
     this.resultsFastest = null;
+    /* What the results screen offers the board: { lapMs, threeMs, weight }
+     * from the race's boardRow, the lap it would post and the weight it was
+     * flown at, or null. resultsFastest stays the run's fastest lap, which
+     * is what this screen reports; the two differ only on a room run that
+     * changed weight between laps. */
+    this.resultsBoard = null;
     this.resultsDocId = null;
     this.coursePublished = null;
     this.padPrev = { up: false, down: false, left: false, right: false, select: false, back: false };
@@ -4341,11 +4393,25 @@ export class Ui {
     this.coursesMenu = coursesBlock.menu;
     this.coursesMenu.classList.add('menu-scroll');
     this.coursesHelp = coursesBlock.help;
+    /* Kept, because choosing a card from the keys brings the whole of this
+     * into view rather than one row of it. See revealCardList. */
+    this.coursesStage = coursesBlock.stage;
     courses.append(
       this.courseStrip,
       coursesBlock.stage,
       hintWithKeys(['↑↓', 'Enter', 'Esc'], 'Arrow keys move, Enter chooses. Escape goes back. On a radio: pitch to move, roll right to choose.'),
     );
+    /* A double click on a track flies it: see cardDoubleClick. The
+     * capturing half forgets the last card press on every first press, so
+     * a press on anything else in the room cannot leave one behind for a
+     * later double click to find: a card's own handler, which runs after
+     * this, writes it back when the press was on a card. */
+    courses.addEventListener('click', (e) => {
+      if (e.detail <= 1) {
+        this.cardPress = null;
+      }
+    }, true);
+    courses.addEventListener('dblclick', (e) => this.cardDoubleClick(e));
     this.screens.courses = courses;
 
     /* Freestyle. Same card machinery as Race, different contents, and no
@@ -6033,7 +6099,7 @@ export class Ui {
       airHint.hidden = !show;
       if (show) {
         const f = WEIGHT_FEEL[af] ?? WEIGHT_FEEL['5inch'];
-        airHint.textContent = `The Weight slider between the sticks on the flight screen is this exact complaint: it scales the weight the quad carries, so it drops when you chop the throttle instead of hanging. Yours is at ${weight} percent. From a hover with the throttle cut, the stock quad falls 10 metres in ${f.fall[0]} s and balloons ${f.balloon[0]} m after a short punch; at ${top} percent that is ${f.fall[1]} s and ${f.balloon[1]} m. Hover moves up the stick with it, ${f.hover[0]} percent at stock to ${f.hover[1]} at ${top}. Worth dragging before you wait on us, and a lap flown on it stays off the public board.`;
+        airHint.textContent = `The Weight slider between the sticks on the flight screen is this exact complaint: it scales the weight the quad carries, so it drops when you chop the throttle instead of hanging. Yours is at ${weight} percent. From a hover with the throttle cut, the stock quad falls 10 metres in ${f.fall[0]} s and balloons ${f.balloon[0]} m after a short punch; at ${top} percent that is ${f.fall[1]} s and ${f.balloon[1]} m. Hover moves up the stick with it, ${f.hover[0]} percent at stock to ${f.hover[1]} at ${top}. Worth dragging before you wait on us, and a lap flown on it goes on the public board with its weight beside your name.`;
       }
     };
     const refreshCapHint = () => {
@@ -6586,7 +6652,7 @@ export class Ui {
         const chip = courseChip(listing);
         cards.push({
           label: seat.name,
-          note: `${chip.note} ${seat.gates} gate${seat.gates === 1 ? '' : 's'}.`,
+          note: `${chip.note} ${seat.gates} gate${seat.gates === 1 ? '' : 's'}. ${CARD_PRESS_NOTE}`,
           course: { kind: 'current', seat },
           action: 'map:custom',
         });
@@ -6632,7 +6698,7 @@ export class Ui {
         }
         cards.push({
           label: t.name,
-          note: `Yours, saved in this browser. ${t.gates} gate${t.gates === 1 ? '' : 's'}. Choosing it loads the track and flies it here.`,
+          note: `Yours, saved in this browser. ${t.gates} gate${t.gates === 1 ? '' : 's'}. ${CARD_PRESS_NOTE}`,
           course: { kind: 'local', track: t },
           action: `local:${t.id}`,
         });
@@ -6641,10 +6707,10 @@ export class Ui {
         cards.push({
           label: t.name,
           note: t.designer
-            ? `Designed by ${t.designer}${t.series ? ` for ${t.series}` : ''}${t.author ? `, published by ${t.author}` : ''}. Choosing it loads the track and flies it here.`
+            ? `Designed by ${t.designer}${t.series ? ` for ${t.series}` : ''}${t.author ? `, published by ${t.author}` : ''}. ${CARD_PRESS_NOTE}`
             : (t.author
-              ? `Published by ${t.author}. Choosing it loads the track and flies it here.`
-              : 'A published track. Choosing it loads the track and flies it here.'),
+              ? `Published by ${t.author}. ${CARD_PRESS_NOTE}`
+              : `A published track. ${CARD_PRESS_NOTE}`),
           course: { kind: 'board', track: t },
           action: `board:${t.id}`,
         });
@@ -7489,14 +7555,20 @@ export class Ui {
                * why it is off is the same answer given before it is needed.
                */
               disabled: built || nothing || Boolean(run && run.assisted)
-                || (run && run.timed === false),
+                || (run && run.timed === false) || Boolean(run && run.weightMixed),
               note: built ? (this.sharedMap ? BOARD_MAP_OFF_BOARD : BUILT_OFF_BOARD) : (nothing
                 ? 'A run with no tricks in it is not a score. Fly one and it appears here.'
                 : (run && run.timed === false
                   ? 'Free flight has no clock, so there is nothing for a board to compare it against. Switch Run to Scored on the Freestyle screen and fly it again.'
                   : (run && run.assisted
                     ? 'This run used the harness hooks, so it is not a flown score and the board will not take it.'
-                    : `${formatScore(run.total)} from ${run.tricks} tricks. One entry per pilot on the board, and only your best.`))),
+                    /* The weight goes up with the run and the board prints
+                     * it; a run whose tricks landed at two weights has no
+                     * one weight to print, so it is the one weight refusal
+                     * left. See submitFreestyleRun in main.js. */
+                    : (run.weightMixed
+                      ? 'The weight changed during this run, so it has no one weight for the board to show. Fly it again at one weight.'
+                      : `${formatScore(run.total)} from ${run.tricks} tricks${Number.isInteger(run.weight) && run.weight !== WEIGHT_STOCK ? `, marked Weight ${run.weight}%` : ''}. One entry per pilot on the board, and only your best.`)))),
             },
           /*
            * THE SHARE CARD, the run's manga page beside its score. A row of
@@ -7539,7 +7611,7 @@ export class Ui {
       return [
         { label: 'Fly again', action: 'restart', primary: true },
         uploadAction(listing, {
-          fastestMs: this.resultsFastest,
+          row: this.resultsBoard,
           timePosted: this.timePosted,
         }),
         publishAction(listing, this.coursePublished),
@@ -9592,7 +9664,14 @@ export class Ui {
           ? it.course.track.plan
           : currentPlan();
         const canvas = planCanvas(plan, `Plan of ${it.label}`);
-        shot.append(canvas);
+        /* Said on the picture while the board hands this track over to be
+         * flown: see flyCard. Laid over it rather than put beside the name,
+         * where a word rewraps the name and the card grows, and every card
+         * under it moves the moment after a double click asked for a page
+         * that holds still. */
+        const wait = el('div', 'course-card-wait', 'Loading');
+        wait.hidden = true;
+        shot.append(canvas, wait);
         const body = el('div', 'map-card-body');
         const name = el('div', 'map-card-name', it.label);
         const meta = el('div', 'map-card-meta', '');
@@ -9628,12 +9707,24 @@ export class Ui {
         body.append(name, tag);
         card.append(shot, body, meta);
         card.addEventListener('mousemove', (e) => this.hoverCursor(e, i));
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+          const key = courseCardKey(it);
+          /* The second press of a double click on this card belongs to the
+           * double click, which flies it: see cardDoubleClick. Choosing it
+           * again here would be a second answer to one gesture. */
+          if (e.detail > 1 && key === this.cardPress) {
+            return;
+          }
+          /* A quick press on a DIFFERENT card is a new choice and not the
+           * end of a double click, whatever the browser counts: Android
+           * counts two taps as far as 100 dp apart as one double tap, and
+           * two cards are 16 px apart. So only a first press begins one. */
+          this.cardPress = e.detail > 1 ? null : key;
           this.cursor = i;
-          this.select();
+          this.select(true);
         });
         host.append(card);
-        return { card, canvas, tag, kind: it.course.kind, key: courseCardKey(it) };
+        return { card, canvas, tag, wait, kind: it.course.kind, key: courseCardKey(it) };
       });
       this.paintCoursePlans();
     }
@@ -9643,6 +9734,13 @@ export class Ui {
       /* The list below belongs to one card. Say which, or the screen is back
        * to looking like a strip of cards over an unrelated menu. */
       c.card.classList.toggle('chosen', Boolean(this.cardSubject) && c.key === this.cardSubject);
+      /* Loading on the card the pilot pressed while the board hands its
+       * document over, because the room's own note for it is under every
+       * other card and a double click is made with the eyes on this one. */
+      const loading = Boolean(this.openingBoardCourse) && c.key === this.flyingCard;
+      if (c.wait.hidden === loading) {
+        c.wait.hidden = !loading;
+      }
       c.tag.textContent = c.kind === 'current' && this.settings.map === 'custom' ? 'Flying now' : '';
     });
   }
@@ -10147,6 +10245,12 @@ export class Ui {
       }
       line.append(el('span', 'standings-rank', String(i + 1)));
       const who = el('span', 'standings-pilot', row.name || 'Unnamed pilot');
+      /* A time flown off 100 says so, as the board's own table does. The
+       * board ranks every weight on the clock, so the label is the only
+       * thing that tells two rows apart. */
+      if (Number.isInteger(row.weight) && row.weight !== WEIGHT_STOCK) {
+        who.append(' ', el('span', 'standings-weight', `Weight ${row.weight}%`));
+      }
       if (row.hasGhost) {
         /* A ghost is the difference between reading a time and racing it,
          * so the rows that carry one say so. */
@@ -10738,6 +10842,11 @@ export class Ui {
       this.courseCardKey = null;
       this.cardSubject = null;
       this.lastCardKey = null;
+      this.cardPress = null;
+      this.flyingCard = null;
+      if (this.coursesStage) {
+        this.coursesStage.style.minHeight = '';
+      }
     }
     /*
      * THE SAME FOR THE FREESTYLE ROOM, where the world cards moved to and
@@ -10944,6 +11053,118 @@ export class Ui {
   }
 
   /*
+   * BRING A CHOSEN CARD'S LIST INTO VIEW, all of it and clear of both bars,
+   * after a choose made from the keys or a radio.
+   *
+   * The cursor's own scroll brings one row to the nearest edge, and on this
+   * page the nearest edge is the foot of the window, where the command bar
+   * is drawn over it: Fly it came to rest behind the bar. The stage is the
+   * heading, the rows and the help beside them. `nearest` on the whole of it
+   * puts its foot at the bottom when it fits and its head at the top when it
+   * does not, and the scroll-padding on .screen-courses in index.html is
+   * what keeps either edge out from under a bar.
+   */
+  revealCardList() {
+    const stage = this.coursesStage;
+    if (stage && typeof stage.scrollIntoView === 'function') {
+      stage.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  /*
+   * A DOUBLE CLICK ON A TRACK FLIES IT. The owner, 2026-09-27: "i should be
+   * able to double click on a track to start racing it".
+   *
+   * Only when both presses were on the same card: the one the first press
+   * chose, which that card's click handler wrote down, and the one under
+   * the second. The two can only differ when something moved between them
+   * or when they were two quick presses on two cards, and flying either
+   * card then would be answering a question nobody asked. What used to move
+   * them apart is gone: choosing a card no longer scrolls, and the list
+   * under the strip no longer shrinks under a still pointer (see the course
+   * branch of select). A double click that did not begin on a card finds
+   * nothing written down and does nothing: see the capturing listener where
+   * the screen is built.
+   */
+  cardDoubleClick(e) {
+    const key = this.cardPress;
+    this.cardPress = null;
+    const under = e.target instanceof Element ? e.target.closest('.course-card') : null;
+    const hit = under && (this.courseCards || []).find((c) => c.card === under);
+    if (this.screen === 'courses' && key && hit && hit.key === key) {
+      this.flyCard(key);
+    }
+  }
+
+  /*
+   * FLY A TRACK FROM ITS CARD: seat it, then the starting blocks.
+   *
+   * Three presses end here and they are one press: a double click on the
+   * card, the command bar's Fly it while the card is chosen, and the Fly it
+   * row under the strip. The row used to seat the track and go back to the
+   * title, which is Fly it doing half of what it says: the pilot landed on
+   * the menu, pressed Fly, got the launch card and pressed Go. The owner has
+   * asked for the other half twice from the builder, on 2026-09-25 and
+   * 2026-09-26 ("straight to the starting blocks not the initial menu"), and
+   * the builder's Fly this track has gone to the grid since. A track chosen
+   * in here is the same decision made one page later.
+   *
+   * THE GRID WAITS FOR THE WORLD. Seating a track that is not the one loaded
+   * starts a swap, and flying before the new world is on screen would put
+   * the pilot on the old track under the new one's name. So the last step is
+   * main.js's, which knows whether a world is building: see onFlySeated
+   * there.
+   *
+   * A board track keeps its card chosen while the board hands the document
+   * over, and says Loading on it. A load that fails leaves the card as it
+   * was and brings the room's note, which says why, into view. The press
+   * that asked for it is over by then, so moving the page cannot send a
+   * press to the wrong card.
+   */
+  flyCard(key) {
+    if (this.screen !== 'courses') {
+      return;
+    }
+    const card = this.items().find((it) => it.course && courseCardKey(it) === key);
+    if (!card) {
+      return;
+    }
+    const go = () => {
+      if (this.onFlySeated) {
+        this.onFlySeated();
+      }
+    };
+    const failed = () => {
+      this.flyingCard = null;
+      if (this.screen === 'courses') {
+        this.renderCourseCards();
+        this.boardNote.scrollIntoView({ block: 'nearest' });
+      }
+    };
+    if (card.course.kind === 'board') {
+      /* One track at a time: openBoardCourse refuses a second while the
+       * first is fetching, and a card that said Loading for a fetch that
+       * was never made would be a small lie. */
+      if (this.openingBoardCourse) {
+        return;
+      }
+      this.flyingCard = key;
+      this.openBoardCourse(card.course.track.id, go, failed);
+      this.renderCourseCards();
+      return;
+    }
+    if (card.course.kind === 'local' && !this.seatLocal(card.course.track.id)) {
+      failed();
+      return;
+    }
+    if (!hasLoadedTrack()) {
+      return;
+    }
+    this.act('map:custom');
+    go();
+  }
+
+  /*
    * OPEN A COURSE IN THE BUILDER WITHOUT FLYING IT, which is the whole point
    * of this list and the thing the screen could not do before.
    *
@@ -11016,7 +11237,9 @@ export class Ui {
    * that is the builder's Load dialog, which never stopped offering them.
    */
 
-  openBoardCourse(id, then = null) {
+  /* `failed` hears about a load that did not happen, once the note says why:
+   * a card that was showing Loading has to stop. */
+  openBoardCourse(id, then = null, failed = null) {
     const track = (this.boardCourses || []).find((t) => t.id === id)
       || (this.standingsFor && this.standingsFor.id === id ? this.standingsFor : null);
     if (!track || this.openingBoardCourse) {
@@ -11027,12 +11250,18 @@ export class Ui {
     if (!this.onBoardCourse) {
       this.openingBoardCourse = false;
       this.boardNote.textContent = `${track.name} could not be loaded from the board.`;
+      if (failed) {
+        failed();
+      }
       return;
     }
     this.onBoardCourse(track).then((ok) => {
       this.openingBoardCourse = false;
       if (!ok) {
         this.boardNote.textContent = `${track.name} could not be loaded from the board.`;
+        if (failed) {
+          failed();
+        }
         return;
       }
       this.boardNote.textContent = '';
@@ -11043,6 +11272,9 @@ export class Ui {
     }).catch((err) => {
       this.openingBoardCourse = false;
       this.boardNote.textContent = `${track.name} could not be loaded. ${err.message ?? err}`;
+      if (failed) {
+        failed();
+      }
     });
   }
 
@@ -11632,6 +11864,12 @@ export class Ui {
     this.timePosted = null;
     this.coursePublished = null;
     this.resultsFastest = fastest;
+    /* The row the board would be sent, from the race (boardRow). The one
+     * caller always hands it; one that did not would get the fastest lap
+     * and the three with no weight, which every reader takes as stock. */
+    this.resultsBoard = fastest == null
+      ? null
+      : (opts.board || { lapMs: fastest, threeMs: Number.isFinite(opts.threeMs) ? opts.threeMs : null, weight: null });
     /* Which course this lap was flown on. The time and the document have to
      * travel together: publishing a DIFFERENT course while these results are
      * still on screen used to hand the new course this lap. */
@@ -11643,11 +11881,14 @@ export class Ui {
         if (listing && listing.canPostTime && listing.shareId) {
           writePendingTime({
             trackId: listing.shareId,
-            lapMs: fastest,
+            lapMs: this.resultsBoard.lapMs,
             /* Carried with the lap, because the upload can happen on a later
              * visit and by then the race is gone. Null on the field, which
              * is scored on one lap and always will be. */
-            threeMs: opts.trackClass === 'micro' ? opts.threeMs : null,
+            threeMs: opts.trackClass === 'micro' ? this.resultsBoard.threeMs : null,
+            /* And the weight it was flown at, for the same reason: the
+             * slider may be somewhere else by the time it goes up. */
+            weight: this.resultsBoard.weight,
           });
         }
       } catch (e) {
@@ -12996,16 +13237,17 @@ export class Ui {
     /*
      * SLATE AT STOCK, AMBER OFF IT. Slate is the colour this shell uses for
      * type that should recede, and at 100 there is nothing to say: the pilot
-     * is on the machine every record and every board time was set on. Off
-     * stock the number is an instrument reading, which is what amber means
-     * everywhere else on this overlay.
+     * is on the machine the board prints no weight for. Off stock the number
+     * is an instrument reading, which is what amber means everywhere else on
+     * this overlay, and it is the colour the board's weight label is in.
      *
      * IT USED TO SAY ", off the board" AND THE PILOT HAD IT REMOVED: "this
      * means nothing". They are right about where it belongs. A pilot mid
-     * flight is feeling the quad, not filing a time, and the board rule is
-     * already said twice in the places somebody is actually deciding about a
+     * flight is feeling the quad, not filing a time, and what the board does
+     * with a weight, which is now to take the time and print the weight
+     * beside the name, is said where somebody is actually deciding about a
      * record: the sentence under the Fly button, read immediately before a
-     * run, and the refusal on the upload itself. A third copy riding the
+     * run, and the note on the Upload row. A third copy riding the
      * instrument all flight is noise, and noise on an overlay is how a pilot
      * learns to stop reading it.
      */
@@ -13732,6 +13974,13 @@ export class Ui {
       }
     }
     out.push({ keys: [pad ? 'A' : 'Enter'], text: 'Choose' });
+    /* The Race room's shortcut, and the one entry on this bar a mouse makes
+     * rather than a key: a double click on a track flies it (flyCard). Not
+     * in the radio's voice, which has no pointer to double click with, nor
+     * the phone's, where a double tap is the browser's to interpret. */
+    if (this.screen === 'courses' && !pad) {
+      out.push({ keys: ['Double click'], text: 'Fly' });
+    }
     if (this.screen !== 'title') {
       out.push({ keys: [pad ? 'B' : 'Esc'], text: 'Back' });
     } else if (!this.onGate()) {
@@ -13908,7 +14157,9 @@ export class Ui {
     }
   }
 
-  select() {
+  /* `pointer` says a mouse or a finger pressed it, which only the course
+   * cards distinguish: see the course branch below. */
+  select(pointer = false) {
     const it = this.items()[this.cursor];
     if (!it) {
       return;
@@ -14026,10 +14277,45 @@ export class Ui {
       if (this.onUiSound) {
         this.onUiSound('select');
       }
+      /*
+       * THE LIST UNDER THE STRIP MAY GROW, NEVER SHRINK, while this room is
+       * open. Choosing swaps the seat's rows for this card's, usually fewer,
+       * and on a page scrolled to its foot the browser takes a shorter page
+       * off the scroll: measured, choosing the last of thirty cards moved
+       * every card 93 px down under a pointer that had not moved. So the
+       * stage holds the height it had. The room's rows are aligned to its
+       * top (.menu-stage, align-items: start), so what it holds is empty
+       * page below the panel, and show() lets it go when the room is left.
+       */
+      if (this.coursesStage) {
+        this.coursesStage.style.minHeight = `${this.coursesStage.offsetHeight}px`;
+      }
       this.renderMenu();
       this.renderCourseCards();
-      /* Land on Fly it, so the quick path stays Enter then Enter. */
-      this.setCursor(this.firstStop(this.items(), this.rowOffset));
+      /*
+       * Land on Fly it, so the quick path stays Enter then Enter.
+       *
+       * AND THE PAGE ONLY MOVES FOR THE KEYS. The cursor's own scroll used
+       * to run for a click too: it brought Fly it to the nearest edge,
+       * which is the bottom of the window, which is under the command bar.
+       * Measured at 1440 by 900 on the board's thirty tracks for the five
+       * inch: one click scrolled the page 822 px, Fly it came to rest at 856
+       * to 900 behind a bar at 848 to 900, and the card the pilot had
+       * pressed was gone off the top with another one under the pointer.
+       * So a second press, which is what a double click is, landed on a
+       * different track.
+       *
+       * A pointer choose now moves nothing. The card stays under the hand,
+       * Fly it arrives on the command bar (see courseCardRows), and the
+       * list below is where it always was for whoever wants the builder
+       * or the standings. A key or a radio has no bar to reach for, and
+       * the cursor it is steering has just gone to a row it cannot see, so
+       * there the whole list comes into view, clear of both bars.
+       */
+      this.setCursor(this.firstStop(this.items(), this.rowOffset), pointer);
+      if (!pointer) {
+        this.revealCardList();
+      }
       return;
     }
     if (this.onUiSound) {
@@ -14445,9 +14731,10 @@ export class Ui {
         this.renderMenu();
         return;
       }
+      /* The row, the command bar's button and a double click on the card
+       * are one press, and flyCard is it. */
       if (action === 'card-fly') {
-        this.cardSubject = null;
-        this.act(card.action);
+        this.flyCard(this.cardSubject);
         return;
       }
       if (action === 'card-board') {

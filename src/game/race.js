@@ -261,6 +261,16 @@ export class Race {
      */
     this.micro = trackClass === 'micro';
     /*
+     * THE WEIGHT THE LAPS ARE FLOWN AT, the shell's Weight slider, stamped on
+     * every clean lap in the log so the board is told the weight of the lap
+     * it is sent (boardRow below). The shell keeps it equal to the weight
+     * the module is flying (setWeight, from applySettings in main.js, which
+     * also voids a lap the change lands in), so a lap in the log was flown
+     * at its stamp from its first gate to its last. Null until the shell
+     * says, and the shell says before anything can be flown.
+     */
+    this.weight = null;
+    /*
      * THROUGH THE ROOM'S FACTOR, BECAUSE BOTH MICRO FIGURES ARE DERIVED FROM
      * RACEGOW'S REAL PIPE AND THE PIPE IS NOT BUILT AT THAT SIZE.
      *
@@ -402,6 +412,11 @@ export class Race {
     } catch (e) {
       return null;
     }
+  }
+
+  /* The Weight slider the next lap is flown at. See this.weight. */
+  setWeight(weight) {
+    this.weight = weight;
   }
 
   /* Best laps are only comparable on the same config and pack voltage;
@@ -676,7 +691,7 @@ export class Race {
         this.lastSplits = this.splits;
         this.lap += 1;
         this.laps.push(this.lastLapMs);
-        this.log.push({ n: this.lapNumber(), ms: this.lastLapMs });
+        this.log.push({ n: this.lapNumber(), ms: this.lastLapMs, weight: this.weight });
         let msgText = `Lap ${this.log.length}   ${fmt(this.lastLapMs)}`;
         /* Kept for the shell's spoken call (src/render/voice.js), so the
          * voice reads the flash's decision rather than making its own. */
@@ -773,6 +788,63 @@ export class Race {
 
   bestThreeMs() {
     return fastestThreeConsecutive(this.log);
+  }
+
+  /*
+   * WHAT THIS RUN PUTS ON THE PUBLIC BOARD: { lapMs, threeMs, weight }, or
+   * null when it flew no clean lap.
+   *
+   * A board row carries ONE weight, and a run need not have flown one. The
+   * Weight slider applies at once and voids the lap it lands in, so each
+   * clean lap was flown at one weight, and three clean laps in a row at the
+   * same one, because between two consecutive laps a lap is always running.
+   * But the laps either side of a change were flown on two different quads,
+   * and a run's fastest lap and its fastest three need not be on the same
+   * side. So the row is taken from one weight. A room's is its fastest three
+   * with the fastest lap flown at THEIR weight beside it, since three laps
+   * are what a room is ranked on. A field's is its fastest lap, with that
+   * lap's own weight. A room run with no three in a row puts its fastest
+   * lap up alone, which the board stores and does not rank, as it always
+   * has. A window of three whose stamps disagree is not counted, so the
+   * rule above breaking somewhere would cost a row rather than label one
+   * wrongly.
+   */
+  boardRow() {
+    const clean = this.log.filter((e) => e.ms != null);
+    if (!clean.length) {
+      return null;
+    }
+    if (this.micro) {
+      let best = null;
+      let run = [];
+      for (const e of this.log) {
+        if (e.ms == null) {
+          run = [];
+          continue;
+        }
+        run.push(e);
+        if (run.length > 3) {
+          run.shift();
+        }
+        if (run.length === 3 && run[0].weight === run[2].weight && run[1].weight === run[2].weight) {
+          const total = run[0].ms + run[1].ms + run[2].ms;
+          if (best == null || total < best.threeMs) {
+            best = { threeMs: total, weight: run[2].weight };
+          }
+        }
+      }
+      if (best) {
+        const lapMs = fastestLap(clean.filter((e) => e.weight === best.weight).map((e) => e.ms));
+        return { lapMs, threeMs: best.threeMs, weight: best.weight };
+      }
+    }
+    let pick = clean[0];
+    for (const e of clean) {
+      if (e.ms < pick.ms) {
+        pick = e;
+      }
+    }
+    return { lapMs: pick.ms, threeMs: null, weight: pick.weight };
   }
 
   /* Scene index of the gate the race wants next, for highlighting. */
