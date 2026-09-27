@@ -56259,3 +56259,325 @@ moved 322 to 215 px on one click, and the double click never left the room.
     shots.js                      not run: the pictures above are the rig's
     npm run verify                not run: nothing in the physics, the
                                   plant, the ABI or the build
+
+## 2026-09-27 | shell, render, input | Input lag: the low latency canvas was never asked for, Auto graphics measures, and the OSD leaves the layout path
+
+### Why
+
+Two tickets on the same day. bug-2090e494, Wing: "almost unplayable (using
+my Radiomaster controller)", an Intel UHD laptop on Windows. bug-e82b8bb8,
+the owner on a low spec laptop: "nearly impossible to fly with input lag on
+this computer at low settings", an Iris Xe laptop on Linux, whose report
+said 60 fps from the pause screen and could not see the flight. The owner
+asked for a design (a fix that holds lag down on any machine, the OSD's text
+styling, anything else, and the browser detecting and setting itself), then,
+the same evening: "yes start on step 1, test it, then do step 2 and step 3.
+Self verify." Nothing here touches the physics model, the module ABI or the
+build.
+
+### Measured first
+
+All in headless Chromium in this container, which draws with SwiftShader, so
+its frame rates are not a laptop's; the numbers below are the ones that do not
+depend on the GPU, or are compared with each other inside one run.
+
+- The page's own work is small. Flying Flags and cones on the five inch at Low
+  with drawing off: the frame callback took 1.7 ms median while stepping 65 to
+  150 physics steps a frame (the container runs at 12 to 15 frames a second),
+  and about 7 ms with the CPU throttled four times. At 60 fps a frame is 17
+  steps. Physics is not the lag, and a worker would not help.
+- Low draws 24 calls and 386k triangles a frame (High: 115 and 935k).
+- The low latency canvas was never requested. main.js has asked buildShell
+  for `desynchronized: true` since at least 2026-09-14 (91c77eb; this clone is
+  shallow), and getContextAttributes() said false: three.js r160 builds its
+  context from a fixed attribute list with alpha always true and no
+  desynchronized in it, so the option was dropped on every platform. Made by
+  the shell itself, this Linux Chromium grants it: desynchronized true, alpha
+  false.
+- A forced layout every frame. updateTargetLock read the canvas's
+  clientWidth and clientHeight after the OSD had written its numbers: two
+  layout passes per frame in the trace where one would do, the one the read
+  forced mid frame and the browser's own before painting.
+- The throttle bar was a width with a 120 ms width transition, so a layout
+  every frame the throttle moved and the bar drawn a tenth of a second late.
+  The keyboard gimbals moved by left and top every frame, unguarded, and the
+  bounce count wrote textContent and className raw every frame.
+- The OSD's ink edge, with the world canvas hidden so the compositor is not
+  the noise: 0.4 to 0.7 ms of raster a frame against about 0.1 ms with no
+  styling. Taking the blur out, four diagonal offsets, or a stroke did not
+  reliably beat it; two runs of each varied more than the variants differed.
+  So the ink edge stays (it is what keeps the small print readable over a lit
+  world) and the numbers change less often instead.
+- WebGL fences: with trivial work, seen signalled about 6 ms after the draw
+  when a timer polls them, and still unsignalled at the next frame about one
+  frame in sixteen (seven percent unpolled, six polled). A guard that believed
+  one reading would drop frames for nothing, so it does not.
+
+### What changed
+
+Step 1, the cheap wins:
+- src/render/shell.js makes the flight view's WebGL2 context itself when
+  asked for low latency or an opaque canvas, and hands it to three.js; the
+  orbit page asks for neither and keeps three's own context, as before.
+  `shell.granted` records what the browser actually gave, and `shell.cssSize`
+  the canvas's CSS size as of the last resize.
+- updateTargetLock reads shell.cssSize: zero layout reads per frame (was two).
+- The OSD's continuous numbers at OSD rate: speed, height and pack at about
+  15 Hz, the clock at about 30 Hz, with every change of state written the
+  frame it happens. Bars are a scaleX from the left edge, composited, and the
+  throttle's has no transition. Gimbal dots ride a plate sized track moved by
+  translate(), guarded. The bounce count goes through Ui.text and Ui.klass.
+  contain: layout style on the OSD's top block and corners. setOsd allocates
+  no closure (P8): the clock's write is a method and a flag.
+- The bug report carries `perf`: the flying frames' own record
+  (src/render/flightperf.js: frames, fps, frame ms p50, p95 and max, frames
+  over 25 and 50 ms, the page's own ms), what the browser granted, the pixel
+  ratio, Auto's state, the GPU's time over a frame, draws held, key to screen,
+  the refresh rate, fullscreen and cores. One top level key; a feel report is
+  still well under the board's 32. input.js keeps the previous source's flight
+  record under `before` instead of dropping it when the source changes: the
+  owner's ticket was filed on the keyboard after the radio flew.
+- Settings, Screen: Low latency view, on by default, from the next load, with
+  a note that says whether this browser granted it.
+
+Step 2, the main fix:
+- src/render/gpugate.js times each frame from the end of its draw to the GPU
+  finishing it, with a ring of four fences polled on the sticks' own timer
+  (input.startPolling takes a second callback for it, so there is one timer,
+  not two) and at each frame. It holds a draw back only when the GPU's
+  average is over 85 percent of a 60 Hz frame AND the last frame is still on
+  it, and never twice running: at most one frame in flight when the GPU is
+  saturated, nothing at all otherwise. It follows Low latency view.
+- src/render/autoscale.js is Auto graphics' resolution: a factor on the Render
+  scale path (renderScaleOf and a shared applyRenderScale in main.js, so every
+  map follows it and each pipeline still clamps to its own floor). Down a
+  tenth after half a second late (frames under about 54 fps, not CPU bound, or
+  the GPU over 90 percent of a frame), up a twentieth after three seconds of
+  headroom, a climb blocked for ten seconds after any drop, a cooldown after
+  each change, all in milliseconds so a slow machine is not also slow to be
+  helped. The floor is the slider's 55 percent on Low and Medium, and on High
+  the rubric's 1,200,000 internal pixels (prompts/bando-perf-loop.md, F4).
+  Three seconds late at the floor moves the preset down, as often as that
+  keeps happening; most of a minute with the GPU under 45 percent at full
+  scale moves it up, once a session and never in a session that came down.
+  Preset moves happen on the title only, between runs, because a preset
+  rebuilds the world. Auto reads the flight and the title's attract flight,
+  and never a frame with the world frozen, which costs nothing and would read
+  as headroom.
+- The Graphics row has Auto first. Auto is graphicsAuto, the flag the row has
+  always cleared when a preset is picked; picking a preset still fixes it by
+  hand, and then nothing here touches it.
+
+Step 3, the extras:
+- Fullscreen in flight, on by default: Fly, Restart and Resume ask for it
+  from the press, and the title gives the window back. Escape is the
+  browser's own way out of fullscreen, and leaving fullscreen in flight
+  pauses with the two calls Escape makes, so the key still pauses; Resume
+  goes back to fullscreen. A radio's button cannot ask: browsers grant
+  fullscreen only to a key press, a click or a touch, and a refusal costs
+  nothing.
+- src/render/latency.js reads the browser's Event Timing for key presses and
+  clicks: the time from the press to the frame that first showed it, and the
+  refresh rate from the frame intervals. Settings shows it as Input to screen
+  with the facts beside it, and the report carries it. It is the browser's
+  reading, not photon latency, and the note says so.
+
+### Not done, and why
+
+- Sampling the sticks at the frame callback's own time instead of the
+  frame's timestamp. It would take a few milliseconds at best off a sample
+  that lands in that gap, and it would trade the vsync aligned sim clock the
+  interpolation relies on for judder. Declined.
+- The chevron's box still sizes by width and height: a scale would thicken
+  its corner brackets. It was already guarded; the forced layout was the cost.
+- The OSD's outline itself is unchanged, for the reason above.
+
+### What went wrong on the way
+
+- The first gpugate kept one fence and deleted it at the next draw, so on a
+  saturated GPU, where the last fence is usually still pending, only the
+  quick frames were ever timed and saturation could not be seen. A ring of
+  four now, each timed when it lands.
+- The F5 rule carried over from pace.js (a frame long with a cheap render is
+  CPU bound, and fewer pixels will not help) misfired on the frames the guard
+  held back, whose render time is zero, and stopped the scale dropping on
+  exactly the saturated GPU the guard had found. The render and shell
+  averages now learn only from frames that drew.
+- The controller's cooldown was counted in frames: at ten frames a second a
+  step took fifteen seconds. Milliseconds now. Under SwiftShader, whose drawn
+  frames take a few hundred milliseconds, a step still takes about five
+  seconds, because the frame loop caps dt at 100 ms and the controller runs
+  on that clock. A machine drawing faster than ten frames a second is not
+  capped.
+- Auto first read frames with the world frozen, which cost nothing, as
+  headroom. It reads live frames only.
+- A preset move on the results screen would rebuild the world onto the title
+  (syncWorld's STAY_SCREENS has no results) and take the lap away from the
+  pilot. The title only.
+- lint:input read the gimbal dot's left and top and failed once the dot
+  moved by translate. It reads the translate now, which is the same per cent
+  of the plate, with the same thresholds.
+- The Keyboard Lock API, to keep Escape as the pause key in fullscreen, went
+  in and came out. In headless Chromium, navigator.keyboard.lock(['Escape'])
+  in fullscreen never settled and every key after it was swallowed: lint:input
+  lost the M key, the W hold and Stays put. A convenience is not worth a
+  platform where that happens for real.
+- A Settings note claimed Chrome grants the low latency canvas on Windows and
+  ChromeOS only; this Linux Chromium granted it. The claim is gone.
+- Two headless browsers from earlier runs (openPage's profiles; whether a
+  probe stopped by a timeout or a check's own close left them is not known,
+  see the end of the RUN LOG) ran on from about 14:48 UTC until found at
+  16:40, three of the container's four cores between them. Timings in that
+  window were taken on a starved machine; the comparisons above were each
+  made inside one run, and the lint:input comparison below was run after
+  they were killed. One comparison run was lost to my own cleanup deleting
+  its browser's profile as it started, and was run again.
+- src/fresh.js was first regenerated while the four new modules were
+  untracked, and its served list is built from tracked files, so it left
+  them out and lint:preload still said up to date (225 served). Seen after
+  committing, when it said STALE; regenerated into the same commit, 229
+  served, before anything was pushed.
+- Reading my own diff before handing it over: the fence poll had its own
+  2 ms timer beside the sticks' (a second wakeup at the same rate on the
+  machines this is for; it rides the sticks' timer now), the Input to screen
+  note quoted thresholds nobody had measured (it says what a frame is now),
+  two notes promised a frame off where they can only say it can, and two
+  comments sat over the wrong code.
+
+### The baseline, and the argument
+
+tests/shell-baseline.json: Settings overflow 835 to 968 px, three rows (Low
+latency view, Fullscreen in flight, Input to screen) and the Graphics row's
+Auto note, edited by hand, the same argument as the Impact frame, Clean FPV,
+Stick mode, Check sticks and Keyboard throttle rows: the file is today's
+overflow and not a target, the rows are deliberate, and lint:devices reaches
+every row and note on all five devices. Not --record, which would also
+rewrite the fc and tricks rows lint:shell reports as improved, which are not
+this change's.
+
+### For the owner, when flying
+
+1. On the Iris Xe laptop, Settings, Screen: Low latency view should say "On,
+   and this browser is using it". Input to screen fills in after a few key
+   presses in the menus. Then fly Flags and cones on the radio. Wrong would be
+   the lag unchanged, or tearing, flicker or a black picture (for any of
+   those, Low latency view off, reload, and say which).
+2. Graphics on Auto. If the laptop cannot keep the picture on time, it
+   softens within a second or two of flying; back on the title after a run,
+   Auto may drop the preset, and says so.
+3. Fullscreen: Enter or a click on the launch card should go fullscreen, and
+   Escape should leave fullscreen and pause. Resume by a key or a click goes
+   back to fullscreen. Started from the radio, the window stays a window.
+4. On Windows (Wing's platform) the low latency canvas has never been
+   requested before today. The Freestyle room films the loaded world by
+   copying this canvas; if its card stays blank there, say so.
+5. A report sent from here now carries perf, so the next lag ticket says
+   which part it is.
+
+### RUN LOG
+
+First on this change alone (903f95b's tree, on 20801d8), on a quiet
+machine (the two orphaned browsers above stopped), one check at a time,
+16:48 to 17:16 UTC; then all of it again on the merge with main (below).
+Scratch probes are the scratchpad's, not the repository's.
+
+    node --check, the ten files touched      ok
+    npm run input:selftest       all 225 passed
+    npm run replay:test          9 tests: 9 pass, 0 fail
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         56 of 56 checks clean
+    npm run lint:preload         said up to date, 225 served, with the
+                                 new modules untracked, which was wrong
+                                 (see src/fresh.js above); 229 served once
+                                 they were committed. On main (20801d8) it
+                                 says src/fresh.js is STALE: d6ef340 added
+                                 src/art/partnermark.js without
+                                 regenerating, and this restores it.
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:nouns           FAIL, 1 player-visible "course", the
+                                 same on main (20801d8): the Drift course
+                                 in src/maps/built/showpiece.js, not this
+                                 change's
+    npm run lint:boot            9 of 9 checks clean
+    npm run lint:shell           PASS, with the baseline above
+    npm run lint:devices         PASS
+    npm run lint:responsive      PASS
+    npm run lint:memory          PASS
+    npm run lint:attract         no world flies the title camera through
+                                 anything solid
+    npm run lint:input           all 160 passed twice on this tree (172 s
+                                 and 180 s), alternating with main
+                                 (20801d8), all 160 passed twice (184 s
+                                 and 192 s). Before the orphans were
+                                 found, this tree failed "let go in the
+                                 air" three runs of three and main passed
+                                 it once, at 334 s a run: the whoop room
+                                 drew under two frames a second, and
+                                 whether a frame landed in the hold
+                                 decided it.
+    film probe                   the Freestyle room's film of the
+                                 desynchronized canvas: 6 frames, mean
+                                 483, sd 142, every sampled pixel lit;
+                                 with Low latency view off, 7 frames,
+                                 mean 553, sd 141
+    Auto probe, flying           the boot guess put SwiftShader on Low;
+                                 Auto took the scale from 1 to 0.8 in
+                                 5 s and to the 0.55 floor by 10 s, and
+                                 set demote by 15 s. The gate timed 29
+                                 fences in the first 5 s on the sticks'
+                                 timer and held about every other draw,
+                                 never two running.
+    Auto probe, title            from Medium: 0.9, 0.8, 0.7, 0.6, 0.55 in
+                                 25 s, the preset to Low on the title at
+                                 35 s and stored, then Low's scale to its
+                                 floor; the report's perf says down true
+    fullscreen probe             Go went fullscreen, Escape paused, Resume
+                                 flew, leaving fullscreen in flight
+                                 paused; Input to screen read About 24 ms
+                                 (p90 40, 12 presses, 60 Hz); no page
+                                 errors. Headless keys never reach the
+                                 browser's own Escape, so leaving
+                                 fullscreen by Escape was not seen here.
+    npm run build:wasm           emcc not found, exit 1: not installed in
+                                 this container
+    git diff --stat vendor/betaflight  empty (not checked out here)
+    npm run verify               17 of 17 passing, 1 SKIP (check 1: no
+                                 emcc and no vendor/betaflight here);
+                                 de0401cd4266 in both processes, Node and
+                                 Chrome, one hash across 4 rates; hover
+                                 0.2793, punch 80.0 m, terminal 31.0 m/s,
+                                 motor step 26 ms, 671.7 deg/s, yaw
+                                 -0.10, sag 11.14%, ratio 1.2472; console
+                                 clean; world golden 35 of 35; crash
+                                 pacing 48 of 48. Every value as on
+                                 6928650. Run because this touches
+                                 src/input/input.js and the frame loop,
+                                 and the owner asked for it to be
+                                 verified.
+
+Main moved to e63026b while this was checked (the Tracks cards, the R32
+and E82 coupes, the weight change). Merged as fd0bba1 with no conflicts;
+main.js, ui.js and index.html merged on their own, each function this
+change adds is defined once, and a double clicked Tracks card flies
+through ui.act('fly'), so it asks for fullscreen like Fly. Every check
+above run again on fd0bba1, 17:17 to 17:32 UTC:
+
+    input:selftest 225 passed; replay:test 9 of 9; lint:frame 34 passed;
+    lint:quality 56 of 56; lint:preload up to date, 229 served;
+    check:fresh 18 passed; lint:nouns the same one FAIL as main;
+    lint:boot 9 of 9; lint:shell PASS, the baseline unchanged by main's
+    Weight note; lint:devices, lint:responsive and lint:memory PASS;
+    lint:attract clean; lint:input all 160 passed (168 s); film probe 6
+    frames, mean 493, sd 138, every sampled pixel lit; fullscreen probe
+    as above, About 24 ms (p90 32); Auto title probe from Medium to its
+    floor by 30 s, the preset to Low at 35 s and stored, Low to its floor
+    by 50 s; npm run verify 17 of 17 passing and check 1 skipped as
+    above, every value as above.
+
+Between checks, in both rounds, seven headless browsers that replay:test
+(two), lint:devices (two) and lint:responsive (three) left running after
+they had passed were stopped. tests/lib/page.js's close() sends one SIGTERM and
+does not wait for the browser to go, and never removes the /tmp/sim-page-*
+profile it made (about 130 had piled up here, some near 90 MB). Not changed
+here, because it is under tests/ and is its own change: wait for the exit,
+SIGKILL after a few seconds, signal the process group, remove the profile.
