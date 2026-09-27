@@ -55562,3 +55562,28 @@ login, no counters and no painted wall in the maps.
     npm run gen:partners        made assets/credits/betaflight-mono.svg
     npm run lint:partners       45 passed, 0 failed
     npm run verify              not run: an image and a script, no physics
+
+## 2026-09-27 | partners | Betaflight's permission, and "Powered by" it stays
+
+### The owner's answer
+
+The owner passed on Betaflight's reply and said to "call it powered by".
+Betaflight gave permission to use the name and logo in the game because
+WebFPV is free, said they have nothing to do with the project and will not
+publicise it, and noted they hold trade marks in the name and logo in the
+major markets. NOTICE now records that, in substance, and that Betaflight is
+never to be called a partner, sponsor or supporter or shown as endorsing
+WebFPV. The pages already said "Powered by" and nothing else, so no page
+changed.
+
+Put to the owner in the same reply, and not acted on: the permission was
+for use "in the game", and the mark also stands beside the partners on the
+front door's first screen and the board's masthead, which promote the
+project. Whether that is inside what Betaflight agreed to is the owner's
+call, and the logo can be moved into the simulator only if they say so.
+
+### RUN LOG
+
+    documentation only: NOTICE and this entry
+    dash scan of the added lines   none
+    npm run verify                 not run: no code changed
