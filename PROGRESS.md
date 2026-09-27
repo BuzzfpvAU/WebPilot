@@ -56000,3 +56000,10 @@ which makes the E82's corners squarer than the real car's. If the rounder
 corners are wanted, the parked r32 and e82 solids would need cut corners in
 carLayout, which changes the world golden's "one of everything" world (it
 parks one of each style) and so needs the owner's yes first. Not done.
+
+### The owner's answer, 2026-09-27
+
+Verification scale: none, after the before and after pictures and the two
+in-game shots. The owner asked for this work to be pushed to `main`. The
+question above about the parked solids' corners was not answered and stays
+open.
