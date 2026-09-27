@@ -3982,12 +3982,21 @@
       .screen-courses {
         justify-content: flex-start;
         padding-top: 4vh;
-        padding-bottom: 3vh;
+        /* Clear of the command bar, which .screen's own padding promised
+           every screen and this rule took back: scrolled to its foot, the
+           page left a chosen card's last row under the bar. */
+        padding-bottom: calc(3vh + var(--bar-bot));
         overflow-y: auto;
         overscroll-behavior: contain;
         pointer-events: auto;
         scrollbar-width: thin;
         scrollbar-color: rgba(232, 168, 184, 0.45) rgba(16, 22, 17, 0.55);
+        /* The frame is drawn OVER this page, not beside it, so the edge a
+           scroll into view stops at is the bar and not the window. Without
+           this the cursor's scroll put a chosen card's Fly it at 856 to 900
+           of a 900 px window, behind a command bar at 848 to 900. See
+           revealCardList in src/ui/ui.js. */
+        scroll-padding: var(--bar-top) 0 var(--bar-bot);
       }
       .screen-courses > * { flex: 0 0 auto; }
       .card-strip { width: 100%; margin-bottom: 6px; }
@@ -4006,6 +4015,18 @@
         position: absolute; inset: 0;
         display: block; width: 100%; height: 100%;
       }
+      /* A track being fetched to fly, said on its picture: see flyCard in
+         src/ui/ui.js. Over the drawing and in a corner of it, so the card
+         keeps its size. The mint of the chosen card it is on. */
+      .course-card-wait {
+        position: absolute; left: 10px; bottom: 8px; z-index: 1;
+        padding: 3px 8px 4px; border-radius: 3px;
+        background: rgba(12, 18, 14, 0.86);
+        box-shadow: inset 0 0 0 1px rgba(125, 255, 180, 0.45);
+        color: var(--mint); font-size: 11px; font-weight: 700;
+        letter-spacing: 0.1em; text-transform: uppercase;
+      }
+      .course-card-wait[hidden] { display: none; }
       /* A map from the board wears its share card, which carries the WebFPV
          wordmark over its top left for when the link is posted somewhere
          else. In here the page is already WebFPV, so the picture is taken

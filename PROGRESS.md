@@ -55724,3 +55724,132 @@ says so.
     documentation only here: NOTICE and this entry
     board: npm test all passed; the roll looked at at 1440 and 430
     npm run verify              not run: no code changed here
+
+## 2026-09-27 | shell | Tracks: a card is chosen where it is, and a double click flies it
+
+The owner: "when i select a 5 inch race track in tracks i should be able to
+double click on a track to start racing it, at the moment i click on it,
+then the page scrolls a bit the i have to scroll down to fly the track.
+Understand the poor ux here and fix it". Shell only; the plant, the ABI and
+the build are untouched.
+
+### What it was, measured
+
+Driven in headless Chromium at 1440 by 900 against a copy of the live
+board's list, which has thirty tracks for the five inch, so six rows of
+cards over the list a chosen card owns:
+
+- One click on the second card scrolled the page 822 px. Choosing a card
+  moves the cursor to its Fly it row, and the cursor's scrollIntoView takes
+  a row to the nearest edge, which is the foot of the window, which is where
+  the command bar is drawn over the page: Fly it at 856 to 900, the bar at
+  848 to 900. The rest of the card's list was below the window.
+- The pressed card was gone off the top and "Vertical Speed Arrest" was
+  under the pointer, so a second press chose a different track.
+- Fly it, once found, seated the track and went back to the title, where it
+  took Fly, then the launch card's Go: two more presses to the grid.
+- At the foot of the page, choosing a card swaps the seat's eight rows for
+  the card's five, and the browser takes the shorter page off the scroll:
+  every card moved 93 px down under a pointer that had not moved.
+
+### What changed
+
+- Choosing a card with the pointer moves nothing (select's `pointer`). The
+  card stays under the hand.
+- The chosen card's Fly it row is `primary`, so the command bar shows it as
+  the screen's filled mint button, in the same pixels however far the page
+  is scrolled. Nothing new is drawn for it: it is the bar every screen
+  already has, and the "one filled mint thing" rule holds.
+- A double click on a card flies it (cardDoubleClick), only when both
+  presses were on the same card. A quick press on a different card is a new
+  choice: Android counts two taps up to 100 dp apart as one double tap, and
+  two cards are 16 px apart. The legend says "Double click Fly" in the
+  keyboard voice only.
+- The row, the bar and the double click are one press, flyCard, and it goes
+  to the starting blocks, as the builder's Fly this track has since
+  2026-09-26. The last step is main.js's new ui.onFlySeated: it flies now
+  when the world already holds the seat, and otherwise parks the map in
+  ui.flyOnLoad for flyIfLinked, the builder link's own door, with the course
+  key beside it, because every race track is `custom` and a failed load
+  puts the previous track back. flyToGrid is the link's two presses,
+  shared.
+- The list under the strip may grow and never shrink while the room is
+  open: the stage keeps its height, released when the room is left.
+- From the keys or a radio, choosing brings the whole list into view
+  (revealCardList). .screen-courses has scroll-padding for the two bars, and
+  its bottom padding clears the command bar again: the rule had taken back
+  what .screen's padding promised every screen.
+- A board track being fetched to fly says Loading on its picture, not beside
+  its name, where the word rewrapped the name and grew the card. A load that
+  fails brings the room's note, which says why, into view.
+- The cards' notes said "Choosing it loads the track and flies it here",
+  false since 2026-08-19. They share one sentence now.
+
+### Coverage
+
+lint:board gains a section, pressed through the browser's own input rather
+than ui.select(): Enter on a card puts Fly it clear of both bars with the
+bar offering Fly it; two quick presses on two cards choose the second and
+fetch nothing; one click at the foot of the page leaves the scroll where it
+was and the card under the pointer, with Fly it on the bar; the second press
+of a double click reaches the grid on that track. Run against HEAD without
+this change, the section fails four ways: nothing on the bar twice, the page
+moved 322 to 215 px on one click, and the double click never left the room.
+
+### What went wrong
+
+- The first version flew the card the FIRST press chose, whatever was under
+  the second, to survive the 93 px shift. On a phone that flies the wrong
+  track after a quick correction tap. The shift is gone at its source now
+  (the stage keeps its height), so the rule is the same card or nothing.
+- Loading was first put in the name's tag slot: the name rewrapped and the
+  card grew 19 px, moving every card under it just after a double click.
+  Moved onto the picture.
+- lint:board failed once on its own setup: it sets the mode and not the
+  aircraft half of the gate, so the title after the load was still the gate
+  and flyIfLinked rightly refused. The new section answers the gate with the
+  race card, the way the Freestyle section already does.
+- lint:shell failed "launch: overflow grew from 0 to 11 px" twice, on this
+  branch and on HEAD, because a scratch board stub was listening on
+  127.0.0.1:3100, the simulator's board on localhost, and the launch card
+  grows a row when a board answers. With the stub stopped it passes.
+
+### Open, for the owner
+
+- Standings' Fly this track promises the launch card and ends on the title:
+  driven, the screens were title, title, launch, title. It acts on the seat
+  before the load that seat starts has finished. ui.onFlySeated is the door
+  to fix it with, but it goes to the grid and those rows promise the card,
+  so whether they should go to the grid too is yours to say. Race the
+  record has the same shape and was not driven. Not changed here.
+- A double tap on a real phone was not tried; the phone's path is the bar's
+  Fly it, which was driven with emulated touch at 430 by 932.
+- lint:nouns fails on src/maps/built/showpiece.js:149 "Drift course", and
+  lint:preload reports src/fresh.js stale. Both are identical on HEAD
+  without this change and neither is touched here.
+
+### RUN LOG
+
+    node --check                  ui.js, main.js, board-check.js: ok
+    npm run lint:board            PASS: Enter, two cards, one click at the
+                                  foot (374 to 374 px), double click flying
+                                  Copper Gully
+    lint:board section on HEAD    FAIL 4, as above
+    npm run lint:shell            PASS, nothing on 3100
+    npm run lint:input            all 160 passed
+    npm run lint:nouns            FAIL 1, the same on HEAD
+    npm run lint:preload          STALE src/fresh.js, the same on HEAD
+    scratch rigs, headless Chromium, a stub board serving the live list:
+      1440x900 one click          page 0 to 0 px, same card, bar "Fly it"
+      1440x900 double click       the grid on the track pressed
+      seated track's own card     the grid at once, no load
+      foot of the page            1196 to 1196 px, then the grid on it
+      Enter, then Enter           list 472 to 848 against a bar at 848,
+                                  then the grid
+      430x932 touch, bar          tap chose in place (700 to 700 px), the
+                                  bar's Fly it flew it
+      board 1.5 s slow            Loading on the picture, then the grid
+      board 404                   Loading gone, note in view, still here
+    shots.js                      not run: the pictures above are the rig's
+    npm run verify                not run: nothing in the physics, the
+                                  plant, the ABI or the build

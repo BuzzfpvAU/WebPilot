@@ -8738,6 +8738,9 @@ export async function boot({ loading, bootStart, mapId }) {
       flyIfLinked();
     }
   }
+  /* The course a track card asked flyIfLinked for, beside the map in
+   * ui.flyOnLoad, or null for a link, which names only the map. */
+  let flyOnLoadCourse = null;
   /*
    * THE BUILDER'S FLY THIS MAP AND FLY THIS TRACK, carried the last step
    * into the air.
@@ -8755,8 +8758,15 @@ export async function boot({ loading, bootStart, mapId }) {
    */
   function flyIfLinked() {
     const wanted = ui.flyOnLoad;
+    const course = flyOnLoadCourse;
     ui.flyOnLoad = null;
+    flyOnLoadCourse = null;
     if (!wanted || view.id !== wanted || ui.settings.map !== wanted || ui.screen !== 'title' || ui.onGate()) {
+      return;
+    }
+    /* A track card names the course as well as the map, because every race
+     * track is `custom`: see onFlySeated below. */
+    if (course != null && loadedCourseKey(view) !== course) {
       return;
     }
     setTimeout(() => {
@@ -8764,15 +8774,48 @@ export async function boot({ loading, bootStart, mapId }) {
         return;
       }
       wakeAudio();
-      ui.act('fly');
-      /* A race seat stops on the launch card, which only restates what is
-       * already seated. The link asked for the grid, so it presses Go the
-       * way the card's own button does. */
-      if (ui.screen === 'launch') {
-        ui.act('launch-go');
-      }
+      flyToGrid();
     }, 0);
   }
+  /* Fly's own path, then past the launch card. A race seat stops on the
+   * card, which only restates what is already seated, and every caller here
+   * asked for the grid, so it presses Go the way the card's own button does. */
+  function flyToGrid() {
+    ui.act('fly');
+    if (ui.screen === 'launch') {
+      ui.act('launch-go');
+    }
+  }
+  /*
+   * FLY WHAT WAS JUST SEATED, from a track card in the Race room: a double
+   * click on it, the command bar's Fly it, or the Fly it row. The owner,
+   * 2026-09-27: "i should be able to double click on a track to start
+   * racing it". See flyCard in ui.js, which has already seated the track.
+   *
+   * Whether that seat changed the world is only known here. A track that is
+   * already the loaded world, which the card for the seated track is, flies
+   * now. Any other has just started the swap that builds it, and flying
+   * before that is on screen would fly the old world under the new name, so
+   * it parks the map where the builder's link parks it, in ui.flyOnLoad,
+   * and flyIfLinked takes it after the new world's first frame, off the
+   * title that the swap lands on.
+   *
+   * WITH THE COURSE BESIDE THE MAP, because a race track and the track
+   * before it are both `custom`. A load that fails puts the previous track
+   * back, and flying that would be the second surprise flyIfLinked exists to
+   * avoid. The key is the one the seat will build, and loadedCourseKey reads
+   * the one the world actually did.
+   */
+  ui.onFlySeated = () => {
+    const id = mapById(ui.settings.map).id;
+    if (mapReady && !swapInFlight && worldMatchesSettings()) {
+      wakeAudio();
+      flyToGrid();
+      return;
+    }
+    ui.flyOnLoad = id;
+    flyOnLoadCourse = wantedCourseKey(id);
+  };
   let worstBlockMs = 0;
   let worstShellMs = 0;
   let worstAudioMs = 0;

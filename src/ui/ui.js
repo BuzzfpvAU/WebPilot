@@ -2781,6 +2781,17 @@ function courseCardKey(card) {
  * underneath the strip are untouched and still belong to the seat, because
  * publishing and uploading a time are things you do to the course you are
  * flying, not to a card you are pointing at.
+ *
+ * FLY IT IS THE SCREEN'S PRIMARY, and that is what puts it within reach of
+ * a mouse. This list is under every card on the board, thirty of them on a
+ * five inch, so from a card near the top it was a scroll away, and the
+ * scroll the choose used to make stopped with Fly it under the command bar.
+ * The owner, 2026-09-27: "at the moment i click on it, then the page
+ * scrolls a bit then i have to scroll down to fly the track". A primary row
+ * is also the filled button on the command bar (see primaryItem), which
+ * sits in the same pixels however far the page is scrolled, so choosing a
+ * card puts Fly it on screen without moving anything. A double click on the
+ * card is the same press: see flyCard.
  */
 function courseCardRows(subject) {
   const board = subject.course.kind === 'board';
@@ -2793,9 +2804,10 @@ function courseCardRows(subject) {
     {
       label: 'Fly it',
       action: 'card-fly',
+      primary: true,
       note: board
-        ? `Load ${name} from the board and fly it here.`
-        : `Fly ${name}.`,
+        ? `Load ${name} from the board and go straight to the starting blocks. A double click on its card does the same.`
+        : `Fly ${name}, straight from the starting blocks. A double click on its card does the same.`,
     },
     {
       label: 'Open in the track builder',
@@ -2820,6 +2832,12 @@ function courseCardRows(subject) {
   rows.push({ label: 'Back to the list', action: 'card-back' });
   return rows;
 }
+
+/* What pressing a course card does, said once for all three kinds of card so
+ * they cannot drift apart again. Each used to end "Choosing it loads the
+ * track and flies it here", which stopped being true on 2026-08-19, when
+ * choosing a card started listing what it can do. */
+const CARD_PRESS_NOTE = 'Choose it to see what you can do with it, or double click it to fly it.';
 
 /*
  * The tune, as named choices.
@@ -3577,8 +3595,17 @@ export class Ui {
      * second is where Back to the list puts the cursor. */
     this.cardSubject = null;
     this.lastCardKey = null;
+    /* The card the first press of a click chose, by courseCardKey, which is
+     * what a double click flies (cardDoubleClick); and the card whose track
+     * is being fetched to fly, which is the one that says Loading. */
+    this.cardPress = null;
+    this.flyingCard = null;
     this.onAction = null;    /* (action, settings) => void */
     this.onSettings = null;  /* (settings) => void */
+    /* () => void. Fly what was just seated from the starting blocks, now if
+     * its world is on screen and after the load if one is building. main.js
+     * owns the world, so only it can tell which. See flyCard. */
+    this.onFlySeated = null;
     this.onMusicSkip = null; /* (dir) => void, -1 previous, +1 next */
     /* (screen) => void, fired by show(). The shell hangs the music
      * context off this: the flight crate plays on a flight, the menu bed
@@ -4201,11 +4228,25 @@ export class Ui {
     this.coursesMenu = coursesBlock.menu;
     this.coursesMenu.classList.add('menu-scroll');
     this.coursesHelp = coursesBlock.help;
+    /* Kept, because choosing a card from the keys brings the whole of this
+     * into view rather than one row of it. See revealCardList. */
+    this.coursesStage = coursesBlock.stage;
     courses.append(
       this.courseStrip,
       coursesBlock.stage,
       hintWithKeys(['↑↓', 'Enter', 'Esc'], 'Arrow keys move, Enter chooses. Escape goes back. On a radio: pitch to move, roll right to choose.'),
     );
+    /* A double click on a track flies it: see cardDoubleClick. The
+     * capturing half forgets the last card press on every first press, so
+     * a press on anything else in the room cannot leave one behind for a
+     * later double click to find: a card's own handler, which runs after
+     * this, writes it back when the press was on a card. */
+    courses.addEventListener('click', (e) => {
+      if (e.detail <= 1) {
+        this.cardPress = null;
+      }
+    }, true);
+    courses.addEventListener('dblclick', (e) => this.cardDoubleClick(e));
     this.screens.courses = courses;
 
     /* Freestyle. Same card machinery as Race, different contents, and no
@@ -6437,7 +6478,7 @@ export class Ui {
         const chip = courseChip(listing);
         cards.push({
           label: seat.name,
-          note: `${chip.note} ${seat.gates} gate${seat.gates === 1 ? '' : 's'}.`,
+          note: `${chip.note} ${seat.gates} gate${seat.gates === 1 ? '' : 's'}. ${CARD_PRESS_NOTE}`,
           course: { kind: 'current', seat },
           action: 'map:custom',
         });
@@ -6483,7 +6524,7 @@ export class Ui {
         }
         cards.push({
           label: t.name,
-          note: `Yours, saved in this browser. ${t.gates} gate${t.gates === 1 ? '' : 's'}. Choosing it loads the track and flies it here.`,
+          note: `Yours, saved in this browser. ${t.gates} gate${t.gates === 1 ? '' : 's'}. ${CARD_PRESS_NOTE}`,
           course: { kind: 'local', track: t },
           action: `local:${t.id}`,
         });
@@ -6492,10 +6533,10 @@ export class Ui {
         cards.push({
           label: t.name,
           note: t.designer
-            ? `Designed by ${t.designer}${t.series ? ` for ${t.series}` : ''}${t.author ? `, published by ${t.author}` : ''}. Choosing it loads the track and flies it here.`
+            ? `Designed by ${t.designer}${t.series ? ` for ${t.series}` : ''}${t.author ? `, published by ${t.author}` : ''}. ${CARD_PRESS_NOTE}`
             : (t.author
-              ? `Published by ${t.author}. Choosing it loads the track and flies it here.`
-              : 'A published track. Choosing it loads the track and flies it here.'),
+              ? `Published by ${t.author}. ${CARD_PRESS_NOTE}`
+              : `A published track. ${CARD_PRESS_NOTE}`),
           course: { kind: 'board', track: t },
           action: `board:${t.id}`,
         });
@@ -9419,7 +9460,14 @@ export class Ui {
           ? it.course.track.plan
           : currentPlan();
         const canvas = planCanvas(plan, `Plan of ${it.label}`);
-        shot.append(canvas);
+        /* Said on the picture while the board hands this track over to be
+         * flown: see flyCard. Laid over it rather than put beside the name,
+         * where a word rewraps the name and the card grows, and every card
+         * under it moves the moment after a double click asked for a page
+         * that holds still. */
+        const wait = el('div', 'course-card-wait', 'Loading');
+        wait.hidden = true;
+        shot.append(canvas, wait);
         const body = el('div', 'map-card-body');
         const name = el('div', 'map-card-name', it.label);
         const meta = el('div', 'map-card-meta', '');
@@ -9455,12 +9503,24 @@ export class Ui {
         body.append(name, tag);
         card.append(shot, body, meta);
         card.addEventListener('mousemove', (e) => this.hoverCursor(e, i));
-        card.addEventListener('click', () => {
+        card.addEventListener('click', (e) => {
+          const key = courseCardKey(it);
+          /* The second press of a double click on this card belongs to the
+           * double click, which flies it: see cardDoubleClick. Choosing it
+           * again here would be a second answer to one gesture. */
+          if (e.detail > 1 && key === this.cardPress) {
+            return;
+          }
+          /* A quick press on a DIFFERENT card is a new choice and not the
+           * end of a double click, whatever the browser counts: Android
+           * counts two taps as far as 100 dp apart as one double tap, and
+           * two cards are 16 px apart. So only a first press begins one. */
+          this.cardPress = e.detail > 1 ? null : key;
           this.cursor = i;
-          this.select();
+          this.select(true);
         });
         host.append(card);
-        return { card, canvas, tag, kind: it.course.kind, key: courseCardKey(it) };
+        return { card, canvas, tag, wait, kind: it.course.kind, key: courseCardKey(it) };
       });
       this.paintCoursePlans();
     }
@@ -9470,6 +9530,13 @@ export class Ui {
       /* The list below belongs to one card. Say which, or the screen is back
        * to looking like a strip of cards over an unrelated menu. */
       c.card.classList.toggle('chosen', Boolean(this.cardSubject) && c.key === this.cardSubject);
+      /* Loading on the card the pilot pressed while the board hands its
+       * document over, because the room's own note for it is under every
+       * other card and a double click is made with the eyes on this one. */
+      const loading = Boolean(this.openingBoardCourse) && c.key === this.flyingCard;
+      if (c.wait.hidden === loading) {
+        c.wait.hidden = !loading;
+      }
       c.tag.textContent = c.kind === 'current' && this.settings.map === 'custom' ? 'Flying now' : '';
     });
   }
@@ -10565,6 +10632,11 @@ export class Ui {
       this.courseCardKey = null;
       this.cardSubject = null;
       this.lastCardKey = null;
+      this.cardPress = null;
+      this.flyingCard = null;
+      if (this.coursesStage) {
+        this.coursesStage.style.minHeight = '';
+      }
     }
     /*
      * THE SAME FOR THE FREESTYLE ROOM, where the world cards moved to and
@@ -10771,6 +10843,118 @@ export class Ui {
   }
 
   /*
+   * BRING A CHOSEN CARD'S LIST INTO VIEW, all of it and clear of both bars,
+   * after a choose made from the keys or a radio.
+   *
+   * The cursor's own scroll brings one row to the nearest edge, and on this
+   * page the nearest edge is the foot of the window, where the command bar
+   * is drawn over it: Fly it came to rest behind the bar. The stage is the
+   * heading, the rows and the help beside them. `nearest` on the whole of it
+   * puts its foot at the bottom when it fits and its head at the top when it
+   * does not, and the scroll-padding on .screen-courses in index.html is
+   * what keeps either edge out from under a bar.
+   */
+  revealCardList() {
+    const stage = this.coursesStage;
+    if (stage && typeof stage.scrollIntoView === 'function') {
+      stage.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  /*
+   * A DOUBLE CLICK ON A TRACK FLIES IT. The owner, 2026-09-27: "i should be
+   * able to double click on a track to start racing it".
+   *
+   * Only when both presses were on the same card: the one the first press
+   * chose, which that card's click handler wrote down, and the one under
+   * the second. The two can only differ when something moved between them
+   * or when they were two quick presses on two cards, and flying either
+   * card then would be answering a question nobody asked. What used to move
+   * them apart is gone: choosing a card no longer scrolls, and the list
+   * under the strip no longer shrinks under a still pointer (see the course
+   * branch of select). A double click that did not begin on a card finds
+   * nothing written down and does nothing: see the capturing listener where
+   * the screen is built.
+   */
+  cardDoubleClick(e) {
+    const key = this.cardPress;
+    this.cardPress = null;
+    const under = e.target instanceof Element ? e.target.closest('.course-card') : null;
+    const hit = under && (this.courseCards || []).find((c) => c.card === under);
+    if (this.screen === 'courses' && key && hit && hit.key === key) {
+      this.flyCard(key);
+    }
+  }
+
+  /*
+   * FLY A TRACK FROM ITS CARD: seat it, then the starting blocks.
+   *
+   * Three presses end here and they are one press: a double click on the
+   * card, the command bar's Fly it while the card is chosen, and the Fly it
+   * row under the strip. The row used to seat the track and go back to the
+   * title, which is Fly it doing half of what it says: the pilot landed on
+   * the menu, pressed Fly, got the launch card and pressed Go. The owner has
+   * asked for the other half twice from the builder, on 2026-09-25 and
+   * 2026-09-26 ("straight to the starting blocks not the initial menu"), and
+   * the builder's Fly this track has gone to the grid since. A track chosen
+   * in here is the same decision made one page later.
+   *
+   * THE GRID WAITS FOR THE WORLD. Seating a track that is not the one loaded
+   * starts a swap, and flying before the new world is on screen would put
+   * the pilot on the old track under the new one's name. So the last step is
+   * main.js's, which knows whether a world is building: see onFlySeated
+   * there.
+   *
+   * A board track keeps its card chosen while the board hands the document
+   * over, and says Loading on it. A load that fails leaves the card as it
+   * was and brings the room's note, which says why, into view. The press
+   * that asked for it is over by then, so moving the page cannot send a
+   * press to the wrong card.
+   */
+  flyCard(key) {
+    if (this.screen !== 'courses') {
+      return;
+    }
+    const card = this.items().find((it) => it.course && courseCardKey(it) === key);
+    if (!card) {
+      return;
+    }
+    const go = () => {
+      if (this.onFlySeated) {
+        this.onFlySeated();
+      }
+    };
+    const failed = () => {
+      this.flyingCard = null;
+      if (this.screen === 'courses') {
+        this.renderCourseCards();
+        this.boardNote.scrollIntoView({ block: 'nearest' });
+      }
+    };
+    if (card.course.kind === 'board') {
+      /* One track at a time: openBoardCourse refuses a second while the
+       * first is fetching, and a card that said Loading for a fetch that
+       * was never made would be a small lie. */
+      if (this.openingBoardCourse) {
+        return;
+      }
+      this.flyingCard = key;
+      this.openBoardCourse(card.course.track.id, go, failed);
+      this.renderCourseCards();
+      return;
+    }
+    if (card.course.kind === 'local' && !this.seatLocal(card.course.track.id)) {
+      failed();
+      return;
+    }
+    if (!hasLoadedTrack()) {
+      return;
+    }
+    this.act('map:custom');
+    go();
+  }
+
+  /*
    * OPEN A COURSE IN THE BUILDER WITHOUT FLYING IT, which is the whole point
    * of this list and the thing the screen could not do before.
    *
@@ -10843,7 +11027,9 @@ export class Ui {
    * that is the builder's Load dialog, which never stopped offering them.
    */
 
-  openBoardCourse(id, then = null) {
+  /* `failed` hears about a load that did not happen, once the note says why:
+   * a card that was showing Loading has to stop. */
+  openBoardCourse(id, then = null, failed = null) {
     const track = (this.boardCourses || []).find((t) => t.id === id)
       || (this.standingsFor && this.standingsFor.id === id ? this.standingsFor : null);
     if (!track || this.openingBoardCourse) {
@@ -10854,12 +11040,18 @@ export class Ui {
     if (!this.onBoardCourse) {
       this.openingBoardCourse = false;
       this.boardNote.textContent = `${track.name} could not be loaded from the board.`;
+      if (failed) {
+        failed();
+      }
       return;
     }
     this.onBoardCourse(track).then((ok) => {
       this.openingBoardCourse = false;
       if (!ok) {
         this.boardNote.textContent = `${track.name} could not be loaded from the board.`;
+        if (failed) {
+          failed();
+        }
         return;
       }
       this.boardNote.textContent = '';
@@ -10870,6 +11062,9 @@ export class Ui {
     }).catch((err) => {
       this.openingBoardCourse = false;
       this.boardNote.textContent = `${track.name} could not be loaded. ${err.message ?? err}`;
+      if (failed) {
+        failed();
+      }
     });
   }
 
@@ -13491,6 +13686,13 @@ export class Ui {
       }
     }
     out.push({ keys: [pad ? 'A' : 'Enter'], text: 'Choose' });
+    /* The Race room's shortcut, and the one entry on this bar a mouse makes
+     * rather than a key: a double click on a track flies it (flyCard). Not
+     * in the radio's voice, which has no pointer to double click with, nor
+     * the phone's, where a double tap is the browser's to interpret. */
+    if (this.screen === 'courses' && !pad) {
+      out.push({ keys: ['Double click'], text: 'Fly' });
+    }
     if (this.screen !== 'title') {
       out.push({ keys: [pad ? 'B' : 'Esc'], text: 'Back' });
     } else if (!this.onGate()) {
@@ -13667,7 +13869,9 @@ export class Ui {
     }
   }
 
-  select() {
+  /* `pointer` says a mouse or a finger pressed it, which only the course
+   * cards distinguish: see the course branch below. */
+  select(pointer = false) {
     const it = this.items()[this.cursor];
     if (!it) {
       return;
@@ -13785,10 +13989,45 @@ export class Ui {
       if (this.onUiSound) {
         this.onUiSound('select');
       }
+      /*
+       * THE LIST UNDER THE STRIP MAY GROW, NEVER SHRINK, while this room is
+       * open. Choosing swaps the seat's rows for this card's, usually fewer,
+       * and on a page scrolled to its foot the browser takes a shorter page
+       * off the scroll: measured, choosing the last of thirty cards moved
+       * every card 93 px down under a pointer that had not moved. So the
+       * stage holds the height it had. The room's rows are aligned to its
+       * top (.menu-stage, align-items: start), so what it holds is empty
+       * page below the panel, and show() lets it go when the room is left.
+       */
+      if (this.coursesStage) {
+        this.coursesStage.style.minHeight = `${this.coursesStage.offsetHeight}px`;
+      }
       this.renderMenu();
       this.renderCourseCards();
-      /* Land on Fly it, so the quick path stays Enter then Enter. */
-      this.setCursor(this.firstStop(this.items(), this.rowOffset));
+      /*
+       * Land on Fly it, so the quick path stays Enter then Enter.
+       *
+       * AND THE PAGE ONLY MOVES FOR THE KEYS. The cursor's own scroll used
+       * to run for a click too: it brought Fly it to the nearest edge,
+       * which is the bottom of the window, which is under the command bar.
+       * Measured at 1440 by 900 on the board's thirty tracks for the five
+       * inch: one click scrolled the page 822 px, Fly it came to rest at 856
+       * to 900 behind a bar at 848 to 900, and the card the pilot had
+       * pressed was gone off the top with another one under the pointer.
+       * So a second press, which is what a double click is, landed on a
+       * different track.
+       *
+       * A pointer choose now moves nothing. The card stays under the hand,
+       * Fly it arrives on the command bar (see courseCardRows), and the
+       * list below is where it always was for whoever wants the builder
+       * or the standings. A key or a radio has no bar to reach for, and
+       * the cursor it is steering has just gone to a row it cannot see, so
+       * there the whole list comes into view, clear of both bars.
+       */
+      this.setCursor(this.firstStop(this.items(), this.rowOffset), pointer);
+      if (!pointer) {
+        this.revealCardList();
+      }
       return;
     }
     if (this.onUiSound) {
@@ -14204,9 +14443,10 @@ export class Ui {
         this.renderMenu();
         return;
       }
+      /* The row, the command bar's button and a double click on the card
+       * are one press, and flyCard is it. */
       if (action === 'card-fly') {
-        this.cardSubject = null;
-        this.act(card.action);
+        this.flyCard(this.cardSubject);
         return;
       }
       if (action === 'card-board') {
