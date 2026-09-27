@@ -55176,3 +55176,77 @@ called calibrated.
                                      nothing about a standard pad in the page; the
                                      Node checks above are the only ones that see it
     npm run verify                   not run: no physics, plant, ABI or build
+
+## 2026-09-27 | release, board | The gamepad fix to main, and the five controller tickets closed
+
+The owner, 27 September 2026, answering the entry above's two questions
+(close the tickets now or once live, and which verification pass): "merge it
+to main and close the tickets". No verification pass beyond the cheap checks
+was chosen or run, and nobody has flown a standard pad on the live page.
+
+### The merge
+
+`origin/main` had moved by two commits (2a4c65d, 7e700ca: the import map
+before the body). Merged into `claude/admiring-hypatia-ljpela` as 887a34a,
+then `main` fast forwarded to it, 7e700ca..887a34a, no force. One conflict,
+PROGRESS.md, both sides appending: main's entry first, then this branch's,
+checked by script that main's file is an exact prefix of the result and the
+branch's entry its exact tail. Nothing else overlapped: main touched
+index.html, src/fresh.js and the two other pages' import maps, this branch
+src/input, stickmode.js, one Settings note in ui.js and the input selftest.
+
+### Live before closing
+
+Render's static site deployed on the push. Polled
+webfpv.org/sim/src/input/input.js with a cache buster until it carried
+standardGuessMap: live at 04:52:23 UTC, last modified 04:51:55. Then fetched
+input.js, stickmode.js, ui.js and index.html from webfpv.org/sim and compared
+each byte for byte against 887a34a: all four identical.
+
+The modules are served `max-age=14400`, so a returning pilot's browser can
+hold the old input.js for up to four hours. Each resolution says to reload,
+with Ctrl+Shift+R if it still behaves the old way.
+
+### The board
+
+POST /api/bugs/<id> with { status, resolution }, no token, as on 21
+September. Each write re-read through GET /api/bugs/<id> and checked for its
+new status and the exact resolution text.
+
+    bug-aeb29de7  fixed    DualSense Edge, "Mode 2 isn't mode 2"
+    bug-6c81072b  fixed    DualSense, sticks wrong
+    bug-585786cd  fixed    DJI RC 2, throttle on the right stick: Mode 1
+                           in Settings now reaches a standard pad
+    bug-338cd29b  wontfix  TX15 on Android, no yaw. Closed without a code
+                           fix, the way the 21st closed the dead roll pair:
+                           the report shows a fourth axis reading 0, which
+                           looks like yaw not reaching the page. The note
+                           says where to look on the radio, to try a
+                           computer to tell the radio from the phone, and
+                           to report again from the calibration screen.
+    bug-c9423f3e  fixed    Radiomaster Pocket in Firefox, in progress since
+                           the 24th; its resolution text left as written,
+                           its fix live since 7d3f181
+
+The listing caps at 200, and the board holds exactly 200, so the count was
+checked another way: the oldest ticket listed is 17 August, the project's
+first day, and `?status=open` and `?status=in_progress`, filtered by the
+server, agree with the full listing. After the writes: 21 open, 1 in
+progress. The open ones are Flight feel replies, bug-d188ebf4 (stuck in the
+stratosphere) and bug-a51bc0ff (a menu going to the wrong screen), none of
+them a controller fault. When the board passes 200 the listing will stop
+showing the oldest, and `?status=` is the way to ask what is still open.
+
+### RUN LOG
+
+    on the merged tree:
+    node scripts/input-selftest.js   all 224 passed
+    npm run lint:preload             up to date: boot 115, city 74, built 34, 223
+    npm run lint:boot                9 of 9
+    live files vs 887a34a            4 of 4 identical
+    board writes                     5 tickets, all HTTP 200, each re-read
+    npm run lint:input               not rerun on the merged tree: ran green
+                                     (160) on the branch, and main's side
+                                     changes only the pages' import maps,
+                                     which lint:boot covers
+    npm run verify                   not run: no physics, plant, ABI or build
