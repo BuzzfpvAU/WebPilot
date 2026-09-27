@@ -441,20 +441,24 @@ scenario('the same wall at four spawn yaws', async () => {
 /*
  * THE SHELL'S CRASH VERDICT, asked of flights through the module.
  *
- * src/main.js resets a crash on the frame it reads one (CRASH IS A RESET),
+ * src/main.js resets a crash on the step it reads one (CRASH IS A RESET),
  * and for the solid world it asks solidContactCrash in src/game/collide.js,
- * once a frame, of the frame's sim_world_report and the attitude at the
- * frame's end. The report's normal is the world's and the attitude is the
- * plant's, and until 2026-09-25 the two were read as one frame, so a belly
- * flat on a wall scored cos(yaw) where it should score 1. The owner's belly
- * first wall tap, on a map of their own, was reset as a crash. The module
- * was right all along (the scenario above holds it to 1e-6 across headings);
- * the shell's reading of it was not, and nothing flew a tap faster than
- * GRAZE_SPEED_MAX at a heading other than zero.
+ * every step, of that step's sim_world_report and the attitude after it;
+ * until 2026-09-26 it asked once a frame, of the frame's summed report and
+ * the attitude at the frame's end. The report's normal is the world's and
+ * the attitude is the plant's, and until 2026-09-25 the two were read as one
+ * frame, so a belly flat on a wall scored cos(yaw) where it should score 1.
+ * The owner's belly first wall tap, on a map of their own, was reset as a
+ * crash. The module was right all along (the scenario above holds it to
+ * 1e-6 across headings); the shell's reading of it was not, and nothing flew
+ * a tap faster than GRAZE_SPEED_MAX at a heading other than zero.
  *
  * So: a wall tap, base first, at a smack's closing speed, and a steep nose
- * first hit, each flown at the four headings, and judged as the shell judges
- * them for frames of 7, 16 and 33 steps at every phase: 144, 60 and 30 Hz.
+ * first hit, each flown at the four headings, and judged one step at a time,
+ * as the shell judges them, and over frames of 7, 16 and 33 steps at every
+ * phase (144, 60 and 30 Hz), as it judged them until 2026-09-26, so the turn
+ * is held right under both. scripts/crash-pacing.js is the check that the
+ * shell's verdict no longer depends on the frames.
  */
 
 /* What the shell reads once a frame: sim_world_report summed over steps
@@ -544,7 +548,7 @@ reading('a wall tap is judged the same whichever way the map faces', async () =>
     nose: { ms: 9000, world, pose: { p: [-30, 0, 4], q: [1, 0, 0, 0] }, stopAfterTouch: 200,
       sticks: flipPilot(0, 7, 1.6, -75, 0.35) },
   };
-  const LENS = [7, 16, 33];
+  const LENS = [1, 7, 16, 33];
   const out = { tap: [], nose: [] };
   for (let q = 0; q < 4; q += 1) {
     const frame = { o: [12.5, -40.25, 3.5], quarter: q };
@@ -583,13 +587,13 @@ reading('a wall tap is judged the same whichever way the map faces', async () =>
     tap.every((r) => r.belly >= 0.9), tap.map((r) => r3(r.belly)).join(', '));
   check('a belly first tap is never reset, at any heading, frame rate or phase',
     tap.every((r) => r.fixed.every((n) => n === 0)),
-    `phases reset of 7/16/33, by heading ${show(tap, 'fixed')}`);
+    `phases reset of 1/7/16/33, by heading ${show(tap, 'fixed')}`);
   check('the nose first hit reaches the wall steep, at a smack\'s closing speed',
     nose.every((r) => r.t0 >= 0 && r.belly <= -0.8 && r.closing >= GRAZE_SPEED_MAX + 0.5),
     nose.map((r) => `${r3(r.closing)} m/s, belly ${r3(r.belly)}`).join(', '));
   check('a steep nose first hit is reset at every heading, frame rate and phase',
     nose.every((r) => r.fixed.every((n, i) => n === LENS[i])),
-    `phases reset of 7/16/33, by heading ${show(nose, 'fixed')}`);
+    `phases reset of 1/7/16/33, by heading ${show(nose, 'fixed')}`);
   /* And the check can see the fault it was written for: read in one frame,
    * as the shell did until 2026-09-25, the same tap is reset at the three
    * headings that are not zero, and the nose first hit is missed at 180. */
