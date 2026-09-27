@@ -88,7 +88,7 @@
 
 import { formatScore } from '../game/score.js';
 import {
-  INKS, SFX, callSize, letterCanvas, paintCall, paintSfx, sideRoom,
+  INK, INKS, SFX, callSize, letterCanvas, paintCall, paintKana, paintSfx, sideRoom,
 } from './lettering.js';
 
 /* Local, because ui.js keeps its own copy private and this file is meant to
@@ -145,8 +145,7 @@ const COLUMN_LEFT = 22;
  *   a gap of tier 1000 or more   the named gaps an author prices highest
  *                                (100, 250, 500, 1000, 2500): the crane,
  *                                the water tower, not the kerb
- *   a combo banked at x3 or more the tier this overlay already calls Sweet,
- *                                the first one with speed lines
+ *   a combo banked at x3 or more the tier this overlay already calls Sweet
  */
 export const GAP_BALLOON_TIER = 1000;
 export const BANK_BALLOON_MULT = 3;
@@ -177,13 +176,41 @@ export const SKIM_BAR_M = 1;
  * speaking a different language from the place it sits in. Each is the
  * ordinary spoken word a person would actually use, not a translation of
  * the English one.
+ *
+ * DRAWN, NOT TYPESET (polish item 19). They were font glyphs, いいね, すごい,
+ * やばい and 最高, and a machine with no Japanese font drew them as boxes,
+ * though the sound effects were already brush strokes to avoid exactly
+ * that. So they are the same words in katakana, the way a manga letters a
+ * shout, drawn with the sound effects' stroke kana (src/ui/lettering.js):
+ * イイネ, スゴイ, ヤバイ, and サイコー for 最高, which is the spelling a manga
+ * gives it when somebody yells it. That needed five kana added to the set,
+ * イ ネ コ ヤ サ, and ゴ is コ voiced. The kanji was not drawn: ten and ten
+ * strokes at a badge's twelve pixels is a smudge, and a kana word is what
+ * the page would letter there anyway. The words stay in the DOM as text
+ * for a screen reader; the drawing is aria-hidden.
  */
 const TIERS = [
-  { at: 2, en: 'Nice', jp: 'いいね' },
-  { at: 3, en: 'Sweet', jp: 'すごい' },
-  { at: 4, en: 'Wild', jp: 'やばい' },
-  { at: 5, en: 'Perfect', jp: '最高' },
+  { at: 2, en: 'Nice', jp: 'イイネ' },
+  { at: 3, en: 'Sweet', jp: 'スゴイ' },
+  { at: 4, en: 'Wild', jp: 'ヤバイ' },
+  { at: 5, en: 'Perfect', jp: 'サイコー' },
 ];
+
+/* The tier words' kana, painted once each at a generous cell on first use
+ * and kept: the badge sets them at 1.2 em by CSS, so no window size ever
+ * repaints one, and nothing here is drawn per frame. */
+const KANA_CELL = 28;
+const kanaArt = new Map();
+
+function tierKana(jp) {
+  let c = kanaArt.get(jp);
+  if (!c) {
+    c = letterCanvas('score-tier-kana');
+    paintKana(c, jp, KANA_CELL, INK);
+    kanaArt.set(jp, c);
+  }
+  return c;
+}
 
 function tierFor(mult) {
   let hit = null;
@@ -471,11 +498,7 @@ export class ScoreHud {
      * the verdict on: see the header for why not the middle any more. */
     this.verdict = el('div', 'score-verdict score-cut');
 
-    /* Speed lines down both edges, driven entirely by a class on the root.
-     * Behind everything, so it can never sit over a number. */
-    this.lines = el('div', 'score-lines');
-
-    this.root.append(this.lines, this.totalBox, this.names, this.skimBox, this.comboBox, this.verdict);
+    this.root.append(this.totalBox, this.names, this.skimBox, this.comboBox, this.verdict);
     root.append(this.root);
 
     this.shownTotal = -1;
@@ -517,13 +540,12 @@ export class ScoreHud {
     this.root.className = this.rootClass();
   }
 
-  /* The root carries the combo tier, because the speed lines are drawn from
-   * it and they belong to the whole frame rather than to the combo box; the
-   * skim, because the names step up out of the meter's way; and which
-   * lettering is in use. */
+  /* The root carries the skim, because the names step up out of the
+   * meter's way, and which lettering is in use. It carried the combo tier
+   * too, for two strips of CSS speed lines; the speed lines are drawn in
+   * the frame now, by speed, and not by the combo (src/render/manga.js). */
   rootClass() {
-    const t = this.shownMult >= 5 ? 5 : (this.shownMult >= 4 ? 4 : (this.shownMult >= 3 ? 3 : 0));
-    return `score-hud ${this.manga ? 'is-manga' : 'is-clean'}${t ? ` tier-${t}` : ''}`
+    return `score-hud ${this.manga ? 'is-manga' : 'is-clean'}`
       + `${this.shownSkim ? ' is-skim' : ''}${this.visible ? '' : ' is-off'}`;
   }
 
@@ -586,8 +608,8 @@ export class ScoreHud {
     if (c.mult !== this.shownMult) {
       this.shownMult = c.mult;
       this.comboMult.textContent = c.mult > 1 ? ` x ${c.mult}` : '';
-      /* Tier: the colour of the number, the badge beside it and the speed
-       * lines down the frame are one decision made once, here. */
+      /* Tier: the colour of the number and the badge beside it are one
+       * decision made once, here. */
       const t = tierFor(c.mult);
       const step = t ? t.at : 0;
       if (step !== this.shownTier) {
@@ -596,7 +618,7 @@ export class ScoreHud {
         if (t) {
           this.tier.hidden = false;
           this.tierEn.textContent = t.en;
-          this.tierJp.textContent = t.jp;
+          this.tierJp.replaceChildren(tierKana(t.jp), el('span', 'sr-only', t.jp));
           /* Restart the badge's landing animation on each new tier. */
           this.tier.style.animation = 'none';
           void this.tier.offsetWidth;
@@ -605,7 +627,6 @@ export class ScoreHud {
           this.tier.hidden = true;
         }
       }
-      this.root.className = this.rootClass();
     }
     /* The bar is a transform, not a width: a width change relayouts the
      * whole overlay every frame and a transform does not. */

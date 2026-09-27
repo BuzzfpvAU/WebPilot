@@ -96,7 +96,8 @@ import {
   CLIP_CRASH_HOLD_MS, BOUNCE_SEPARATION, CLIP_SPAWN_GRACE_MS,
   setCraftAirframe, dirtClearance, craftVerticalOffset, craftVerticalHalf,
   findRestSpot, restSpotAt, CRAFT_WORLD_R, CRASH_UNDERSIDE_NZ, CRASH_BELLY_UP,
-  bodyUpDotWorld, solidContactCrash,
+  bodyUpDotWorld, solidContactCrash, CrashJudge, emptyWorldReport, foldWorldReport,
+  BOUNCE_COOLDOWN_MS,
 } from '../game/collide.js';
 import { sincos } from '../props/trig.js';
 import { AIRFRAMES, airframeById } from '../../configs/airframes.js';
@@ -1125,13 +1126,25 @@ function suiteWarnings() {
     closeWarns(twice('full', 0)).length >= 1);
   check('and 0.3 m apart is close on the field and not in a room',
     closeWarns(twice('full', 0.3)).length >= 1 && closeWarns(twice('micro', 0.3)).length === 0);
+  const loopDoc = createTrack();
+  const loopGate = place(loopDoc, 'gate', 10, 10);
+  const loopWay = place(loopDoc, 'waypoint', 20, 14);
+  const loopNext = place(loopDoc, 'gate', 40, 10);
+  for (const el of [loopGate, loopWay, loopGate, loopNext]) {
+    addToSequence(loopDoc, el.id, 0);
+  }
+  check('one gate flown twice in a row round a loop, 2022 AU Nationals\' 32-36, is not a warning: the race holds it until it is left',
+    closeWarns(loopDoc).length === 0, closeWarns(loopDoc).map((w) => w.message).join(' | '));
 
   /*
    * And the race's side of it, on the Orbit course as it is built: its two
    * flags score one square, passed one way and then the other. Rocking two
    * centimetres a frame in that square closed a lap every two frames, 32 ms;
-   * now each lap is twice stationLegMin of flying. A real there and back
-   * through it closes every lap it did.
+   * with stationLegMin each lap was twice it of flying, 784 ms; and since the
+   * same opening is held until the craft leaves its box (2022 AU Nationals,
+   * openingKey in race.js) it closes none at all, because the square the lap
+   * started in is never left. A real there and back through it closes every
+   * lap it did.
    */
   const orbitGates = [0, Math.PI].map((heading, i) => ({
     position: { x: 30, y: 0, z: -24 },
@@ -1159,10 +1172,9 @@ function suiteWarnings() {
     rock.update(rockPrev, c, rockMs, rockMs);
     rockPrev = c;
   }
-  const rockFloor = 16 * ((2 * stationLegMin('full')) / 0.02 - 1);
-  check('rocking in one square no longer closes a lap in two frames',
-    rock.laps.length > 0 && Math.min(...rock.laps) >= rockFloor,
-    `${rock.laps.map((ms) => `${ms} ms`).join(', ')} against ${rockFloor}`);
+  check('rocking in one square starts the clock and closes no lap at all: the square is held until it is left',
+    rock.lapStartMs != null && rock.laps.length === 0,
+    `laps ${rock.laps.map((ms) => `${ms} ms`).join(', ') || 'none'}, clock ${rock.lapStartMs == null ? 'never started' : 'started'}`);
   const thereBack = new Race(orbitGates);
   let tbMs = 0;
   let tbPrev = sqAt(-2);
@@ -1196,6 +1208,61 @@ function suiteWarnings() {
   check('one straight pass through two stations at one point still credits both',
     pair.next === 2 && pair.splits.length === 1 && Math.abs(pair.splits[0] - 50) < 1e-3,
     `next ${pair.next}, splits ${pair.splits.join(', ')}`);
+
+  /*
+   * THE SAME OPENING TWICE IN A ROW, 2022 AU Nationals' gate 32-36: through
+   * it, round a loop, through it again. One straight pass used to credit
+   * both, face then plane, and the lap skipped the loop (the owner,
+   * 2026-09-26). The same element and hole is held until the craft has left
+   * its box; two different elements on one spot, RaceGOW6 Track 1's pair,
+   * are still one pass.
+   */
+  const againGates = (second) => [0, 0, -20].map((z, i) => ({
+    position: { x: 0, y: 0, z },
+    heading: 0,
+    flyOrder: i,
+    elementId: i === 1 ? second : i === 0 ? 'el-a' : 'el-b',
+    apertureIndex: 0,
+    apertures: [{ centreY: 1, clearW: 1.75, clearH: 1.75 }],
+  }));
+  const flyPts = (race, pts, t0) => {
+    let ms = t0;
+    for (let i = 0; i + 1 < pts.length; i += 1) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / 0.1));
+      for (let s = 1; s <= n; s += 1) {
+        const lerp = (u, v) => u + (v - u) * ((s - 1) / n);
+        const lerp2 = (u, v) => u + (v - u) * (s / n);
+        ms += 10;
+        race.update({ x: lerp(a.x, b.x), y: lerp(a.y, b.y), z: lerp(a.z, b.z) },
+          { x: lerp2(a.x, b.x), y: lerp2(a.y, b.y), z: lerp2(a.z, b.z) }, ms, ms);
+      }
+    }
+    return ms;
+  };
+  const through = [{ x: 0, y: 1, z: 2 }, { x: 0, y: 1, z: -2 }];
+  const round = [{ x: 0, y: 1, z: -2 }, { x: 3, y: 1, z: -2 }, { x: 3, y: 1, z: 2 }, { x: 0, y: 1, z: 2 }, { x: 0, y: 1, z: -2 }];
+  const again = new Race(againGates('el-a'));
+  let againMs = flyPts(again, through, 0);
+  check('the same opening twice in a row, crossed straight: credited once',
+    again.next === 1 && again.splits.length === 0, `next ${again.next}, splits ${again.splits.join(', ')}`);
+  const roundFrom = againMs;
+  againMs = flyPts(again, round, againMs);
+  check('and flown round and through it again: credited the second time',
+    again.next === 2 && again.splits.length === 1 && again.splits[0] > roundFrom,
+    `next ${again.next}, splits ${again.splits.join(', ')} after ${roundFrom} ms`);
+  const twoOnOne = new Race(againGates('el-c'));
+  flyPts(twoOnOne, through, 0);
+  check('two different gates on one spot, crossed straight: still both',
+    twoOnOne.next === 2 && twoOnOne.splits.length === 1, `next ${twoOnOne.next}, splits ${twoOnOne.splits.join(', ')}`);
+  const lone = new Race(againGates('el-a').slice(0, 1));
+  flyPts(lone, through, 0);
+  check('a one gate course: one straight pass starts the clock and closes no lap',
+    lone.lapStartMs != null && lone.laps.length === 0, `laps ${lone.laps.join(', ')}`);
+  flyPts(lone, round, 400);
+  check('and round and through again closes one',
+    lone.laps.length === 1 && lone.laps[0] > 300, `laps ${lone.laps.join(', ')}`);
 }
 
 function suiteHistory() {
@@ -2353,6 +2420,163 @@ function suiteCrashFrame() {
     !solidContactCrash(solidReport(wall, 6), ...plantQuat(0, 50 * deg, 0), 1, 0));
   check('pitched back 40 degrees it is not',
     solidContactCrash(solidReport(wall, 6), ...plantQuat(0, 40 * deg, 0), 1, 0));
+}
+
+/*
+ * THE CRASH JUDGE, one step at a time (src/game/collide.js CrashJudge, the
+ * owner's approval of 2026-09-26). scripts/crash-pacing.js flies it; these
+ * pin the rules no flight there reaches, the STOP above all, on state blocks
+ * written by hand: [4..6] velocity, [7..10] the attitude.
+ */
+function judgeState(v, q) {
+  const st = new Float64Array(18);
+  st[4] = v[0];
+  st[5] = v[1];
+  st[6] = v[2];
+  st[7] = q[0];
+  st[8] = q[1];
+  st[9] = q[2];
+  st[10] = q[3];
+  return st;
+}
+
+function suiteCrashJudge() {
+  console.log('\ncrash judge: every step on its own, on the sim clock');
+  const level = [1, 0, 0, 0];
+  const back = [0, 1, 0, 0];
+  /* Rolled 60 degrees: body up 0.5, off the belly. */
+  const side = [Math.cos(Math.PI / 6), Math.sin(Math.PI / 6), 0, 0];
+  const none = emptyWorldReport(new Float64Array(11));
+  const prop = solidReport([-1, 0, 0], 30, 0);
+
+  /* The STOP. */
+  let j = new CrashJudge();
+  j.beginFrame();
+  const stop = j.step(judgeState([10.3, 0, 0], back), judgeState([0.02, 0, 0], back), 0, none, 1000, true);
+  check('a step that stops the craft from 10.3 m/s, flat on its back, touching nothing, is a crash: the STOP',
+    stop && j.crash === 'stop' && j.crashAtMs === 1000, `${stop} ${j.crash} ${j.crashAtMs}`);
+  check('under BOUNCE_SPEED_MAX it is a reset and not a hard hit', !j.stopHard);
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([20, 0, 0], back), judgeState([0.02, 0, 0], back), 0, none, 1000, true);
+  check('from 20 m/s it is also a hard hit for the count', j.crash === 'stop' && j.stopHard);
+  j = new CrashJudge();
+  j.beginFrame();
+  check('the same stop on the belly is not a crash',
+    !j.step(judgeState([10.3, 0, 0], level), judgeState([0.02, 0, 0], level), 0, none, 1000, true) && j.crash === '');
+  j = new CrashJudge();
+  j.beginFrame();
+  check('nor in a step where a solid was touched, a prop alone included: that is the solid rule\'s',
+    !j.step(judgeState([10.3, 0, 0], back), judgeState([0.02, 0, 0], back), 0, prop, 1000, true) && j.crash === '');
+  j = new CrashJudge();
+  j.beginFrame();
+  check('nor 3.9 m/s taken off in one step',
+    !j.step(judgeState([10, 0, 0], back), judgeState([6.1, 0, 0], back), 0, none, 1000, true));
+
+  /* The ground, and its cooldown on the sim clock. */
+  const t0 = 5000;
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([6, 0, -0.5], level), judgeState([5.5, 0, 0], level), 1, none, t0, true);
+  check('a skim at 6 m/s on the belly is judged, a hit and not a crash',
+    j.hit && !j.hitCrash && j.hitAtMs === t0 && j.crash === '', JSON.stringify({ hit: j.hit, at: j.hitAtMs }));
+  j.beginFrame();
+  const inside = j.step(judgeState([5, 0, 0], side), judgeState([4.8, 0, 0], side), 1, none, t0 + BOUNCE_COOLDOWN_MS, true);
+  check('the side on the grass BOUNCE_COOLDOWN_MS of sim clock later is not judged',
+    !inside && !j.hit && j.crash === '');
+  j.beginFrame();
+  const past = j.step(judgeState([5, 0, 0], side), judgeState([4.8, 0, 0], side), 1, none, t0 + BOUNCE_COOLDOWN_MS + 1, true);
+  check('one step later it is, and off the belly it is a crash',
+    past && j.hit && j.hitCrash && j.crash === 'ground' && j.crashAtMs === t0 + BOUNCE_COOLDOWN_MS + 1);
+  j.beginFrame();
+  const slow = j.step(judgeState([3.9, 0, 0], side), judgeState([3.8, 0, 0], side), 1, none, t0 + 2 * BOUNCE_COOLDOWN_MS + 5, true);
+  check('under a smack\'s speed a judged contact is neither a hit nor a crash', !slow && !j.hit);
+  j.beginFrame();
+  check('and it starts the cooldown all the same',
+    !j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, t0 + 3 * BOUNCE_COOLDOWN_MS, true));
+  j.beginFrame();
+  check('a sim clock that went backwards ends the cooldown',
+    j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, 40, true) && j.crash === 'ground');
+  j = new CrashJudge();
+  j.step(judgeState([6, 0, 0], level), judgeState([5.8, 0, 0], level), 1, none, t0, true);
+  j.forget();
+  j.beginFrame();
+  check('and so does forget(), a set down or a restart',
+    j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, t0 + 10, true) && j.crash === 'ground');
+
+  /* A landing is the perch's, which came before the ground judgement. */
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([0, 0, -5], level), judgeState([0, 0, 0], level), 1, none, t0, true);
+  check('a 5 m/s landing that comes to rest on the step it touches is a landing, not a hit', !j.hit);
+  j.beginFrame();
+  check('and starts no cooldown: a side touch 50 ms later is judged',
+    j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, t0 + 50, true) && j.crash === 'ground');
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([0, 0, -5], level), judgeState([0, 0, 0], level), 1, none, t0, false);
+  check('taking off, when the shell does not perch, the same touch is a hit', j.hit && !j.hitCrash);
+
+  /* One crash, counted once. */
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([3, 0, -20], level), judgeState([3, 0, 0], level), 1, none, t0, true);
+  check('a belly landing at 20 m/s, skidding on, is a hard hit and not a crash', j.hit && j.hitHard && !j.hitCrash);
+  j.beginFrame();
+  j.step(judgeState([19, 0, 0], back), judgeState([0.1, 0, 0], back), 0, none, t0 + 40, true);
+  check('a STOP 40 ms after it is a crash, but not a second hard hit',
+    j.crash === 'stop' && !j.stopHard);
+  j = new CrashJudge();
+  j.step(judgeState([3, 0, -20], level), judgeState([3, 0, 0], level), 1, none, t0, true);
+  j.beginFrame();
+  j.step(judgeState([19, 0, 0], back), judgeState([0.1, 0, 0], back), 0, none, t0 + BOUNCE_COOLDOWN_MS + 1, true);
+  check('past the cooldown it is its own hard hit', j.crash === 'stop' && j.stopHard);
+
+  /* The frame. */
+  j = new CrashJudge();
+  j.beginFrame();
+  j.step(judgeState([10.3, 0, 0], back), judgeState([0.02, 0, 0], back), 0, none, 700, true);
+  j.step(judgeState([6, 0, 0], side), judgeState([5.8, 0, 0], side), 1, none, 701, true);
+  check('a frame keeps its first crash and the step it came on', j.crash === 'stop' && j.crashAtMs === 700);
+  j.beginFrame();
+  check('and the next frame starts from nothing', j.crash === '' && !j.hit && !j.stopHard);
+
+  /* The solid rule reads the step's own attitude. */
+  const wall = [-1, 0, 0];
+  j = new CrashJudge();
+  j.beginFrame();
+  const deg = Math.PI / 180;
+  check('a tap pitched back 40 degrees at the step it lands is a crash, at that step',
+    j.step(judgeState([5, 0, 0], level), judgeState([0.8, 0, 0], plantQuat(0, 40 * deg, 0)), 0,
+      solidReport(wall, 5), 1234, true) && j.crash === 'solid' && j.crashAtMs === 1234);
+  j.beginFrame();
+  check('pitched back 50 it is the belly, and not',
+    !j.step(judgeState([5, 0, 0], level), judgeState([0.8, 0, 0], plantQuat(0, 50 * deg, 0)), 0,
+      solidReport(wall, 5), 1235, true));
+
+  /* The report, summed in the shell as world.c sums it. */
+  const acc = emptyWorldReport(new Float64Array(11));
+  const a = solidReport([1, 0, 0], 3, 0);
+  a[2] = 2;
+  a[3] = 7;
+  a[7] = 1;
+  a[9] = 0.01;
+  const b = solidReport([0, 1, 0], 5, 1);
+  b[2] = 2;
+  b[3] = 9;
+  b[9] = 0.004;
+  b[10] = 4;
+  const quiet = emptyWorldReport(new Float64Array(11));
+  quiet[10] = 6;
+  foldWorldReport(acc, a);
+  foldWorldReport(acc, b);
+  check('folded: steps, prop steps and frame steps add; the closing speed and the depth keep the larger',
+    acc[0] === 2 && acc[7] === 1 && acc[8] === 1 && acc[1] === 5 && acc[9] === 0.01, Array.from(acc).join(','));
+  check('an equal velocity change goes to the later read, its shape and normal with it',
+    acc[2] === 2 && acc[3] === 9 && acc[4] === 0 && acc[5] === 1);
+  foldWorldReport(acc, quiet);
+  check('a read with no contact moves nothing but the support box',
+    acc[0] === 2 && acc[3] === 9 && acc[10] === 6);
 }
 
 /*
@@ -3843,10 +4067,18 @@ function suiteRoadsAndVehicles() {
     && rl.problems.length === 0, rl.problems.map((p) => p.message).join('; '));
   const traffic = trafficOf(yard.doc);
   const drift = traffic.vehicles.filter((v) => v.drift > 0);
-  check('trafficOf the starter: two lanes, three vehicles, one of them the drift car, no problems',
-    traffic.roads.length === 2 && traffic.vehicles.length === 3 && drift.length === 1 && drift[0].drift === DRIFT.gain
+  check('trafficOf the starter: two lanes, four vehicles, one of them the drift car, no problems',
+    traffic.roads.length === 2 && traffic.vehicles.length === 4 && drift.length === 1 && drift[0].drift === DRIFT.gain
     && traffic.vehicles.some((v) => v.style === 'boxtruck') && traffic.problems.length === 0,
     traffic.problems.map((p) => p.message).join('; '));
+  /* The blue coupe shares the drift car's lane, so it must share its speed
+   * table (lane, top speed and cornering) or one would drive through the
+   * other; scripts/roads-check.js holds the two apart for 30 minutes. */
+  const coupe = traffic.vehicles.find((v) => v.style === 'e82');
+  check('the starter\'s coupe drives the drift car\'s lane on its speed table, without its slide',
+    coupe !== undefined && drift.length === 1 && coupe.road === drift[0].road && coupe.topSpeed === drift[0].topSpeed
+    && coupe.lateral === drift[0].lateral && coupe.drift === 0,
+    coupe ? `road ${coupe.road}, ${coupe.topSpeed} m/s, ${coupe.lateral} m/s/s, drift ${coupe.drift}` : 'no e82');
 }
 
 /*
@@ -5549,6 +5781,7 @@ async function main() {
   suitePresets();
   suiteCrashRule();
   suiteCrashFrame();
+  suiteCrashJudge();
   suiteClipCatch();
   suiteRecoverSpot();
   suiteFaces();

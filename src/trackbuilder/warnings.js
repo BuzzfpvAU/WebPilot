@@ -315,6 +315,12 @@ export function collectWarnings(doc, path) {
  * nothing, and the stations either side of it are next to each other. The
  * lap wraps, so the last and the first are a pair too. In the document's
  * own metres, which on a room are RaceGOW's, as stationLegMin answers.
+ *
+ * The SAME opening twice in a row (one element and hole, or one marker) is
+ * not a pair of this kind any more: the race holds an opening it has just
+ * credited until the craft has left its box (openingKey in race.js), so one
+ * pass cannot reach both, and a loop between them is what the author means.
+ * 2022 AU Nationals flies its gate 32-36 that way.
  */
 function closeStationWarnings(doc, path, out) {
   const stations = [];
@@ -336,7 +342,7 @@ function closeStationWarnings(doc, path, out) {
     const a = stations[i];
     const b = stations[(i + 1) % stations.length];
     const d = Math.hypot(a.at.x - b.at.x, a.at.y - b.at.y, a.at.z - b.at.z);
-    if (d >= min) {
+    if (d >= min || (a.s.elementId === b.s.elementId && (a.s.apertureIndex ?? 0) === (b.s.apertureIndex ?? 0))) {
       continue;
     }
     const name = (e) => `${gateNumberOf(doc, e.s.id) ?? doc.sequence.indexOf(e.s) + 1}. ${sequenceLabel(doc, e.s)}`;

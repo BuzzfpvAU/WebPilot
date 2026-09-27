@@ -85,6 +85,32 @@ function collideLeaves(ctx, parts) {
 const BLOB_TONES = [PAL.blossomLight, PAL.blossom, PAL.blossomDeep];
 
 /**
+ * A canopy blob, shaded round.
+ *
+ * `IcosahedronGeometry` at detail 0 hands every vertex of a face that face's
+ * own normal, so the toon ramp quantised each of the twenty facets on its
+ * own and a canopy came out as a mosaic of lit and shaded triangles.  Every
+ * vertex of the unit icosahedron is on the unit sphere, so, as for the
+ * planet, its normal is simply the radial direction.  The ramp then gives
+ * each blob two or three clean bands, lit crown to shaded underside, and the
+ * silhouette keeps its facets.  The instance matrix scales it to the blob's
+ * ellipsoid, and three.js carries the normals through that scale.  Drawing
+ * only: the blob and its box are the same numbers as before.
+ */
+function roundBlobGeometry() {
+  const geo = new THREE.IcosahedronGeometry(1, 0);
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.set(pos.getX(i), pos.getY(i), pos.getZ(i)).normalize();
+    nrm.setXYZ(i, v.x, v.y, v.z);
+  }
+  nrm.needsUpdate = true;
+  return geo;
+}
+
+/**
  * @param spots [{ x, z, y, scale, seed, lean, tone }]
  */
 export function buildSakura(ctx, spots) {
@@ -238,7 +264,7 @@ export function buildSakura(ctx, spots) {
   wood.name = 'sakuraWood';
   ctx.add(wood);
 
-  const blobGeo = new THREE.IcosahedronGeometry(1, 0);
+  const blobGeo = roundBlobGeometry();
   const canopies = [];
   // Blossom keeps a pink cast even in shade: a violet tint turns it grey, and
   // a normal ramp makes the away-facing side of the canopy read as mauve rock,
@@ -471,7 +497,7 @@ export function buildGrove(ctx, spots) {
   wood.name = 'groveWood';
   ctx.add(wood);
 
-  const blobGeo = new THREE.IcosahedronGeometry(1, 0);
+  const blobGeo = roundBlobGeometry();
   blobs.forEach((list, i) => {
     if (!list.length) return;
     const inst = new THREE.InstancedMesh(

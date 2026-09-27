@@ -52225,6 +52225,2062 @@ takeoff and be back on landing and on pause, Air should read 0.00 on the
 pads and hold when landed, and the OSD's small print should read over the
 yard at noon and overcast.
 
+## 2026-09-26 | render, settings | Stage F: speed lines, the impact frame, screentone and Clean FPV
+
+The owner, 2026-09-26: "do the bigger items also starting with map card
+and stage f then manga menus". This is Stage F (FREESTYLE-MAPS-PLAN.md
+section 11), polish item 18: speed lines, the impact frame, screentone,
+the settings and Clean FPV. Render and settings only: no physics, no
+plant, no module ABI, no build; `git diff --stat vendor/betaflight` is
+empty and nothing under src/game/ or src/native/ was touched. Built in a
+worktree on 716562b, four commits in the brief's order: 3443f9e (speed
+lines), 902cff4 (the impact frame), a13f500 (screentone), 16252c8 (the
+settings); then two found by flying the finished tree, 8ca4aa8 (the
+speed lines skip the pixels inside their reach) and 7613638 (impact
+strokes in paper where the panel is ink); then this entry.
+
+### How it is folded in, and why there is no PATCH diff
+
+One new module, src/render/manga.js. The town's pipeline (CityPipeline)
+and a built map's (BuiltPipeline) call mangaPipeline(this) in their
+constructors, and it edits the pipeline's OWN copies of the vendored
+grade and fxaa materials by finding exact lines and adding after them,
+the way BuiltPipeline already edits its ink (INK_LINEAR). So
+src/maps/city/vendored/core/post.js stays byte identical, and there is
+no PATCH-*.diff: nothing under vendored/ changes. If a vendored update
+moves a line it looks for, the edit finds nothing, the map draws as it
+did before Stage F, and stats().manga says { lines: false }.
+
+No new pass, no texture tap, no loop, no render target: the strokes and
+the impact frame are arithmetic in the grade; the screentone's mask
+rides in the alpha of the target the grade already writes, and its dots
+are drawn by the fxaa pass from the fetch it already makes. The race
+field's chain (src/render/post.js) never hears of any of it, so a race
+track is clean by construction as well as by ui.manga.
+
+### What was built
+
+- **Speed lines.** From 20 m/s, full at 40: the share of strokes drawn
+  (0.3 to 0.62 of 120 round a turn), how far in they reach (an
+  elliptical radius of 0.95 down to 0.62) and their ink (0.55 to 0.9)
+  all rise with speed. Each stroke is a wedge 12 px wide at the frame's
+  edge at 1080 lines, tapering to a point, redrawn ten times a second at
+  its own moment the way an animator redraws speed lines, still under
+  reduced motion. They converge on the velocity's vanishing point: the
+  plant's velocity through the render boundary (simPosToThree, the spawn
+  yaw) into the camera's frame, projected, its opposite when flying
+  backwards (the same radial lines), smoothed over 90 ms and held inside
+  the centre third, because a vanishing point out among the strokes
+  draws a knot and not a direction. The map's own ink, so they match the
+  ink pass at every time of day. In flight, the FPV camera only: not the
+  pad shot, not a replay.
+- **The CSS strips are gone** (index.html .score-lines and the score
+  HUD's element and root tier class), as item 18 asked.
+- **The impact frame.** A crash the shell calls, the one that sets the
+  craft down (crashResetTick), holds the last picture before the hit
+  for 67 ms, two frames of an anime cut timed at 30, re-inked, with 90
+  heavy radial strokes round the edge seeded afresh each time (ink on
+  paper, paper on ink, so they show on a dark face), then lets it go over
+  240 ms while the craft is already set down. The camera holds the pose
+  the pilot last saw; render only, the physics has moved on. A hard belly
+  landing that flies on, X and the stuck reset are not crashes and get
+  none.
+- **Photosensitivity, what was done.** Never a white flash: the dark
+  half goes to ink and the light half to the cream paper tone on a
+  curve that only darkens (paper times (L / L_paper)^1.2), so no pixel's
+  luminance rises by more than two percent of white, the strokes' own
+  few pixels apart, and the frame gains contrast while losing a little
+  light. The re-inked picture is mixed in at most 0.8, so the scene
+  shows through. The release is a fade, not a cut back. At most one
+  every two seconds, so at most half a flash a second where WCAG 2.3.1's
+  line is three. Its own Settings row, Clean FPV, and off whenever the
+  system asks for reduced motion (read live, so it takes effect mid
+  session).
+- **Screentone.** A 45 degree dot grid at the canvas's own pixels (6 px
+  pitch at 1080 lines), dots as big as the pixel is deep in the darkest
+  band: the scene's linear luminance under 0.05 to 0.09 before the
+  grade, and not the ink pass's own lines. High only (only High runs the
+  fxaa pass). OFF by default, see the verdict; `?tone=1` turns it on.
+- **Settings.** Clean FPV's note now says what it turns off, and it
+  does: mangaFrame reads ui.manga every frame. A new row under Screen,
+  Impact frame, on by default (DEFAULTS.impactFrame), with its own
+  note. Race tracks: ui.manga is false and their chain has no edit.
+- **Harness**, window.__manga: state(), force(), clock() (hold the
+  layer's clock, so each picture of the impact frame is one moment of
+  it), impact() (the crash's own call without the crash), tone(),
+  centre() and cost(), below.
+
+### The screentone: does it shimmer
+
+Yes, and it is left off. Judged on moving captures at 60 Hz spacing,
+the harness camera stepped a sixtieth of a second at a time: a 25 m/s
+dolly and a 2 rad/s pan, down the town's spawn street at 4 m and across
+Hibari Yard, High, 1280 by 720, each frame looked at and the toned
+regions cropped and zoomed side by side.
+
+- A big dark face well away (the bando's dark underside from 40 m)
+  holds its tone steadily from frame to frame. That part is fine.
+- But the dots stay on the glass while the face slides under them, a
+  shower door, and at FPV speeds everything is sliding.
+- Near faces whose brightness sits at the band's edge gain and lose
+  their tone between consecutive frames as the haze moves them across
+  it: the town's balcony box and a fence rail, 4 m off, went from dotted
+  to plain within two or three frames of the dolly.
+- Before the ink pass's lines were left out of the band, every moving
+  silhouette had a crawling dotted edge. Leaving them out fixed that
+  part; the other two are what a screen space tone with no history and
+  no world position does, and this pass has neither.
+
+So it is off by default, as the plan allows ("judged by flying it
+before it is kept"), and `?tone=1` turns it on at High for the owner to
+fly and decide. It is also subtle at 720 lines: a 4 px pitch of dots
+over faces that are already dark.
+
+### The centre third
+
+No stroke starts inside an elliptical radius of 0.62 (speed lines) or
+0.52 (impact), and the centre third's corner is at 0.471, so none can
+reach it by construction. Measured as well: window.__manga.centre()
+draws the chain twice at one instant of the same world, with and without
+the strokes, reads the canvas back after each and counts the pixels that
+differ (the impact's strokes as the difference of two seeds, whose
+re-inking is identical), at five focus points (the centre and the four
+corners of the focus box):
+
+    Low, yard (1088 by 612 canvas)   lines 36,120 to 40,456 px changed,
+                                     impact strokes 78,325 to 83,940;
+                                     0 in the middle third, all ten cases
+    Low, town                        lines 40,760 to 46,763, impact
+                                     74,217 to 79,211; 0 in the middle
+    High, yard (1280 by 720)         lines 64,381 to 71,793, impact
+                                     113,489 to 122,553; 0 in the middle
+
+Every picture below was looked at for it too; none has a stroke in the
+middle third.
+
+The impact frame's re-inking is a grade of the whole frame and not a
+thing drawn over it: the centre third still shows the scene, in ink.
+
+### The budget
+
+window.__budget at the spawn with a fixed harness camera, 1280 by 720,
+Low as earlier entries measured it (Low's 0.85 gives a 1088 by 612
+canvas), main (716562b, served from a git archive of it in the
+scratchpad) against this tree with the layer off, the speed lines forced
+to full, the impact frame forced to full, and the screentone asked for:
+
+                         calls   triangles  full res  taps  loops  targets MB  attrs MB
+                                            passes                 (at 1080p)
+    yard, Low, main       296     108,635      1        1     0    10.7 (33.2)    6.9
+    yard, Low, Stage F    296     108,635      1        1     0    10.7 (33.2)    6.9
+                          (the same in all four states)
+    town, Low, main       558     900,091      1        1     0    10.7 (33.2)   52.1
+    town, Low, Stage F    558     900,091      1        1     0    10.7 (33.2)   52.1
+    yard, High, main      480     180,671      1        9     0    87.0 (153.8)   6.9
+    yard, High, Stage F   486     182,899      1        9     0    87.0 (153.8)   6.9
+
+No budget number moves. The High yard's six calls are the cars, which
+were somewhere else in main's frame; within one run the four states read
+the same. The High targets, 153.8 MB derived for 1080p against P5's 120,
+are main's, unchanged here. npm run lint:quality is the presets'
+arithmetic and does not see a map: 56 of 56 clean.
+
+Frame cost. No pass, tap, loop or target is added, so the cost is
+fragment arithmetic: on a pixel a stroke can reach, an atan, four
+hashes and a few smoothsteps, about a hundred ALU operations, and none
+inside the stroke's reach (six pixels in ten are skipped at 25 m/s,
+three in ten at full speed); the impact's are there for 300 ms after a
+crash; the tone's are a dozen per canvas pixel at High when asked for.
+Measured with window.__manga.cost(): the grade and the fxaa pass drawn
+over one drawn scene, the layer off, lines at full, impact at full and
+tone, interleaved, the median of nine rounds of three, under SwiftShader:
+
+                      off (spread)            lines    impact   tone
+    yard, Low     114.3 ms (80.1 to 167.6)    125.2    115.9     -
+    town, Low      95.1 ms (58.3 to 109.8)     74.7     64.6     -
+    yard, High    213.4 ms (188.6 to 253.2)   230.7    223.1    226.4
+
+A software rasteriser's spread is wider than any difference, so this
+says the layer is lost in the noise of a CPU drawing the passes and not
+what it costs on a GPU; the steadiest row (High) reads about 8 percent
+of the two passes for the lines, 5 for the impact and 6 for the tone.
+The Low rows were taken before 8ca4aa8, with lines at full, where that
+commit changes nothing.
+
+### Pictures
+
+In the session's scratchpad, not committed. The in-page pilot
+(scripts/lib/pilot.js on the shell's clamped frame clock), Low, 1280 by
+720, the Weight hint dismissed:
+
+- **At rest**: the yard's pads and the lane, no strokes; at 12 to 19.5
+  m/s, none.
+- **Hibari Yard's lane at 26 to 28 m/s** (the approach frames of both
+  crash sequences, x 60 at 5.2 m, the final strokes): short wedges at
+  the edges at 26, more and longer at 28 (lines 0.35 to 0.40), leaning
+  on a point near the top of the centre third, where a pitched forward
+  five inch is going, and swung off to the side in a hard bank. Earlier
+  flights at 25 to 30 m/s through the FOOTBRIDGE gap at 2.6 m (worst
+  tracking error 1.6 m) were on the thinner first strokes and are what
+  showed them reading as wires.
+- **The town's spawn street at 27 to 29 m/s** (0, 4.5 m, from z 44 to
+  -82, worst error 1.8 m): the same, over the town's walls and wires.
+- **A crash, in sequence** (screencast, every frame drawn, on 7613638):
+  the lane at 5.2 m into the footbridge's blue sign at 98 km/h. The frame
+  before, the sign close with speed lines; the impact frame, the same
+  pose, the sign in ink, its lettering and arrows paper, paper strokes
+  over the ink and ink ones over the paper round the edge; the next, the
+  craft already set down under the bridge, the ink fading off it; then
+  clear. Under SwiftShader a frame is about 100 ms, so the hold is one
+  frame here; at 60 Hz it is four, then fourteen of release.
+- **The impact frame staged, clock held**: 0, 33 and 66 ms full, 110 ms
+  at 0.67, 180 at 0.28, 250 at 0.06, 320 clear. A second one 1.5 s later
+  was refused, one 2.1 s later was not; with Clean FPV, and with the
+  Impact frame row off, the same call starts nothing.
+- **Screentone at High**: the town's street and the yard, at rest, a
+  dolly and a pan (the verdict above). Faint 4 px dots at 720 lines on
+  the darkest faces.
+- **Clean FPV on**: the yard's lane at 94 to 104 km/h and the town's
+  street at 97 to 101: no strokes, and ui.manga false.
+- **A race track**: Flags and cones (the board's document, seeded) flown
+  down its first straight at 96 to 105 km/h: no strokes; ui.manga false
+  and the chain has no edit. An empty course with no gates is a
+  freestyle map by src/render/scene.js's rule, and there the shell's
+  state reads manga on, but the race field's chain has nothing to draw
+  it with.
+
+### RUN LOG
+
+Run this turn, with browser profiles in a private temp folder (TMPDIR),
+so no /tmp/sim-page-* was created:
+
+    npm run lint:boot            9 of 9 checks clean, on 3443f9e, 902cff4,
+                                 a13f500 and 7613638
+    npm run lint:preload         up to date after node scripts/gen-preload.js
+                                 (manga.js is a boot module): boot 114
+                                 modules, city 73, built 32; 216 served
+    npm run lint:quality         56 of 56 checks clean
+    npm run lint:memory          PASS, every world lazy and freed; boot
+                                 baseline 61 geometries, 5 textures, 130
+                                 requests
+    npm run lint:responsive      PASS, freestyle 214 frames, worst gap
+                                 436 ms, 0 over 500 ms
+    npm run lint:input           all 160 passed
+    npm run lint:shell           FAIL, 1 problem: "title: overflow grew from
+                                 0 to 67 px", the known one on main; before
+                                 the baseline moved, a second, "pilot:
+                                 overflow grew from 790 to 835 px" (argued
+                                 below)
+    npm run lint:devices         PASS on all five
+    node scripts/shots.js        through the real flow into Hibari Yard,
+                                 with expect steps on __manga.state():
+                                 harness faults 0, console errors 2, both
+                                 "net::ERR_CONNECTION_REFUSED", the board
+                                 not running here; a plain run with no
+                                 steps: 0 errors
+    dash scan                    none in any changed file
+    npm run verify               not run: render only, no physics, plant,
+                                 ABI or build change, and the brief said
+                                 not to
+
+lint:memory, lint:responsive, lint:input, lint:shell and lint:devices ran
+on 16252c8; 8ca4aa8 and 7613638 after it change only a few lines of GLSL
+in src/render/manga.js. The measurements and pictures straddle those two:
+the Low cost rows and the first crash sequence are from before them, the
+High rows, the race track, Clean FPV and the second crash sequence from
+after.
+
+### What went wrong
+
+- The session was stopped by the spend limit in the middle of the
+  flights; the lead resumed it with the work intact and asked for
+  coherent commits as each piece checked out. The four commits were then
+  cut from the finished tree, each stage built by exact removals and
+  booted (lint:boot 9 of 9 at each of the first three).
+- The first strokes, 2.6 then 9 px and at most a third wide at the
+  frame's middle edges (the taper ran past the edge), read at 25 to 30
+  m/s as more of Hibari Yard's power lines. Now they reach full width at
+  the edge and are wedges.
+- The first impact grade was a sepia wash (the light half at its own
+  brightness); the second, with a 1.35 curve, greyed the sky; 1.2 kept
+  the paper light and the darks ink.
+- The first yard flight at 5 m hit the footbridge's deck: the FOOTBRIDGE
+  gap is under it at 2.5 m. That crash became the impact sequence.
+- The first cost proxy timed the whole chain and the scene's own noise
+  hid the layer (the layer on measured cheaper than off). It now times
+  the grade and the fxaa pass over one drawn scene, interleaved, median
+  of nine rounds.
+- High in the town under SwiftShader is about 30 s a frame; the first
+  tone sequence was cut short by its own timeout and the yard was used
+  for the rest.
+- The first crash into the footbridge's sign on the finished tree filled
+  the impact frame with ink (a blue sign, close up) and its ink strokes
+  vanished into it; 7613638 draws them in paper there.
+- lint:shell's Settings overflow moved 790 to 835 px for the new row,
+  argued below.
+
+### The baseline, and the argument
+
+tests/shell-baseline.json: Settings overflow 790 to 835 px, the Impact
+frame row, edited by hand, the same argument as the Clean FPV, Stick
+mode, Check sticks and Keyboard throttle rows: the file is today's
+overflow and not a target, the row is deliberate, and lint:devices
+reaches every row and note on all five devices. Not --record, which
+would also write the title's 67 px, main's known failure.
+
+### For the lead
+
+- Six commits and this entry on the worktree branch, on 716562b, not
+  merged with claude/vibrant-wozniak-v2pg5e. Files: src/render/manga.js
+  (new), src/main.js, src/maps/city/index.js, src/maps/built/index.js,
+  src/ui/ui.js, src/ui/scorehud.js, index.html, src/fresh.js,
+  tests/shell-baseline.json.
+- In src/main.js: one import; reducedMotion, impactFrameOn, the tone
+  flag, mangaCrash and mangaFrame after counterCrash; mangaCrash() in
+  crashResetTick before setDownNearby; the MangaLayer beside the lens
+  shake; manga.tick(dt) after the frame's dt; the FPV camera branch
+  holds the impact pose; mangaFrame(dt) before the draw; window.__manga
+  after window.__drawOff.
+- src/fresh.js regenerated (boot 114 modules, 216 served). If main
+  moved, regenerate after the merge.
+- If the map card or the manga menus change Settings rows, the pilot
+  overflow in tests/shell-baseline.json moves again; it is 835 here.
+
+### For the owner, when flying
+
+Fly Hibari Yard's lane or the town's street past 20 m/s (about 72
+km/h). **Look for**: ink strokes gathering at the edges, more and longer
+as you go faster, leaning in on where you are going (watch them swing
+when you slide or drift); none at a hover; a crash freezing for a beat
+in ink and letting go, never a white flash; Clean FPV and the Impact
+frame row each taking theirs away; race tracks with none. **Wrong would
+be**: a stroke in the middle third, lines that point at the screen's
+centre while you slide, an impact frame on a hard landing you flew out
+of, or two in a row. Screentone: open the sim with `?tone=1`, set
+Graphics to High, and fly past dark faces; if the dots swimming on the
+glass bother you, it stays off.
+
+## 2026-09-26 | integration, main | The polish release: cars, the owner's decisions, the map card, the quick wins and Stage F
+
+The owner asked to "push completed tasks to main". The working branch's tip
+carried the 135i and the cars' second pass half done (lead checkpoints
+c44c4e1 and e2adacc), so the release was built in a separate worktree from
+1875b91, the last finished commit on the branch: the R32 and the cars'
+first pass, POLISH-PLAN.md and the owner's answers. Onto it, in order:
+main (37588cf: the whoop room, the lap calls, practice); the owner's four
+decisions (95ca77b); the map card (d8329e9); the quick wins (b6d141c); then
+Stage F (419a7e5). No physics, module ABI or build change: dist, src/native
+and tests/goldens are unchanged against main, and nothing under vendor or
+patches moved.
+
+Conflicts, each kept from both sides: PROGRESS.md at every merge; the
+builder selftest's race.js import (main's practice and lap calls beside the
+station leg rule); index.html's OSD rules (main's hidden speed value beside
+the quick wins' ink edge). tests/shell-baseline.json takes Stage F's pilot
+835 px for its Impact frame row, argued in its own entry. src/fresh.js
+regenerated after each merge.
+
+Pushed to main in two steps, each a fast forward: 45a6af2 (everything but
+Stage F), then Stage F on top.
+
+### Checks, on the release with Stage F (091be0a)
+
+    npm run check:clip           909 passed, 0 failed
+    npm run score:selftest       all passed (the Maverick Loop line is gone
+                                 with the trick, the owner's decision)
+    npm run check:counter        all passed
+    npm run check:chase          all passed
+    npm run check:roads          all passed
+    npm run check:props          all passed
+    npm run check:world          all passed
+    npm run check:world-golden   all passed, the golden untouched
+    npm run check:crash          0 guards failed
+    npm run trick:sweep          nothing was ever paid more than it was worth
+    npm run lint:boot            9 of 9 clean
+    npm run lint:memory          PASS
+    npm run lint:quality         56 of 56 clean
+    npm run lint:preload         up to date
+    npm run check:world-engines  Node and Chromium equal to the bit
+    npm run replay:test          8 of 8
+    npm run lint:devices         PASS, the builder bars and the results page
+                                 included
+    npm run lint:responsive      PASS
+    npm run lint:shell           PASS, the title's overflow gone (it had
+                                 failed at 67 px on main since before Stage E)
+    npm run lint:input           all 160 passed
+    npm run verify               not run: no physics, plant, ABI or build
+                                 change
+
+The same set ran on 45a6af2 before the first push, all green (lint:input
+all 160 there too).
+
+### Still to come
+
+The 135i and the cars' second pass (on the working branch, in progress);
+wave 2 of the polish list: crashes judged per physics step (PHYSICS PATH,
+approved on 2026-09-26, coverage first, then the verify procedure), the
+manga menus, the phone OSD, the town's budget in its render only steps,
+overcast and canopies, the replay chase camera, and the radio help row.
+Open for the owner: a gate sequenced twice in a row (2022 AU Nationals,
+32 to 36) is credited twice by one pass; the screentone, off by default
+because it shimmers, to be judged with ?tone=1 at High.
+
+## 2026-09-26 | art, maps, props | The e82: a compact coupe in blue, chasing the drift car round Hibari Yard
+
+The owner, 2026-09-26: "can we add a series 1 bmw coupe now 135i in blue".
+Built as a new car kind, `e82`, in src/art/cars.js and every table the
+r32 is in. No physics model change, no module ABI, no build: dist/sim.wasm,
+src/native and tests/goldens are untouched. Commits 46eef8e (the model and
+its tables), c44c4e1 (the lead's checkpoint of the yard row, the cornering
+and the self test, pushed mid work) and this entry.
+
+### What it is, and how it is told apart
+
+No badge, roundel, maker's name or model name anywhere: the car is known by
+its shapes, as the r32 is.
+
+- **Sizes** are the real car's: 4.36 m long, 1.75 wide, 1.41 high, a 2.66 m
+  wheelbase (axles at +1.46 and -1.20 from the middle, so the front axle is
+  well forward and the boot is short), 18 inch wheels (0.315 m radius).
+  CAR_KINDS.e82 carries a 1.32 m roof and a bonnet step at 0.83 m, so its
+  parked solid follows the body: a bonnet box, a cabin box, a boot box.
+- **Front**: twin round lamps each side, a bright ring round a clear disc,
+  under a straight body coloured brow, in a dark housing; a split twin
+  grille as two rounded rectangles with bright rims and dark slats; the
+  bonnet's two lines converging on it; a sport bumper with a large central
+  intake (a body bar across it) and dark corner intakes with round fog
+  lamps.
+- **Side**: a tall glasshouse on a two door cabin, the rear side window
+  kinking forward at its foot into the C pillar (the Hofmeister kink, drawn
+  as a V cut in the glass at x = -1.04), dark pillars, a shoulder line
+  rising from the front wheel to the tail over a concave lower line, a deep
+  sill with a bright edge, a door seam and a handle.
+- **Rear**: L shaped tail lamps, the leg on the wing and the arm on the boot
+  lid, wrapping round the corner, with a clear reversing strip, an amber
+  foot and a dark light guide; a short boot with a lip; a dark diffuser
+  band; twin exhaust tips on one side.
+- **Wheels**: double spoke, five pairs.
+- **Colour** by variant (E82_LIVERIES, carLivery): 1 racing blue 0x4675c6,
+  a bright mid metallic blue in the manner of Le Mans Blue drawn in the
+  town's palette, the default; 2 deep blue; 3 grey blue; 4 silver; 5 white.
+
+### Where it is on Hibari Yard, and why there
+
+In the drift car's lane, half a lap behind it: row el-57, appended after
+every other row, so every id and the order above it are unchanged. It is a
+grip car on the drift car's pace, so the pilot can chase it at the drift
+car's speed, and from the pads one of the two is usually in sight.
+
+Three places were weighed, in the brief's order:
+
+1. **Beside the drift car, as an ordinary car at lateral 4.5 m/s/s**: no.
+   Two cars share a lane only if they lap in the same time, and at 4.5 its
+   bends cap it: bisecting its top speed on the module's own poses (the way
+   VAN_SPEED was found) gave a 30.20 s lap at 50 m/s against the drift
+   car's 24.763 s. It cannot keep up at any top speed.
+2. **As a second drift car**: no. scripts/roads-check.js block 3 finds the
+   drift car with findIndex and asserts every other car's slip is 0, so a
+   second slider fails "the ordinary cars never slip". The check is not
+   changed to fit.
+3. **In the other lane with the box truck and the kei van**: clean, but
+   slow. Matched the same way, its top speed would be 7.7722 m/s (28 km/h)
+   for the truck's 38.028 s lap.
+4. **Chosen: the drift car's cornering.** LATERAL.e82 in
+   src/maps/built/traffic.js is 8 m/s/s, DRIFT.lateral, about 0.8 g, within
+   a compact rear drive coupe's road grip, and the yard's e82 has the drift
+   car's 20 m/s top speed. The speed table's key is road, top speed and
+   cornering, so the module drives the two on one table: they lap in the
+   same time to the step and the gap comes round the same every lap (124
+   to 163 m along the lane as they brake and pull away; the offset, 171 m
+   along the centre line, is 178.3 m along the lane, 0.13 m short of half
+   the 303.9 m lap from the drift car's 26.5). It does not slide: `drift`
+   is off, so its slip is 0.
+
+The cost of 4 is that every e82 on any built map is driven hard, where the
+other kinds are driven at a driver's comfort (2.5 to 4.5). It is a new
+kind, so nothing that existed moves. If the owner would rather it drove at
+comfort, the row moves to the other lane at 7.7722 m/s (option 3) and
+LATERAL.e82 goes back to 4.5.
+
+Measured on the module's poses over 30 minutes: the coupe keeps 2.98 m from
+every solid (a utility pole at (134.9, 16.5), where the drift car's own
+nearest is 2.311 m), never comes within 10 m of the drift car, and comes
+1.566 m from the box truck and 1.913 m from the kei van as they pass in the
+other lane. The nearest any two cars come is unchanged, 0.272 m, the drift
+car's tail and the box truck.
+
+src/trackbuilder/selftest.js pinned the starter at "two lanes, three
+vehicles": it now says four, because the owner asked for a fourth, and it
+gains a check that the coupe is on the drift car's lane, top speed and
+cornering, without its slide, so that a later edit to either car's speed
+fails here before it fails as a car driving through another. That is a
+change to what the starter holds, not to a threshold.
+
+### Triangles and the budget
+
+Parked (the prop kit): 1,645 triangles, against the r32's 1,841 and the
+minibus's 1,437. Moving: a 1,045 triangle body in 13 materials, plus four
+248 triangle wheels in one InstancedMesh.
+
+Hibari Yard on Low at 1280 by 720, window.__budget at the scratch rig's
+fixed cameras, before (1875b91) and after:
+
+| view | draw calls | triangles | with the cars hidden |
+|---|---|---|---|
+| verge, golden | 90 to 91 | 46,704 to 47,714 | 67 and 41,273 to 67 and 41,285 |
+| south east aerial, golden | 372 to 386 | 102,596 to 104,667 | 333 to 333 |
+| whole yard, golden | 508 to 522 | 126,068 to 128,139 | 469 to 469 |
+| whole yard, dusk | 513 to 529 | 126,182 to 128,277 | 468 to 468 |
+
+The moving cars' group: 3 cars, 40 meshes, 6,579 triangles before; 4 cars,
+54 meshes, 8,638 after (dusk 43 to 58, with the lamp glow). So the coupe is
+14 draw calls and about 2,060 triangles when it is on screen and nothing
+when it is not. The town is unchanged: no e82 is parked there, and its
+19,515 boxes still hash a118277a53298663; the yard's 552 still hash
+da1fb02b788cf315.
+
+### Pictures, looked at, in the session's scratchpad (not committed)
+
+Under /tmp/claude-0/-home-user-WebFPVSimulator/6ddfd91b-7f5b-543b-a441-691d12014517/scratchpad/pics:
+
+- e82-pair/front-golden.png, rear-golden.png, front-dusk.png, rear-dusk.png:
+  the coupe beside the r32, front and rear three quarter, day and dusk
+  (sheet: sheets/e82pair.png).
+- e82-yard-day2/quarter-0 to 5.png: the coupe driving the loop by day,
+  passing the kei van in quarter-1 (sheet: sheets/e82yard.png).
+- e82-yard-dusk/quarter-0 to 3.png: at dusk, lamps lit, with its own
+  headlamp pools (sheet: sheets/e82yarddusk.png).
+- e1 to e4: the working close ups (nose, side, tail, three quarters).
+
+What they show: the twin rings and the split grille read at 10 m and are
+the first thing seen; the kink reads in the side window; the blue is bright
+by day and still blue at dusk; the L lamps read as one lamp across the
+corner. What is weaker: its side reads more as a generic compact coupe than
+a 1 Series from the flank alone, because the flame surfacing is two lines
+at this polygon count; and the moving body is 13 draw calls, a cost every
+moving kind pays.
+
+### What went wrong
+
+- The kink was invisible at first: the two clip lines cut the glass in the
+  wrong places. Redrawn as a V at the kink point (a foot line forward and
+  down, a top line forward and up), it reads.
+- The central intake's first bottom edge, 0.26 m, fell below a corner of
+  the bumper's chain, and blockOnEnd does not split a block at a chain
+  corner as onEnd does, so part of it hid inside the bumper. Raised to 0.29.
+- The lap match as an ordinary car was impossible (above), which was found
+  only by bisecting to the 50 m/s end.
+- check:clip once gave 875 and 1 after 46eef8e, before the yard row; the
+  failing line was not kept, and five runs after gave 876 and 0. Not
+  explained. After the yard row it failed repeatably on the starter's
+  "three vehicles" pin, which is the one change above.
+
+### Checks, run in this session
+
+On the tree committed as c44c4e1 (check:roads before two edits to comments
+in starter.js and the self test's change):
+
+    npm run check:roads          all passed; el-57 e82 keeps 2.98 m from
+                                 every solid over its 24.764 s lap; no two
+                                 cars overlap in 30 minutes, nearest 0.272 m
+                                 (unchanged, the r32 and the box truck); the
+                                 truck's and the van's laps agree
+    npm run check:props          all passed
+    npm run check:clip           877 passed, 0 failed (875 and 1 on the
+                                 "three vehicles" pin before it said four)
+    npm run check:world          all passed
+    npm run check:world-golden   all passed, tests/goldens/world.json
+                                 untouched
+    npm run check:world-engines  Node and Chromium agree to the bit on every
+                                 run, Hibari Yard's traffic among them
+    npm run check:chase          all passed
+    npm run check:counter        all passed
+    npm run lint:boot            9 of 9 clean
+    npm run lint:memory          PASS, every world lazy and freed
+    npm run lint:quality         56 of 56 clean
+    npm run lint:preload         up to date
+    npm run lint:shell           FAIL, the known "title: overflow grew from
+                                 0 to 67 px" on main, nothing else
+
+Not run: npm run verify (not asked, and not physics, the plant, the ABI or
+the build), shots.js. Dash scan of every commit since 1875b91: none.
+
+### For the owner, when flying
+
+Spawn on Hibari Yard and look along the loop: the blue coupe is half a lap
+behind the red drift car. Chase it down the lane under the footbridge: it
+brakes for the south bends where the drift car slides, and takes the same
+bend without a slide. What would be wrong: it closing on or dropping back
+from the drift car over a few laps (the check says it cannot), it clipping
+the oncoming box truck in the south west bends, or its nose reading as any
+particular maker's badge.
+
+## 2026-09-26 | art | The cars' second pass: a face of its own for every kind
+
+The owner, 2026-09-26: "second pass on the cars please", with the lead's
+read of the first pass: the r32 right, the others clean but simple, flat
+fronts with two lamp rectangles, the kei, hatch and minivan faces nearly
+the same, the lower front chamfer reading as an odd facet, and budget to
+spend. For every kind but the r32 and the e82. No physics, no module ABI,
+no build; dist/sim.wasm, src/native and tests/goldens untouched. Commits
+e2adacc and aaaed2e (the lead's checkpoints of work in progress) and
+c94238c, then this entry.
+
+### What changed, for every kind
+
+All in src/art/cars.js, gated on the kinds' `p2` rows, so the r32 and the
+e82 are drawn exactly as before: a fingerprint of every buffer of both, in
+three builds each, is the same before and after (scratch geohash.mjs).
+
+- **Bumpers are pieces of their own** (bumperLoft): a section swept along
+  the plan from the arch round a rounded corner across the end and back,
+  standing 5 to 7 cm proud across the end and 2 cm off the flank, its foot
+  tucked, its top rolling back into the body as a lit ledge, easing off
+  toward the arch. The body's profile no longer carries a bumper, so the
+  plan chamfer the lead saw at each lower front corner is gone; the body's
+  end runs down behind the bumper.
+- **Lamps, grilles and intakes in rims** (pod): a rim stands off the face,
+  its inner side goes down to the lens, so the lens sits in a recess whose
+  shadow side reads as depth. Grille bars stand at half the rim's height.
+- **Lips on the arches** (archLipP2), standing 1.2 to 1.4 cm proud. The
+  body's flank stands in by that much (hw is W / 2 less the lip's stand), so
+  lips and bumpers reach the car's width and no further.
+- **Softer forms**: prism's `smooth` gives each ring of a round the normal
+  of a round through it, so the cel bands run along a shoulder as lines;
+  the roof edge is a round in three facets, and the round kinds' roofs and
+  shoulders are larger (kei 0.09, hatch and minivan 0.10, minibus 0.14).
+- **Glass**: the dark tinted base, a paler reflection band across its upper
+  part with a hard edge (a new flat, GLASS_BAND), the glints over it, the
+  dark frames as before.
+- **Wipers** lie on the windscreen as blades (they were bars hidden in its
+  foot); a rear wiper on the kei, kei van, hatch, wagon and minivan.
+- **Mirrors**: a dark foot on the door's corner, a dark arm, a shell in
+  paint, round at its front and narrower at its outer end, the glass on its
+  back.
+- **A tyre's inner face** on a parked wheel, so a wheel seen from the far
+  side or from behind is a tyre and not the thin edge of its tread (the
+  first pass drew that edge as a black blade under every car's far corner).
+- **Plates** stand square and clear of a bumper's roll (the kei's plate
+  first went half inside its bumper).
+
+### Each kind's face (FACES)
+
+    kei       small rounded lamps high on the corners in painted rims, a
+              bright ringed slot between, a big painted bumper with a wide
+              barred intake and two round fog lamps; tall rounded tail
+              lamps, reflectors on the bumper
+    keivan    a black band right across, square lamps at its ends in grey
+              bezels, bars between; a plain black bumper
+    keitruck  lamps in painted rims at the corners, a black barred grille,
+              a bright bumper wrapping the corners, bezelled tail lamps
+    hatch     lamps swept up and back round the corners, a slim slot under
+              the bonnet's edge, a big trapezoid barred mouth with fog lamps
+              in its corners; corner tail lamps wrapping onto the flanks
+    sedan     an upright bright framed grille with six vertical bars, twin
+              lamps in bright rims, amber round the corners, a rubbing
+              strip; wide tail lamps and a bright framed garnish
+    wagon     wedge lamps, a painted barred grille, a plain black bumper
+    minivan   wide lamps with twin projectors joined by a bright barred
+              grille, a deep bumper with a big lower grille and upright fog
+              lamps in bright rims; tall tail lamps, a bright garnish
+    van       lamps sunk in painted rims, a bright framed grille between, a
+              second barred mouth below, a black bumper
+    boxtruck  a big black barred grille panel, lamps in the bright bumper,
+              amber markers high on the cab's corners
+    minibus   twin square lamps each side in black housings, a bright framed
+              barred grille, fog lamps in a black bumper
+
+### Dimensions are physics, and are unchanged
+
+No table moved: SPEC, CAR_KINDS, CAR_H, STYLE_DIMS, VEHICLE_KINDS. The town
+fits its colliders on the vendored drawing, so its 19,515 boxes still hash
+a118277a53298663, and Hibari Yard's 552 still hash da1fb02b788cf315. What
+is drawn stays within the solid as the first pass kept it: the bumpers
+stand past L / 2 as the vendored bumper bar did, the flank is 1.2 to 1.4 cm
+inside W / 2, and the hatch's nose leans back 10 cm at its top (8 before)
+rather than the more a sloped nose would want, because the solid is a box
+to the waist and a steeper nose would leave an invisible wedge in front of
+it.
+
+### Triangles, a car (parked, wheels in)
+
+    kind       vendored   first pass   second pass
+    kei          2,012       1,375        1,897
+    keivan       1,940       1,389        1,815
+    keitruck       690       1,205        1,539
+    hatch        2,024       1,337        1,719
+    sedan        2,036       1,383        1,989
+    wagon        2,024       1,369        1,691
+    minivan      2,024       1,407        1,930
+    van          1,940       1,387        1,837
+    boxtruck     2,144       1,397        1,715
+    minibus      2,048       1,437        1,881
+
+Every kind is still under its vendored count but the kei truck. The first
+draft was over (the kei at 2,285): the fog lamps became flats, the tail
+lamps lost their outer walls, the small pods and the rings round the lamps
+went, the bumper's corner has three facets, the arch lip's inner edge is
+left open behind the wheel. A moving car's body: kei 1,233, keivan 1,167,
+boxtruck 979 (four or six wheels as instances, as before).
+
+### The budget
+
+window.__budget at the scratch rig's fixed cameras, 1280 by 720, calls /
+triangles. Vendored is the tree before the first pass (716562b), first pass
+b5ca53f, second pass c94238c's cars:
+
+    the town, Low           vendored          first pass       second pass
+    spawn                406 / 853,598     404 / 833,029    404 / 852,728
+    street               373 / 890,416     373 / 869,851    373 / 889,550
+    car park             194 / 819,590     194 / 798,793    194 / 818,492
+    rokuchome bays       215 / 826,182     215 / 805,385    215 / 825,084
+    school bays          203 / 855,678     203 / 834,953    203 / 854,652
+    high                 219 / 856,346     220 / 835,877    220 / 855,576
+
+    the town, High
+    spawn                627 / 1,111,865   625 / 1,088,900  627 / 1,116,605
+    street               521 / 1,106,711   521 / 1,083,322  521 / 1,110,897
+    car park             333 / 1,017,834   333 / 985,973    333 / 1,017,308
+    rokuchome bays       299 / 979,827     299 / 952,188    299 / 978,569
+    school bays          326 / 1,033,119   326 / 1,008,840  326 / 1,034,689
+    high                 292 / 977,768     293 / 954,001    293 / 977,912
+
+On Low every view is under the vendored level, by 700 to 1,100. On High two
+views are over it, spawn by 4,740 (0.43 per cent) and street by 4,186, and
+school by 1,570; the car park and rokuchome are under. No new draw call in
+the town (the band glass folds into a look the bake already has; spawn's
+two calls come and go with the cull grid). Attribute memory 52.3 to 53.5
+MB on Low, 63.6 to 65.1 on High. A parked car's distance level of detail
+was not built: the town bakes its cars into its cells by look, so a far
+version is a second bake a cell, and 0.4 per cent on High did not seem to
+earn it. Put to the owner.
+
+    Hibari Yard           first pass          second pass
+    Low, whole plot      522 / 128,139       527 / 129,691
+    Low, verge            91 / 47,714         93 / 48,872
+    High, whole plot     576 / 158,557       581 / 160,135
+    High, verge          239 / 118,158       242 / 120,628
+
+Two more prop batches on a built map (the band glass is one), and the
+moving cars 54 meshes and 8,638 triangles to 57 and 9,286 (58 to 61 at
+dusk): three more draw calls for the four moving cars.
+
+### Pictures, looked at, in the session's scratchpad (not committed)
+
+Under /tmp/claude-0/-home-user-WebFPVSimulator/6ddfd91b-7f5b-543b-a441-691d12014517/scratchpad/pics/p2:
+
+- first/ and final/: every kind, front and rear three quarter, day and
+  dusk (day/, dusk/: front-KIND.png, rear-KIND.png), and the kei, hatch,
+  minivan and sedan fronts close (day/close-KIND.png). The first pass from
+  b5ca53f's sources, the second from c94238c's.
+- sheets/: final-day-front-a, -b, -c and final-day-rear-a, -b, -c (and
+  dusk), every kind side by side; cmp-kei, cmp-hatch, cmp-minivan,
+  cmp-sedan, each first pass beside second; first-front-day and so on for
+  the first pass's own sheets.
+- town-first/ and town-final/: the town's car park from above and at
+  street level on its roof (carpark, roof2, roof4, roof5) and the spawn
+  street; sheets/town-cmp-carpark, -roof2, -roof5, -spawn pair them.
+- yard-van/ and yard-truck/: Hibari Yard's kei van and box truck driving.
+
+What they show: from the front at ten metres the kei (small high lamps, the
+slot, the big painted bumper), the hatch (swept lamps, the mouth), the
+minivan (the wide lamps and the bright bars) and the sedan (the bright
+upright grille) no longer share a face, and the kei van's black band, the
+van's and the minibus's are their own. The bumpers stand off the body at
+three quarters and the lamps sit in their rims; the band makes glass read
+as glass at any distance. At dusk the twin projectors and the rimmed tail
+lamps are what the silhouettes are known by. What is weaker: the rears of
+the tall kinds (kei, kei van, wagon, van, minibus) are still alike, tall
+lamps either side of a plate, which is true of the real cars; the front
+bumper's end meets the arch lip in a small notch seen side on; the kei
+truck is over its vendored count.
+
+### What went wrong
+
+- The kei's plate went half inside its bumper: plate() laid the plate from
+  the face at its foot to the face at its top, and the top was on the
+  bumper's roll, behind its face. Plates now stand square and clear of the
+  most that lies under them.
+- The hatch's lamp wrapped round its corner as a clear lens on the flank
+  and the chamfer, and read as a white flag; taken off. The sedan's amber
+  wrap was the same at twice the size; cut to a sliver.
+- The first draft was 400 to 900 triangles a car over the first pass, over
+  the vendored level (above for what was cut).
+- The dusk town shot is golden: the town has one light and ignores a
+  scene's time, which only a built map reads.
+
+### Found, not fixed
+
+- The r32 and the e82 still draw the parked tyre without its inner face,
+  so their far wheels show the same blade; they were left exactly as they
+  were, as the brief said.
+- Town on High is 0.43 per cent over the vendored level at spawn (above).
+
+### Checks, run in this session
+
+On c94238c's cars (the header comment was the one edit after them):
+
+    npm run check:props          all passed
+    npm run check:roads          all passed
+    npm run check:clip           877 passed, 0 failed
+    npm run check:world          all passed
+    npm run check:world-golden   all passed, tests/goldens/world.json
+                                 untouched
+    npm run check:world-engines  Node and Chromium agree to the bit on
+                                 every step of every run
+    npm run check:chase          all passed
+    npm run check:counter        all passed
+    npm run lint:boot            9 of 9 clean
+    npm run lint:memory          PASS, every world lazy and freed
+    npm run lint:quality         56 of 56 clean
+    npm run lint:preload         up to date
+    npm run lint:shell           FAIL, the known "title: overflow grew from
+                                 0 to 67 px" on main, nothing else
+    collider hashes (scratch)    town 19,515 boxes a118277a53298663, yard
+                                 552 boxes da1fb02b788cf315, as before
+    r32 and e82 fingerprints     unchanged (b37fabe1e4dc6c89,
+                                 1c3e2dbd0c1561da)
+
+Not run: npm run verify (not asked, and not physics, the plant, the ABI or
+the build), shots.js. Dash scan of every change since b5ca53f: none.
+
+### For the owner, when flying
+
+Park on the town's car park roof or the spawn street and come down to three
+metres from a car's nose: its lamps should sit in rims, its bumper should
+stand off the body round the corner, and a kei, a hatch and a minivan side
+by side should have three different faces. What would be wrong: a lamp or
+plate floating off a face or sinking into it, a bumper with a gap between
+it and the body at a corner, a far wheel showing as a black blade, glass
+that reads as paint.
+
+## 2026-09-26 | owner | The 135i stays fast, no distance detail for parked cars, and the cars go to main
+
+Asked two questions from the cars' entries above, the owner answered on
+2026-09-26: "keep it fast, skip the LOD, push the cars to main".
+
+1. **The e82 corners at the drift car's 8 m/s/s** (LATERAL.e82), so it
+   keeps half a lap behind the R32 in the drift car's lane on Hibari Yard,
+   gripping where the R32 slides. Every e82 on any built map is driven that
+   hard; the slower alternative (the other lane at 28 km/h) was declined.
+2. **No distance level of detail for parked cars.** The second pass leaves
+   the town at most 0.43% over the vendored triangle count on High (Low is
+   under it), with no new draw calls; a far version would need a second bake
+   per cell, and the owner judged it not worth it.
+3. The R32, the 135i and both passes on every car go to main.
+
+## 2026-09-26 | ui, hud, results | Polish item 19: the menus in the manga hand, the tier kana drawn, the quad inked
+
+The owner, 2026-09-26, in order of work: "starting with map card and stage
+f then manga menus". The map card and Stage F are on main; this is the
+manga menus, POLISH-PLAN.md item 19: the lettering lived only in the
+freestyle callouts and the results page, the wordmark and the room titles
+were the system sans, the combo tier kana were font glyphs that a machine
+with no Japanese font draws as boxes, and the results panels drew the quad
+as four circles and a box. Built on claude/vibrant-wozniak-v2pg5e at
+3040628, branch manga-menus, not pushed: the lead merges it. Shell, UI and
+2D canvas only: no physics, plant, module ABI or build change; nothing
+under src/game, src/native, src/render, vendor or patches moved.
+
+### What was built, a commit each
+
+- **The wordmark and the room titles** (6d8ca51). WEBFPV and every room's
+  title (Tracks, Freestyle, Quad, Settings, Rates, PIDs, How to fly, Trick
+  list, Standings, Before you fly, Calibrate sticks, Choose joystick,
+  Credits, Paused, and the results' head; every screen's own h2, so the
+  last three are lettered by the same rule, not pictured, because main.js
+  decides when they show) are drawn by the lettering's own
+  code, src/ui/lettering.js paintTitle: heavy slanted capitals, the ink
+  line, the hard drop and the two cel bands of the callouts. The wordmark
+  is one word in two runs, WEB in cream and FPV in sakura (drawRuns, of
+  which drawWord is now the one run case, drawing exactly as before), so
+  the B and the F share one outline. The fill is the heading's own CSS
+  colour, read when it is lettered: a record's title is mint because its
+  CSS says so. The ink is a fifth of the size at callout sizes and thins to
+  a tenth on the 104 px wordmark, where a fifth closed the letters up.
+  - **Accessible and searchable.** The heading keeps its words in the DOM,
+    in their place and at their size, with their fill made transparent;
+    the lettering is an aria-hidden canvas laid on the text's own baseline
+    (a zero sized probe on the baseline says where). A screen reader, find
+    in page and a search engine read the words; the layout is the text's
+    to the pixel, which is why lint:shell cannot move. Forced colours turns
+    the drawing off and the text back on.
+  - **Painted once.** A heading is painted when its screen is shown and
+    again only when its words, colour, size or room change (a key on the
+    element), from show() and one resize listener that waits for the window
+    to settle. A screen visited twice paints nothing the second time;
+    nothing is drawn per frame. The results head's text goes through
+    setHeadingText, which letters it again at once, because textContent
+    takes the canvas with it.
+  - **Clean FPV does not turn this off, on purpose.** Clean FPV is about
+    flight: nothing drawn over the picture while flying (decision 4, section
+    3.3). A menu is not flying, and a title is looked at, not read at speed,
+    so the menus wear the game's hand whatever Clean FPV says, on race
+    tracks too. The pause menu's title is lettered over a race; the race's
+    flight HUD is not touched.
+- **An ink frame on the menu panels** (a9f1c56). Square corners, a 2 px
+  ink frame in the town's ink (a new token, --ink-line, #0b1116), a hairline
+  of the page's paper outside it, the gutter a manga panel is cut from, and
+  a hard 7 by 8 px drop with no blur, the way the results page sits on the
+  share card. The sakura top line, the menus' chrome in index.html's colour
+  rule, stays inside the frame. All box shadow, so no layout moves. The
+  rows stay the system's text: they are read, not looked at. The Betaflight
+  bench keeps its own look. Kept restrained for the owner's eye: the map
+  and gate cards, which are panels with pictures, were left as they are.
+- **The tier kana drawn with the stroke kana** (0568889, then 9559499 and
+  188a688, below). The tiers switch to katakana, the way a manga
+  letters a shout, and the stroke set grows to spell them: イイネ, スゴイ,
+  ヤバイ, and サイコー for 最高. **最高 is not drawn**: it is ten and ten
+  strokes of kanji at a badge's twelve pixels, a smudge, and サイコー is
+  the spelling a manga gives it when somebody yells it. Five kana added,
+  イ ネ コ ヤ サ, and ゴ is コ voiced, the way the set already builds ズ
+  and バ. paintKana draws a word as one ink brush line with no core, a
+  steadier hand than an effect's, painted once per tier at a 28 px cell
+  and set by CSS at the badge's size, so it never repaints. The word stays
+  in the DOM for a screen reader. drawSfx and paintKana share one walker
+  (eachKana), and the sound effects draw exactly as before.
+- **The results panels' quad, inked** (e1e2691). A stretched X of carbon
+  arms, a steel bell and shaft on each, the stack's plate, the pack in two
+  cel bands under its strap, a camera pod at the nose in sakura with the
+  camera, its lens and a glint, the antenna off the back, and the props as
+  blurred discs with two speed arcs each. Two line weights, as an inker
+  uses them: heavy round the outside, light within, and one width all round
+  however far it is squashed, because the points are placed by hand and
+  not under a squashed transform. Under fourteen pixels a side the fine
+  work (hubs, strap, glint, arcs) is left out. The pod's sakura is the only
+  sakura on the craft, so which way it points is never in doubt; the
+  antenna marks the tail.
+  - **The Tricks room's film draws it too.** trickfilm.js's drawQuad is the
+    one drawing the page imports, on purpose (its comment: the craft in a
+    gap is the one the films teach with), and the page's BEST TRICK panel
+    is a film still. So the change is in drawQuad and the film has it. Its
+    caption, "the pink nose is the front", is still true.
+
+### Not done, and why
+
+- **The OSD numerals stay the system's type.** The brief's list left them
+  out and item 5 of it is to keep race flight clean; a numeral is read, and
+  it changes every frame, which the lettering is not for.
+- Dialog titles (Your name, Report a bug, Keep this report?, How does it
+  fly?) are not rooms and are not lettered.
+- The share card's wordmark is src/share/card.js's drawWordmark, which the
+  track cards and the board draw with too; left as it is, for the owner to
+  ask for.
+
+### Race flight stays clean
+
+Nothing in the flight HUD changes on a race track. The tier badge is the
+freestyle score HUD's, which a race never shows; the race OSD's rules in
+index.html are untouched. What a pilot on a race track sees differently is
+menus: the lettered titles and the framed panels, the pause menu included.
+
+### The badge and the outer third
+
+サイコー is four kana where 最高 was two glyphs, so the Perfect badge is
+wider. At the effects' advance the combo line's box ran to 280.5 px of
+the 281.3 px first third at 844 by 390, so a badge word now steps at 0.86
+of it (188a688). Measured after, the Perfect badge's right edge: 241.9 px
+of 281.3 at 844 by 390, 321 px of 533.3 at 1600 by 900. On a 390 px
+portrait phone the combo line was already past the first third before
+this (its box to 246.6 px of 130, with the font glyphs): the portrait
+layout's, found and not changed. The combo box is the height it was with
+the font glyphs: 44 px at 1600 by 900, 33.625 px at 844 by 390, 32 px at
+390 by 844 (9559499).
+
+### RUN LOG
+
+Browser profiles in a private temp folder (TMPDIR), removed at the end.
+
+    npm run check:clip        910 passed, 0 failed (e1e2691 and 188a688)
+    npm run lint:preload      up to date, boot 115 modules, city 74, built
+                              33; 220 served, no regeneration needed (no
+                              module was added) (e1e2691 and 188a688)
+    npm run lint:boot         9 of 9 checks clean (e1e2691 and 188a688)
+    npm run lint:shell        PASS, title overflow 0 px, every screen at or
+                              under its baseline (e1e2691); one note, below
+    npm run lint:devices      PASS, five devices all clear, four builder
+                              windows clear, results at 1280x720 and
+                              1600x900 clear of the menu (9559499)
+    npm run lint:responsive   PASS, freestyle 333 frames, worst gap 394 ms,
+                              0 over 500 ms
+    npm run lint:memory       PASS, every world lazy and freed; boot baseline
+                              61 geometries, 5 textures, 131 requests
+    npm run lint:input        all 160 passed, 190 s
+    node --check, and Node    ui.js, lettering.js, scorehud.js, trickfilm.js
+    imports                   and mangapage.js import in Node (188a688)
+    dash scan                 none, U+2012 to U+2015 by code point, in every
+                              added line
+    npm run verify            not run: no physics, plant, ABI or build
+                              change, and the brief said not to
+
+lint:memory and lint:input ran on 188a688's tree before it was committed;
+lint:responsive started as its two lines of lettering.js were written, and
+they change only the spacing of the badge's kana, which a responsive run
+never draws. 9559499 and 188a688 touch only the badge, which lint:shell
+and lint:devices do not reach. No threshold, baseline or golden moved:
+tests/shell-baseline.json is untouched.
+
+### Pictures
+
+In the session scratchpad, never committed:
+`/tmp/claude-0/-home-user-WebFPVSimulator/6ddfd91b-7f5b-543b-a441-691d12014517/scratchpad/manga-menus/shots/`.
+b- is before, served from a git archive of 3040628 in the scratchpad; a1-
+and a2- after. The real shell through tests/lib/page.js (a rig in the
+style of scripts/shots.js), with Flags and cones (the board's document)
+seeded as the race track, and Hibari Yard reached through the gate's
+Freestyle card for the freestyle map; the results page is the lettering's
+five and two panel fixtures through window.__lettering.
+
+Looked at, every one:
+
+- **1600 by 900, race track seated**: b-1600-00-gate and a1-1600-00-gate
+  (the gate, the wordmark lettered over the four cards); -01-title (the
+  title, the lettered wordmark over the framed menu); -02-freestyle, quad,
+  pilot (SETTINGS), rates, pids, howto, tricks (the film with the new
+  craft), fc (the Betaflight bench, unchanged in both), show-standings,
+  credits; a1-1600-02-courses (TRACKS, left set over its sakura rule; its
+  before at this size went with the first, mislabelled before set, and the
+  phones' b-844-11-courses and b-390-11-courses stand in);
+  -04-pause (PAUSED over the race's dimmed OSD, the OSD unchanged);
+  b-1600-launch and a3-1600-launch (BEFORE YOU FLY).
+- **1600 by 900, Hibari Yard**: -12-pause-free; -14-flight-hud (the yard's
+  HUD with the Perfect badge in stroke kana); -15-results-all and -two (the
+  five and two panel pages, every craft inked); -16-card.jpg (the share
+  card); b-1600-05-tier-2 to 5 and -13-tier-5-clean against a3-1600-tier-2
+  to 5 and a1-1600-13-tier-5-clean, and a1-crop-tier-2 to 5 at four times
+  (イイネ, スゴイ, ヤバイ, サイコー, each legible).
+- **Phones, touch**: b-844- and a2-844-, b-390- and a2-390-: the title,
+  Tracks, Freestyle, Quad, Settings, How to fly, the pause menu, the tier
+  badges, the flight HUD and both results pages.
+- **Close ups**: b-crop-wordmark and h1-crop-wordmark (the wordmark before
+  and after at two times); a1-crop-corner (the menu frame at three times);
+  b-crop-gap and a1-crop-gap (the gap panel's craft at four times);
+  b-crop-film and a1-crop-film (the Tricks room's film craft); q3-quads (the
+  inked quad from 8 to 110 px, plan, squashed, turned, and its underside).
+
+### What went wrong
+
+- The first before run pressed Enter on the gate, which took the race card
+  into the Tracks room, and pictured that as the title; the flows now show
+  the title after the gate. Fly then went to the Tracks room, having no
+  track: a seeded course fixed it for the race, and the gate's Freestyle
+  card for the yard.
+- The heading's own text shadow still drew under the lettering as a grey
+  ghost: .screen h1 outranked .is-lettered. The rule takes two classes now,
+  and a third for the results head, whose own rule is later in the sheet.
+- The quad's first camera pod read black: the heavy ink ate the sakura,
+  and the antenna's sakura cap put pink at both ends. Two line weights, a
+  wider pod and a carbon cap.
+- The badge kana at a 0.15 line read thin beside the heavy English word:
+  0.19, in a canvas a cell and a third tall so the strokes are not clipped.
+  That grew the combo line by 0.7 px until its margins were set inside the
+  line (9559499).
+- A second picture job was started from the worktree rather than the
+  scratchpad and wrote its log there: nothing ran, and the log was deleted
+  before any commit.
+- grep for U+2012 to U+2015 matched the bytes of kana under the C locale;
+  the dash scan was done by code point in Python instead.
+
+### Found, not fixed
+
+- lint:shell notes "tricks: overflow improved from 1649 to 1605 px,
+  re-record the baseline". It is not this work's: the same run on the
+  base snapshot (3040628) prints the same note. 44 px is one row of the
+  list, which has 42 tricks now; most likely the row that went is the
+  Maverick Loop the owner had removed (decision 9), but that was not
+  traced. Not re-recorded: a baseline moves with an argument, not as a
+  side effect of other work.
+- On a 390 by 844 phone the bug chip and the music chip sit over the
+  Settings and Tracks titles and over the Tracks lede, before and after
+  this alike (b-390-11-pilot, a2-390-11-pilot): the portrait layout's.
+
+### For the owner, when flying
+
+Verification to choose: this is shell and 2D canvas only, so **shots** or
+**fly it** would see it; verify would not. **Look for**: the wordmark and
+every room's title in the callouts' hand, crisp, on the text's own line and
+not shifted; the menu panels with a thin ink frame and a hard shadow, the
+rows plain and easy to read; the combo tier badge on a freestyle map
+reading イイネ, スゴイ, ヤバイ, サイコー in brush strokes; the results
+page's quads with arms, motors, props and a pink camera pod at the front;
+the Tricks room's film with the same craft. **Wrong would be**: a title
+doubled (the drawing and the text both visible), cut off or overlapping a
+lede; a frame that looks like a web form's border rather than a panel's;
+a tier badge taller than it was or reaching into the middle third; any
+lettering in a race's flight view.
+
+## 2026-09-26 | physics path, shell, checks | Crashes judged per physics step, the same at every frame rate
+
+The owner, 2026-09-26, answer 5 at the end of POLISH-PLAN.md: "5. ok
+approved", for "judge crashes per physics step, which removes the frame rate
+dependence and changes crash outcomes" (item 16). It is on the physics path
+and changes the core's crash outcomes; it changes no module ABI and no build
+(dist/sim.wasm and src/native are untouched), which the survey said and this
+work confirmed. Under CLAUDE.md the coverage landed first, in a commit of
+its own, failing, and the change came after it.
+
+### The coverage, first
+
+**scripts/crash-pacing.js**, `npm run check:crash-pacing`, and verify's
+check 18. Each scenario is flown once through dist/sim.wasm and Betaflight
+by a pilot on feedback, one step a frame, and what the pilot did is kept:
+the sticks at every 4 ms RC slot and the step of each angle mode switch.
+That input stream is flown again from the start at one step a frame, 144 Hz
+at every whole ms phase (7), 60 Hz (17), 30 Hz (34) and a 60 Hz that hitches
+(a 150 ms frame the shell caps at 100 ms of steps, a short one, a dropped
+one: 24 rotations and phases), 83 flights a scenario, the way src/main.js's
+frame loop flies: wall clock frames, dt capped at 100 ms, the accumulator,
+the frame's RC samples handed over before its steps, the steps one at a
+time, and the shell's own crash judge asked where the shell asks it.
+
+The judge had to be reachable without a browser, so the judgement moved out
+of main.js into **CrashJudge in src/game/collide.js**, as it stood:
+`step()` gathers what the step loop gathered, `ground(nowWall, hits)` is the
+ground judgement on the frame's peaks behind the wall clock cooldown,
+`contact(rep, st)` is the solid rule on the frame's summed report at the
+frame's end attitude and the STOP. main.js calls it at the points where the
+rules stood, with the same numbers; the step loop reads sim_ground_contacts
+once a step now and hands the one reading to both the judge and its own
+takeoff test. With it, **foldWorldReport**, sim_world_report's own sum
+done in the shell, so a frame can be given the report the module would give
+it from reads taken every step.
+
+Eight scenarios, five found by sweeping two pilots' numbers for flights the
+frame end reading disagreed about, and three anchors:
+
+- a wall tap at 4.2 m/s closing with the belly 50 degrees off the wall,
+  outside the cone on the step it lands and turning into it after;
+- a shallower one, belly 63 degrees off, whose props close at 4.0 m/s and
+  whose frame touches 3 ms later at 3.5, so no single step holds both;
+- a belly skim then touches at 145, 176 and 186 ms as it rolls on its side,
+  body up 0.75, 0.70, 0.69: the one at 186 is the first past the cooldown;
+- a skim, a belly touch at 133 ms and side touches at 172 and 185 ms, which
+  a stutter frame turns into a judged bump that hides the side touches;
+- a skim, then the side at 174 ms, inside the cooldown, stopped by the grass
+  to 1.1 m/s by the first step past it;
+- anchors: a steep nose first hit (a crash), a belly first tap (not), flat
+  on its back onto the grass at 8 m/s (a crash).
+
+Each asserts: the flight is the same at every pacing, every step's state,
+ground contacts and report to the bit up to the verdict; the report folded
+per step is the module's once a frame report to the bit; no frame ends in a
+perch before the verdict; for the five edges, the reading the shell used
+until now (the check's frameEndReading) still disagrees with itself across
+the pacings, so a pass can never be a flight that drifted off its edge; and
+then **the same verdict and the same reset step at every pacing and phase**,
+and the ground's judged hits on the same steps. The anchors pin their kind.
+
+**Behaviour identical, the extraction.** check:crash 68 of 68 guards pass
+on the parent (3040628) and on the extraction, 0 failed; its targets are
+measured on the headless frame clock and moved between the two runs as they
+move between any two (the 20 m/s run's upward kick 0 and 1.03 m/s, the
+glancing hit's speed kept 34736 and 97 percent), which is why that script
+compares nothing for equality. check:clip 910 passed, 0 failed, on a copy
+of the parent and on the extraction. check:plant, check:world and
+check:world-golden all passed. And a scratch comparison: the extracted
+judge, driven as the shell drives it, against the check's frameEndReading,
+a line by line transcription of main.js at 3040628, over all 664 flights:
+0 differ.
+
+**Its result on the judgement as it stood: 10 FAILED**, every guard
+passing. The verdict at each pacing, reset of phases:
+
+    scenario                       1 kHz   144 Hz  60 Hz   30 Hz   stutter
+    tap, the landing step resets   reset   7/7     7/17    7/34    4/24
+    tap, no one step resets        kept    4/7     14/17   31/34   22/24
+    skim, side just past cooldown  reset   3/7     6/17    24/34   11/24
+    skim, touch inside cooldown    reset   7/7     17/17   34/34   7/24
+    skim, side inside cooldown     kept    2/7     9/17    10/34   18/24
+
+The same verdict and reset step failed for all five edges; the ground's
+judged hits failed for the three skims; and the two crash anchors failed
+the reset step, because a crash read at the frame's end is reset on the
+frame's last step, which is wherever the frame happened to end: the nose
+first hit at 41 different steps from 2740 to 2838 ms. The belly tap anchor
+passed everything.
+
+### The change
+
+- **CrashJudge judges every step** (src/game/collide.js). `step()` takes the
+  state either side of one physics step, that step's sim_ground_contacts,
+  that step's own world report, the sim clock it ended at, and whether the
+  shell's perch may take a craft at rest (not while taking off or waiting in
+  turtle), and asks the three rules of that step alone, as the old reading
+  asked a frame one step long:
+  - the ground, on the step's own closing speed, its speed going in and
+    body up after it, BOUNCE_COOLDOWN_MS of **sim clock** after the last
+    contact it judged; a step that leaves the craft at rest where the shell
+    would perch it is a landing and not a hit, and starts no cooldown, as
+    the frame's perch came before its ground judgement;
+  - the solid rule, on the step's report against the attitude after it;
+  - the STOP, on the step's own velocity change, with no solid touched in
+    that step. It counts as a hard hit unless the ground counted one within
+    BOUNCE_COOLDOWN_MS of sim clock before it: the frame's "not twice in one
+    frame", held on the step clock.
+
+  It returns true on a crash. After the steps the shell reads what they
+  found: `hit` (the ground's judged smack and its step), `crash` (the rule
+  and its step) and `stopHard`. The wall clock is gone from it.
+- **The step loop reads the world report every step** (src/main.js,
+  readStepReport) and folds it into `frameReport`, which everything that
+  read it once a frame now reads (the sound and shake, the Wall Tap
+  recogniser, passStats). Anything stepped outside the loop, the launch
+  stand, is read and folded in at the frame's end as before.
+- **A crash ends the step loop on its step**, when crashResetTick will take
+  it (crashCanReset, its own guard, asked before the steps). The rest of the
+  frame is never flown, since the reset would throw it away, and the
+  render, the set down (its position and heading) and the impact frame read
+  the crash step's own state: statePrev and stateCurr are both that step,
+  and the cars are read with it. The lap clock still takes the whole frame,
+  as it did, because the craft sits set down for the rest of it; simStepIdx
+  and airtime take the steps flown. The perch is skipped on a crash step.
+- **The ground's hit is acted on whether or not the frame ends in a
+  perch.** It sat in the perch's else; the judge now makes the perch's
+  call per step, above.
+- **scripts/world-check.js**: its reading, "a wall tap is judged the same
+  whichever way the map faces", judges the tap and the nose first hit one
+  step at a time as well as over 7, 16 and 33 step frames: 1/7/16/33, every
+  line as before, and its comment says how the shell reads it now. No
+  scenario moved; READINGS are not in the world golden.
+- **check:clip, a new suite**, "crash judge: every step on its own, on the
+  sim clock", 26 checks: the STOP (no flight in crash-pacing produced one:
+  a flat back fall onto the grass reports a ground contact and is the ground
+  rule's), its hard count and its once, the ground's cooldown to the step
+  and on the sim clock, a clock gone backwards, forget(), a landing at rest
+  as the perch's, the first crash of a frame kept, the solid rule at the
+  step's own attitude, and the fold.
+- **The check's frame driver followed main.js's calls**, nothing it asserts:
+  it reads `hit` and `crash` after the steps instead of calling
+  `ground(nowWall, hits)` and `contact(rep, st)`, passes the perch flag,
+  skips its perch guard on a crash step as main.js skips the perch, and the
+  fold guard flies whole flights unjudged ('fold' against 'frame'), because
+  a judged flight now stops mid frame on its crash step.
+
+No module ABI, build or plant change: dist/sim.wasm (5408b3e2),
+src/native, patches and vendor are untouched, and so is everything under
+tests/ but check 18 and its thresholds entry from the first commit.
+
+### After the change
+
+check:crash-pacing **all passed, 48 of 48 lines**, every scenario the same
+flight to the bit at all 83 pacings and phases:
+
+    scenario                       at every pacing and phase
+    tap, the landing step resets   solid, reset at 3303 ms
+    tap, no one step resets        no crash
+    skim, side just past cooldown  ground, reset at 2934 ms (hits 2748, 2934)
+    skim, touch inside cooldown    ground, reset at 3015 ms (hits 2830, 3015)
+    skim, side inside cooldown     no crash (hit 2806, a bump)
+    nose first hit                 solid, reset at 2740 ms
+    belly first tap                no crash
+    flat on its back at 8 m/s      ground, reset at 792 ms
+
+**What it can and cannot see.** It drives CrashJudge through a frame driver
+that mirrors main.js's calls; that main.js makes those calls (the break, the
+perch skip, the report fold) is read in the diff, not flown, and check:crash
+flies the real loop in Chromium without asserting a reset step. It holds the
+verdict to the frames, not the rule to the truth: judging the solid rule at
+the attitude before the step instead of after it, tried as a mutation,
+passed crash-pacing and failed check:clip's "pitched back 50 it is the
+belly, and not" (935 passed, 1 failed); restored byte for byte.
+
+### What a pilot will feel, and on what frame rates
+
+Every frame rate now gets the verdict a 1000 Hz display would have got,
+because the crash is judged on the millisecond it happens. So 144 Hz and
+240 Hz pilots feel the least change, and 60 and 30 Hz pilots and any
+machine that hitches feel the most. From the scenarios, which are edges on
+purpose:
+
+- **A tap that lands just outside the belly cone and rolls into it** is a
+  crash on the step it lands, everywhere. It was forgiven on 10 of 17 phases
+  at 60 Hz, 27 of 34 at 30 Hz and 20 of 24 of the stutter, and reset on all
+  7 at 144 Hz.
+- **A tap whose props meet the wall at a smack's speed and whose frame
+  follows slower** is no longer a crash anywhere. It was reset on 4 of 7
+  phases at 144 Hz, 14 of 17 at 60 and 31 of 34 at 30.
+- **After a skim**, a touch of the grass is judged when it comes 180 ms of
+  sim time after the last judged one, whatever the monitor, and a hitch no
+  longer ends that early and lets a harmless belly touch hide a crash (the
+  stutter missed the fourth scenario's crash on 17 of 24 phases).
+- **The reset itself** comes from the step that crashed, not the end of the
+  frame it fell in: at 30 Hz up to 33 ms sooner, a quarter of a metre at
+  8 m/s, and up to 100 ms sooner after a hitch. The set down is found from
+  that step's position and heading, and the impact frame shows it.
+- **Bumps** (the thud, the camera kick, the freestyle BUMP, a hard hit's
+  bail) come on the same contacts at every frame rate. By the rule, not
+  measured: a skid that stopped inside one 30 Hz frame used to be a silent
+  landing there and a bump at 144, and is a bump everywhere now unless the
+  contact step itself left the craft at rest.
+
+### For the owner, when flying
+
+On a 60 Hz laptop, or with the frame rate capped, and then on a 144 Hz
+monitor if there is one: belly first wall taps pitched back about 45
+degrees at 4 to 5 m/s, a skim along the grass then a roll onto the side,
+and ordinary nose first hits. Whether each is reset should be the same on
+both, and a reset should put the craft down where it hit. Wrong would be a
+crash that resets with the craft already past the wall, a landing at rest
+that plays the crash cue, a bump every frame while sliding, or a nose first
+hit that is not reset.
+
+### RUN LOG
+
+Branch crash-per-step from origin/claude/vibrant-wozniak-v2pg5e at 3040628,
+fetched first; the coverage is a78d6f9, the change the commit after it. Not
+pushed: the lead merges it. Browser profiles in a private folder under
+/tmp, removed at the end.
+
+    git diff --stat vendor/betaflight   empty (and not checked out here)
+    npm run build:wasm             could not run: no emcc, no EMSDK, no
+                                   vendor/betaflight; verify's own attempt
+                                   stopped at bf_glue.c's platform.h and
+                                   left dist/sim.wasm as it was, 5408b3e2
+    npm run verify                 17 of 17 passing, check 1 SKIP (above).
+                                   Every row read: 2 a=b=de0401cd4266,
+                                   3 node=chrome=de0401cd4266, 4 one hash
+                                   at 30, 60, 144, 240 Hz, 5 hover 0.2793,
+                                   6 punch 80.0 m, 7 terminal 31.0 m/s,
+                                   8 motor step 26 ms, 9 671.7 deg/s,
+                                   10 yaw -0.10 deg, 11 sag 11.14 percent,
+                                   12 ratio 1.2472, 13 errors 0 warnings 0,
+                                   14 media 2.51 s in 2.51 s, 15 every
+                                   reference in band, 16 no city module
+                                   with the field and its cost unchanged
+                                   across a round trip, 17 35 of 35 runs,
+                                   18 48 of 48 lines. Rows 2 to 12 equal to
+                                   the last recorded run in this file
+    npm run check:crash-pacing     the judgement as it stood (a78d6f9): 10
+                                   FAILED, guards all passing; after: all
+                                   passed, 48 of 48, 18 s
+    npm run check:plant            all passed, before and after
+    npm run check:world            all passed, 110 lines before and after;
+                                   the reading's lines read 1/7/16/33 now,
+                                   every number as 7/16/33 was
+    npm run check:world-golden     all passed, 35 runs, 62 flights, 263200
+                                   steps each flown twice; tests/goldens
+                                   untouched
+    npm run check:world-engines    Node and Chromium agree to the bit on
+                                   every step of every run
+    npm run check:clip             910 passed on the parent and on
+                                   a78d6f9; 936 passed, 0 failed after, the
+                                   26 new
+    npm run check:crash            68 of 68 guards on the parent, on
+                                   a78d6f9 and after; its targets are
+                                   measured on the headless frame clock and
+                                   move between any two runs, as that
+                                   script says, and are compared for nothing
+    npm run score:selftest         all passed
+    npm run check:counter          all passed
+    npm run check:chase            all passed
+    npm run lint:boot              9 of 9 checks clean
+    npm run lint:memory            PASS, every world lazy and freed
+    npm run lint:input             all 160 passed
+    npm run lint:preload           up to date, boot 115 modules
+    scratch                        the extracted judge against a
+                                   transcription of main.js at 3040628, 664
+                                   flights, 0 differ; a mutation, the solid
+                                   rule at the attitude before the step,
+                                   caught by check:clip and not by
+                                   crash-pacing, restored byte for byte
+    node --check                   every changed file
+    dash scan                      no em or en dash in any added line
+    tests/                         only check 18 in tests/lib/checks.js and
+                                   its entry in tests/thresholds.json, both
+                                   in a78d6f9; no threshold widened, no
+                                   golden or baseline touched
+
+Determinism rows, what they can see: 2, 3 and 4 replay
+tests/inputs/baseline.rec through dist/sim.wasm with no world and no shell,
+so they cannot see the crash judge at all. Their hash is the one this file
+has recorded for weeks because the module did not change, and that is all
+it says. The determinism this change is about is check 18's: every
+scenario's flight bit identical at 83 pacings, and one verdict.
+
+### What went wrong
+
+- **The first check:crash on the parent died** with "no DevTools endpoint":
+  its profile was in the session scratchpad, and Chromium would not start
+  from a path that long. A short private folder under /tmp was used after.
+- **The frame end reading first read the reference flight that had stopped
+  at its own verdict**, so frames that ended later read a truncated frame and
+  every phase came out a crash; the edge guard failed for the wrong reason.
+  It reads the recorded flight to its end now.
+- **Shortening the approaches moved the flights**, and the second tap the
+  probe had found was no longer on an edge. The sweep was run again on the
+  check's own pilots and the scenarios chosen from that.
+- **After the change the fold guard failed 4 times**, on the four crash
+  scenarios only: it compared a judged flight, which now stops mid frame on
+  its crash step, with the module's whole frame. The guard flies both
+  unjudged to the end now.
+- **The first per step judge judged the ground before the perch could call
+  it a landing.** Every landing at a smack's speed that comes to rest would
+  have been a bump, half a trick's points in freestyle, at every frame rate.
+  Found reading the diff against main.js's perch, before the commit; the
+  judge makes the perch's call per step.
+- **a78d6f9's message first said verify's check 18 failed with it.** Verify
+  had not been run on that commit, so the local, unpushed commit was
+  amended to say so before anything else was done.
+- **main.js changed while a first round of the checks was running**, so
+  that round is not reported; everything above ran on the final tree.
+
+### Found on the way, not fixed
+
+For the owner, each a line to draw or physics:
+
+1. **The ground's crash still waits behind the bump cooldown.** A smack on
+   the side within 180 ms of a judged skim is never judged: the fifth
+   scenario's 5 m/s side touch at 174 ms is no crash at any frame rate now,
+   where the old reading reset it on some phases of each. The cooldown was
+   written so a slide reports one bounce, not to hide crashes.
+2. **An obstacle impact strikes the props from the shell once a frame.**
+   feelImpact calls sim_prop_strike with the frame's largest impulse, behind
+   the cue's wall clock cooldown and performance.now grace windows, on top
+   of world.c's own per contact strike. That reaches the rotors, so a frame
+   rate dependence still reaches the trajectory. Physics, the owner's.
+3. **The perch, stuckTick and turtle entry are still read at frame ends.**
+   None is a crash; each moves or freezes the craft, so each is a frame rate
+   dependence of its own.
+4. **recoverFrom, the open air a set down must be reachable from, is taken
+   from the rendered pose at frame ends**, so where a crash is set down can
+   still differ with the frame rate at the margins; when, and from which
+   state, no longer can.
+5. **The Wall Tap recogniser is told once a frame** with the frame's largest
+   closing speed, on a sim clock cooldown sampled at frame ends. Scoring.
+6. **A belly landing that stops dead upright is a perch at any speed**, so
+   a 20 m/s belly flop that comes to rest is not in the site's crash count;
+   as before, at every frame rate.
+7. **The lap clock drops the accumulator's sub millisecond remainder at
+   every reset** (acc = 0 in resetCraft), a different amount at each frame
+   rate.
+8. **The STOP has no flown scenario**: in Node a flat back fall reports a
+   ground contact and is the ground rule's. check:clip's hand written steps
+   are its only coverage.
+
+## 2026-09-26 | integration, verify | Crash judgement per physics step and the manga menus, verified in the main tree
+
+Both merged into the working branch (c77149a the manga menus, 5838248
+crash judgement per physics step, the owner's approval of 2026-09-26 in
+POLISH-PLAN.md answer 5). The crash agent's own verify skipped row 1 (its
+worktree had no emcc and no Betaflight checkout), so the procedure was run
+again in the main tree, where both are.
+
+### RUN LOG
+
+    sha256 dist/sim.wasm            5408b3e2be286ee8 before
+    npm run build:wasm              exit 0, wrote dist/sim.wasm
+    sha256 dist/sim.wasm            5408b3e2be286ee8 after: the module
+                                    reproduces from source, and the crash
+                                    change does not touch it
+    git diff --stat vendor/betaflight  empty
+    npm run verify (first run)      16 of 18: rows 15 world-scale and 16
+                                    map-isolation reported harness-error, the
+                                    town never ready inside the check's wait,
+                                    with three agents running headless Chrome
+                                    at a load average of 27 on 4 cores. Not
+                                    counted as passing.
+    npm run verify (rerun, load 0.14, nothing else running)
+                                    18 of 18 passing. Row 1 build clean, abi 1,
+                                    vendor diff empty; rows 2 to 4 de0401cd4266
+                                    in both processes, Node and Chrome, and one
+                                    hash across 30, 60, 144 and 240 Hz; rows 5
+                                    to 12 hover 0.2793, punch 80.0 m, terminal
+                                    31.0 m/s, motor step 26 ms, 671.7 deg/s,
+                                    yaw coupling, battery sag and diff ratio
+                                    as recorded; row 13 console clean; row 14
+                                    audio bed; row 15 world scale 1.0000; row
+                                    16 no city module with the field selected;
+                                    row 17 35 of 35 world runs bit identical;
+                                    row 18 crash-pacing 48 of 48 at 83 pacings.
+
+What the determinism rows can and cannot see: rows 2 to 4 replay the
+baseline with no world and no shell, so they cannot see the crash judge;
+their hash is the same because the module is. Row 18 is the check that sees
+it, and it failed 10 ways on the old code (the crash agent's entry above).
+
+The browser's other checks ran on 3040628 plus each branch in the agents'
+own worktrees, and on the merge: check:clip 936 and score:selftest all
+passed, lint:boot 9 of 9, lint:memory PASS, lint:preload up to date.
+
+## 2026-09-27 | render, shell, input, race, checks | Polish items 22 to 24, and the AU Nationals loop
+
+POLISH-PLAN.md items 22 (overcast and faceted canopies), 23 (the chase
+camera frozen in a real time replay) and 24 (the radio "parked" help row
+sometimes five times late), then the owner's "fix the au nats track" from
+the later answers of 2026-09-26. Built on claude/vibrant-wozniak-v2pg5e at
+c77149a, branch polish-small, not pushed: the lead merges it. Main moved
+to 9ce6d61 (crashes judged per physics step) during the work and was
+merged in (d40867d). No physics, plant, module ABI or build change: the
+race is the shell's scoring downstream of the plant, and nothing under
+src/native, patches or vendor/betaflight moved.
+
+### What was built, a commit each
+
+- **Item 23, the replay chase camera** (8f1f5eb). Its spring took dt from
+  frameSteps, the plant's steps this frame, and a replay parks the craft
+  and steps nothing, so in real time dt was 0 on every frame and the
+  camera never left the pose it was seeded at. It now runs on the replay
+  clock's own advance, vt this frame less vt last frame, in step mode and
+  in real time alike: it follows the ghost as fast as the ghost flies, the
+  pause screen holds it to the bit (vt stands still there), a capture
+  stepping 500 ms a frame gets the camera it got before, and a clock that
+  went back (the lap looped, or R) reseeds the arm on the ghost rather than
+  swinging it across the field. Which clock was the owner's open decision
+  10; the lead's brief chose the replay clock. Flight is untouched: the
+  branch runs only in a replay, and frameSteps, which nothing else read,
+  is gone (the merge with main kept it gone: see below).
+  replay:test gains testChaseFollowsInRealTime on the full course's lap at
+  a steady 17 m/s: the camera moves on every frame whose vt rose and holds
+  to the bit on every frame of the pause screen. Run on the old tree it
+  fails, 11 of 11 frames still.
+- **Item 24, the parked yaw axis on the wall clock** (7642044), after the
+  diagnosis below. noteYawParked times the rest from the wall stamp of
+  the first poll that saw the stick there, not by summing the poll's dtMs.
+  input:selftest gains a stall case (3 s: not yet; 4.5 s across two polls:
+  the verdict), which fails on the old timer.
+- **Item 22, overcast and canopies** (5910e23). Render only.
+  - Overcast (src/maps/built/looks.js): the clouds' lit layer a step
+    LIGHTER than the sky (0xdedce8 at 0.94, from 0xaaa7be at 0.55, which
+    was darker than every stop of the sky), the shaded underside a step
+    darker than it (0x9d99b3 at 0.62), and a 3 texel ink line in the
+    time's own ink round each cloud's lit layer (sky.cloudInk, paintSky:
+    the plain cloudTex stamped in sixteen directions and filled with the
+    ink divided by the cloud's colour, then the plain shape laid over it;
+    made once, kept, and taken off again for a time without cloudInk). The
+    touch more ramp contrast is the cloud's own two step ramp, pulled
+    apart. Golden and dusk skies are the same to the pixel from the same
+    camera. The sun was also given more of the light (1.05 from 0.6,
+    the hemisphere 2.3 from 2.55) in 5910e23 and put back in 9b93dcf:
+    measured, it moved the plot 3 percent and a wall's two faces apart by
+    less than the wall's own texture, which bought nothing but a change to
+    what the flats were measured against.
+  - Canopies: IcosahedronGeometry at detail 0 gives every vertex its face's
+    normal, so the ramp quantised each of twenty facets on its own. Every
+    vertex of the unit icosahedron is on the unit sphere, so its normal is
+    now its own direction, as planet.js does for the planet: the vendored
+    buildSakura and buildGrove (PATCH-world-trees.diff beside the tree,
+    git diff form with a GPL preamble that git apply skips; checked to
+    apply forward to the old file and backward to the new) and the kit's
+    new K.leaf, which src/props/street.js's trees draw their blobs with.
+    Rubble, a sandbag and the town's shrubs and bamboo keep the faceted
+    blob. "The clump's sphere" was read as each blob's own: a leaf clump
+    is one blob, and a tree wide sphere would need per instance data on
+    the town's instanced canopies. Each blob now has two or three bands
+    with a curved terminator and keeps its faceted outline.
+  - Colliders: the same placement hashes before and after (4846cefd...,
+    2667e1be...), check:props and check:world-golden pass unchanged.
+- **The merge of main** (d40867d). Two conflicts in src/main.js, both beside
+  frameSteps. Kept both sides: the crash judge's beginFrame and
+  emptyWorldReport, simStepIdx += flown, and no frameSteps.
+- **AU Nationals** (19c1b8c), below, and the overcast light put back
+  (9b93dcf).
+
+### Item 24: the harness or the shell? The shell.
+
+Read both first. The check parks axis 3 at -1 and waits up to 20 s on
+page.until, polling every 100 ms on Node's clock. The shell's timer summed
+the poll's dtMs, and dtMs is min(wall gap, 100 ms), capped for the
+keyboard's integration. The poll runs on a 2 ms setInterval and once a
+frame, so the cap only bites when the main thread is held up.
+
+Logged both, side by side: the harness's time to the row, and the shell's
+timer, every poll's raw wall gap, what it was credited, and when the
+verdict came, over six full runs of lint:input on the old timer (an
+instrumented copy of the check in the scratchpad, not committed) and three
+runs of the section alone:
+
+    run           harness  shell's verdict  wall lost to the cap
+    full 1        4.58 s   4.01 s           0 in 0 capped polls
+    full 2        9.49 s   9.43 s           5.39 s in 6, one gap of 5.15 s
+    full 3        4.79 s   4.28 s           0.48 s in 4, largest 0.31 s
+    full 4        4.31 s   4.00 s           0
+    full 5        4.09 s   4.01 s           0
+    full 6        4.91 s   4.01 s           0
+    alone x3      4.43 to 4.98 s, 1 to 3 capped polls, 31 to 69 ms lost
+
+The harness saw the row within half a second of the shell's verdict every
+time: it waits for the right thing on the right clock. The shell's verdict
+came late by exactly the wall time the cap threw away, and in run 2 a 5.2 s
+stall on the title made the row 5.4 s late with 4.1 s credited. None of
+these six reached the check's 20 s, so the 20.5 s failures in PROGRESS were
+not reproduced; they are the same arithmetic with more stall, which is
+what "parked":false at 20 s says. A pilot with a radio in the wrong mode
+on a machine that stalls waits the same way, so the fix is the shell's: the
+rest is a pilot's time, wall time, and a stick read at the same place
+either side of a stall rested through it as far as anything can tell.
+
+Other failures in those runs, none of them this row and none new to this
+work: "and the input layer and the button agree with the setting" (3 of
+6, the stick mode button read a frame early, known since Stage E) and
+"let go in the air, the throttle rests on the measured hover" (2 of 6,
+the craft read as landed).
+
+### AU Nationals: the same opening twice in a row
+
+2022 AU Nationals (tracks/json/trk-0870b164.json and the board's copy)
+flies its gate 32-36 twice running, round a loop its document marks with
+waypoints 33, 34 and 35. One straight pass through it was credited at the
+box's face and again at its plane, so a lap could skip the loop. The
+station rule of 2026-09-26 (half a metre of flying between two credits)
+cannot see it, and must not refuse RaceGOW6 Track 1, whose two pairs of
+DIFFERENT gates on one spot are one pass.
+
+The fix is the one the station rule's agent proposed, in src/game/race.js:
+an opening credited while the craft is still inside its box is held, and
+is not credited again until the craft has left that box, by any way out,
+flown or not (update's not flown branch lets go too). The opening is its
+element and hole; a station with no element is its own. A held opening is
+not tested at all, because a straight travel that starts inside a box
+cannot leave and come back. The builder's close-stations warning no longer
+speaks for the same opening twice in a row, which is now what a loop
+through it means; it still speaks for RaceGOW6's pairs and Orbit's flags.
+
+Flown, every course's racing line (courseFromDocument, 0.3 m over its
+knots, 5 cm steps, three laps, 12.7 m/s, a room at its scale) through
+c77149a's Race and this one, pass for pass: the 11 in tracks/ and the
+board's 41, each read with GET from webfpv.org/board/api/tracks/ID/document
+into the scratchpad (nothing was sent to the board but GETs):
+
+    52 courses        50 identical pass for pass; 0 with a different lap
+                      time or lap count; 50 closed laps (Orbit
+                      (Anticlockwise) and Vertical Speed Arrest stall at the
+                      same station in both, as before)
+    AU Nationals x2   the same 97 passes and laps (51.047, 51.090, 51.090
+                      s); station 30 credited at 46.47 s, after the loop,
+                      where it was 40.34 s, before it
+    RaceGOW6 Track 1  identical: its pairs 9 then 0 and 4 then 5 are
+                      credited 9.0 and 11.2 ms apart, as before
+
+The loop cut out of AU Nationals' line (through 32-36 once, then on to 37,
+78.4 m shorter): the old Race closed 44.88 s laps; the new one credits
+station 29 and waits at station 30 until the gate is flown again.
+
+check:clip has six new lines: the same opening crossed straight (credited
+once) and flown round and through again (credited the second time), two
+different gates on one spot (still both), a one gate course (one straight
+pass closed a 50 ms lap before and closes none now; round and through
+again closes one), and the warning. Against c77149a's Race and warnings
+the first, second, fourth, fifth and sixth fail, as they should, and the
+third passes in both, which is its point. The Orbit rocking line
+changed: rocking in one square closed 784 ms laps under the station rule
+and closes none now, because the square the lap started in is never left,
+so its check says that rather than timing laps that no longer exist. No
+threshold moved: the check asserted a floor on a lap time and now asserts
+there is no lap.
+
+### Board laps on AU Nationals that may include the skip
+
+The board holds four laps on 2022 AU Nationals, all AsylumFPV (read with
+GET, nothing written):
+
+    tm-f61be24b  50.516 s  2026-08-26  ghost: through 32-36 ONCE, at 48.03 s
+    tm-ead5d4fe  58.822 s  2026-08-26  ghost: through 32-36 ONCE, at 55.77 s
+    (no id)      61.954 s  2026-08-19  no ghost, cannot be seen
+    (no id)      76.691 s  2026-08-18  no ghost, cannot be seen
+
+Counted as crossings of the opening's plane inside its rectangle on every
+segment of the ghost, so the 30 Hz sampling cannot hide a pass. Both laps
+with a ghost skipped the loop, the board's best among them; under this
+Race neither recorded lap closes. Whether to purge any of them is the
+owner's call; nothing was changed on the board.
+
+### RUN LOG
+
+Browser profiles in a private temp folder (TMPDIR), removed at the end.
+The container restarted once during the work; the scratchpad and the
+worktree survived, and the checks below were all run after it, on 19c1b8c
+(the browser checks) and 9b93dcf (check:props again, after the overcast
+light went back, a data change no browser check here displays).
+
+    npm run lint:boot           9 of 9 checks clean
+    npm run lint:memory         PASS, every world lazy and freed; built 61 ->
+                                177 -> 61 geometries, city 61 -> 307 -> 61
+    npm run lint:shell          PASS, title overflow 0 px
+    npm run lint:input          three runs: all 160 passed (266 s); all 160
+                                passed (276 s); 1 failed, 159 passed (347 s,
+                                load 16), "and the input layer and the button
+                                agree with the setting", the known stick mode
+                                read. "parked and left" passed in all three,
+                                and in all three runs on 7642044 before the
+                                restart (all 160 twice, and once 2 failed:
+                                the stick mode read and the hover one)
+    npm run replay:test         9 tests: 9 pass, 0 fail, the new real time
+                                chase check among them (also 9 of 9 on
+                                8f1f5eb)
+    npm run check:props         all passed, 206 (19c1b8c and 9b93dcf); the
+                                placement hashes 4846cefd and 2667e1be, the
+                                same as c77149a's own run
+    npm run check:world-golden  all passed, 35
+    npm run check:clip          942 passed, 0 failed (936 on main)
+    npm run input:selftest      all 200 passed (198 before the stall case)
+    npm run lint:quality        56 of 56 checks clean
+    npm run lint:preload        up to date, boot 115, city 74, built 33; 220
+                                served; no regeneration needed
+    node scripts/micro-check.js exit 0, 267 passed
+    patch                       PATCH-world-trees.diff applies forward to
+                                c77149a's trees.js and backward to this one
+    dash scan                   none, U+2012 to U+2015 by code point, in any
+                                added line
+    git diff --stat vendor/betaflight   empty
+    npm run verify              not run: no physics, plant, ABI or build
+                                change, and the brief said not to
+
+## 2026-09-27 | shell, hud, checks | Polish item 14: the phone OSD in the two top corners; the Weight slider finished; the flight chips fade
+
+POLISH-PLAN.md item 14, and two requests of the owner's passed on by the
+lead while it was under way, a commit each. On branch phone-osd, from
+claude/vibrant-wozniak-v2pg5e at c77149a, with 9ce6d61 (crash judgement
+per physics step) merged in at c834fd9; not pushed, the lead merges it.
+Shell, UI and one check only: no physics, plant, module ABI or build
+change; nothing under src/game, src/native, src/render, vendor or patches.
+
+**The owner's requests, as passed on by the lead:**
+
+- 2026-09-26, "finish the weight slider" (POLISH-PLAN.md, the later
+  answers, 4): usable where it is shown, landed and on the pause screen,
+  draggable on a desk and on touch, reachable from the keyboard on pause,
+  its value saved as it is today, and still faded in flight.
+- 2026-09-27, "yes fade the chips too" (polish item 12): the music chip,
+  Report bug and Pause fade after about three seconds of flight, come back
+  on pointer movement, on touch, on pause and when landed, by a CSS
+  transition on a class change with no per frame work, and Pause stays
+  reachable all the while.
+
+### What moved where on a phone (9a5e38c)
+
+With the thumb sticks up (.touch-fly-on) the OSD used to stack pack,
+speed, height, throttle and the Weight slider in one centre column, to
+about 270 px of a 390 px screen, and the launch banner was drawn on the
+lap clock. Now:
+
+- **Top left, one line:** the pack's volts, its charge bar and the flight
+  mode ("25.2 volts, bar, ACRO"). The PACK label goes: the volts beside a
+  charge bar say what it is. The mode is a second node in the pack block,
+  shown only on glass, so a desk's layout is untouched.
+- **Top right, one line:** speed and height ("24 km/h 12.3 m up"), running
+  up to Pause, which has the corner itself (top 8 px). "above the ground"
+  is the desk's wording and does not fit beside the speed at 740 px; the
+  height is a number and two tails, and the sheet shows one. The
+  THROTTLE bar goes: the left plate's nub already draws the channel.
+- **The chips:** the music dock and Report bug wait on the pause screen in
+  flight on glass, where both already are. Pause stays up.
+- **The lap clock:** tighter. The label rides beside the clock, and the
+  last lap, the record, the ghost and the bounce count share one line,
+  so the block ends at 67 px, where it ended at 106 to 147. The bounce
+  count went there from the pack's line when lint:devices found "2
+  bounces" pushed that line into the middle third at 740 px.
+- **The banner:** hangs under the clock, from 74 px on a race and 58 px
+  on a freestyle map (whose clock has no gate line), sized off the height
+  (clamp 15 to 19 px on 4.6vh, where 4.4vw made it 30 px) and let out wide
+  so a second line stays one line. Measured: 74 to 117 px at 844 by 390,
+  74 to 114 at 740 by 360 (a third of the height is 120), the yard's three
+  line prompt 58 to 123 of 130 at 844 and 58 to 118 of 120 at 740. The
+  launch control call
+  (.osd-launch) is left to the banner, which says the same words there.
+- **The Weight slider:** landed only, at the bottom between the plates,
+  clear of both and in the bottom third; on glass its first flight card
+  waits for the first landing instead of holding the slider up for eight
+  seconds of air, and retires on the next takeoff.
+- **Upright:** the two lines ride just above the plates, the slider stays
+  off in flight as it always did upright, and the turn sideways pill goes
+  up out of the middle of the height to 24 percent.
+
+Nothing of the OSD or the banner reaches the centre third (the middle
+third of the width and of the height) at 844 by 390, 915 by 412 and 740
+by 360, on the pads, in the air, on a lap and landed, except the first
+landing's Weight card, once in a browser's life.
+
+### The Weight slider, finished (6321c69)
+
+Landed, the overlay's slider was already a control: dragged 100 to 125
+and saved with a mouse at 1600 by 900, with a pretend radio, and with a
+thumb at 844 by 390. In the air it is faded and a drag there moved
+nothing. On the pause screen it showed through the menu at 0.4, under a
+screen that takes every pointer and every key, so nobody could move it.
+
+- **A Weight row on the pause menu**, in "Does it feel wrong?" after
+  Rates: the Rates and PIDs screens' drag track with the number beside
+  it. Drag lands on release; one arrow or one radio stick flick is a step
+  of five; the number types. Same setting and save; the overlay's slider
+  follows through applySettings. A change voids a running lap, as it
+  always did from the overlay, and the note says so.
+- The overlay's slider is put away under the dimmed pause OSD on every
+  device, so the row is the one Weight control on that screen. It
+  replaces 9a5e38c's lift of the slider into the command bar on glass,
+  which a thumb could drag and no key could reach.
+- Measured: keyboard, 4 presses from Resume to the row, a right arrow 125
+  to 130 saved, a drag 130 to 95 saved and the overlay reading "Weight
+  95%"; the pretend radio, 5 stick flicks, a flick right 125 to 130 saved;
+  a thumb at 844 by 390, a drag 130 to 95 saved.
+
+### The flight chips fade (d88179b)
+
+syncChipFade runs from the frame loop on the slider's own aloft test and
+compares two times; the fade is a transition on one class on the root
+(chips-quiet), written on a change. Up on the pads; gone about three
+seconds into the air (3.3 to 3.5 s of wall clock from the punch, measured);
+back on landing, on pause, and on any pointer that moves or lands off the
+thumb sticks (a thumb flying the left stick did not wake them, a finger
+at the top of the picture did). Opacity only: a faded chip keeps its place
+and its pointer, so a click or a tap where Pause stands paused while it
+was faded, and Escape paused as ever. There is no radio pause button in
+flight to keep working: a radio pilot with no pointer keeps the chips
+faded until landing or Escape. On a phone in flight the music dock and
+Report bug are already away, so the one chip that fades there is Pause,
+beside the speed line.
+
+### Checks added, and no threshold, baseline or golden moved
+
+lint:devices has a new section, the flight OSD on a phone held sideways:
+Hibari Yard on the five inch at 844 by 390 and 740 by 360, and the first
+shipped track on the whoop at 740 by 360, each on the pads, in the air
+and paused. It asserts nothing drawn by the OSD or the banner is in the
+centre third or on a thumb plate, each corner is one line in its own outer
+third along the top, the banner is below the clock, the bug chip and the
+dock are away, Pause is up on the pads, faded in the air and takes a touch
+at its middle either way, the slider is up and touchable on the ground and
+gone in the air, and on the pause screen the Weight row's track takes a
+touch and the overlay's slider does not show through. Its first version,
+run on c77149a, failed 96 ways, 32 in each case. tests/shell-baseline.json
+is untouched.
+
+### RUN LOG
+
+On d88179b, the branch head, browser profiles in a private temp folder:
+
+    npm run lint:preload      up to date, boot 115 modules, city 74, built
+                              33; 220 served, no regeneration needed
+    npm run lint:boot         9 of 9 checks clean
+    npm run lint:responsive   PASS, freestyle 272 frames, worst gap 466 ms,
+                              0 over 500 ms
+    npm run lint:devices      PASS, five devices all clear, four builder
+                              windows clear (19, 19, 19, 18 controls),
+                              results at 1280x720 and 1600x900 clear, the
+                              three phone flights clear
+    npm run lint:shell        PASS, title overflow 0 px, every screen at or
+                              under its baseline, paused 14 stops (13
+                              before the Weight row); notes as below
+    npm run lint:memory       PASS, every world lazy and freed
+    npm run lint:input        1 failed, 159 passed; see below
+    dash scan                 none, U+2012 to U+2015 by code point, in
+                              every added line
+    npm run verify            not run: no physics, plant, ABI or build
+                              change, and the brief said not to
+
+lint:input's one failure is "and the input layer and the button agree
+with the setting": the calibrate screen's button read "Stick mode 2" a
+moment after M set mode 3. It failed the same way on 9ce6d61, the merged
+main without this work, in this session, and passed once on c77149a; the
+quick wins entry recorded it on 716562b as a race between the key and the
+button's next paint. Nothing here touches calibration or the input path.
+
+### Pictures
+
+In the session scratchpad, never committed:
+`/tmp/claude-0/-home-user-WebFPVSimulator/6ddfd91b-7f5b-543b-a441-691d12014517/scratchpad/small/shots/`.
+The real shell through tests/lib/page.js in a rig (look-rig.mjs,
+chase-rig.mjs beside the shots), before served from a git archive of
+c77149a, fixed cameras through window.__setCam and the #ui hidden.
+
+- **Item 22**, look/: before- and after1- for the town at golden (street,
+  grove, sakura, sakura-near, grove-near; the town has no other time) and
+  Hibari Yard at golden and dusk (pads, sakura-near, tree-near, street,
+  sky); before- and final- for the yard at overcast (final is 9b93dcf;
+  after1 to after3 are the tries on the way). crop-*.png are
+  close ups of the canopies and a cloud; diff-*.png are difference
+  pictures, and the golden and dusk skies differ by 0 pixels.
+- **Item 23**, chase/: chase-before-run-0 to 7 and -paused-0 to 2, the
+  camera at (15.855, 2.122, -5.026) in every one while vt ran 532 to
+  6649 ms; chase-after-*, the camera 6.3 to 9.0 m further on at each read
+  and still on the pause screen.
+
+### What went wrong
+
+- The first picture and diagnosis runs failed to start Chromium with
+  TMPDIR in the scratchpad: the profile path is too long for its socket.
+  A short private folder under /tmp served.
+- An overcast run was killed by its own 600 s timeout at a load average of
+  18 with other agents' browsers running, and was run again.
+- The spend limit and then a container restart stopped the work twice;
+  each time the worktree was intact and the work picked up from its last
+  commit.
+- Several shell commands were refused by the worktree's guard as too
+  complex and were split.
+- The first cloud ink was 5 texels at 0.86 opacity: heavy, and the sky
+  read through the cloud. 3 texels at 0.94.
+
+### For the owner, when flying
+
+Verification to choose: **shots** or **fly it** for the look, **fly it**
+for the race. **Look for**: at overcast on Hibari Yard, pale clouds with a
+thin dark outline and a darker underside against the lavender sky, and a
+wall's lit face a little brighter than its side; on the town and the yard,
+tree canopies whose blobs each shade from a lit top to a darker underside
+with a clean curved edge instead of a mosaic of triangles; in a
+?replay=...&cam=chase link, a camera that follows the ghost and stops
+when paused; with a radio whose throttle is on the yaw axis, the "This
+browser has your throttle as yaw" row on the title about four seconds
+after the throttle is left alone; on 2022 AU Nationals, the lap counting
+only when 32-36 is flown, the loop flown, and 32-36 flown again. **Wrong
+would be**: clouds as dark smudges or with a heavy black rim; canopies
+that look like balls or lose their outline; a replay camera that jumps
+across the field; the help row arriving much later than four seconds; a
+lap on AU Nationals, RaceGOW6 Track 1 or any other course that is flown
+properly and does not count.
+
+`/tmp/claude-0/-home-user-WebFPVSimulator/6ddfd91b-7f5b-543b-a441-691d12014517/scratchpad/phone-osd/shots/`.
+b- is before, served from a git archive of c77149a; a3- after the OSD
+commit; a5- after all three; w1- the Weight slider; c1- the chips. The
+real shell through tests/lib/page.js, touch on: Flags and cones (the
+board's document) seeded as the race, Hibari Yard through the gate's
+Freestyle card. Looked at, every one:
+
+- **Race** at 844 by 390, 915 by 412, 740 by 360 and 390 by 844: -race-1-pads
+  (the launch prompt), -2-air, -3-lap (running clock, gate line, last lap,
+  record, ghost, bounces and the lap flash), -4-landed, -5-pause.
+- **Hibari Yard** at 844 by 390 and 390 by 844: -free-1-pads, -2-air-hud
+  (the score HUD and the chase meter up), -3-air-call (a chase callout),
+  -4-pause; and a5-740x360-free-1-pads, the yard's prompt on the
+  narrowest phone.
+- **Weight**: w1-keys-1600x900, w1-radio-1600x900 and w1-touch-844x390,
+  -1-landed, -2-air, -3-paused-row, -4-paused-drag.
+- **Chips**: c1-keys-1600x900, c1-radio-1600x900 and c1-touch-844x390,
+  -1-pads, -2-air-faded, -3-woken, -4-paused, -5-landed.
+
+### What went wrong
+
+- window.__race() is defined twice in main.js and the second returns a
+  copy, so writing a lap onto it did nothing. Chords flown along the
+  racing line with __placeCraft credited the timing gate and no flag
+  after it (not traced). The lap pictures fly the timing gate for real,
+  so the clock and the gate line are the race's, and put the last lap,
+  a record, a bounce count and the lap flash on the OSD through a wrapper
+  round setOsd and setBanner.
+- The banner at 64vw wrapped the yard's prompt to three lines reaching
+  139 px of 390, into the centre third; it is let out wide now and hangs
+  higher on a freestyle map. The bounce count in the pack's line took it
+  into the middle third at 740 px; lint:devices caught that one.
+- show() wrote the OSD's className, which would have taken the new
+  is-free class off on every screen change; it is a toggle now.
+- The first flight check picked a full size shipped track, and there are
+  none: every shipped track is a whoop track. It flies the whoop there and
+  the yard on the five inch.
+- The first pause design on glass lifted the overlay's slider into the
+  command bar. It could be dragged and no key could reach it, so the
+  owner's request replaced it with the menu row before it shipped.
+- The pretend radio could not walk the pause menu until the harness's
+  stick override was released: while it holds, the pad's axes reach
+  nothing, the menu included.
+- The container restarted mid run and took the browser profiles; the
+  worktree and the scratchpad survived, and the profiles went to a fresh
+  private folder, removed at the end.
+
+### Found, not fixed
+
+- The turtle banner is three panelled lines; by arithmetic it reaches
+  about 150 px on a 390 px phone, into the centre third, for as long as
+  the quad is on its back. Not pictured.
+- The first landing's Weight card on glass covers part of the centre
+  third (y 190 to 335 at 844 by 390) until Got it, a touch on the track
+  or the next takeoff, once in a browser's life.
+- lint:shell notes "tricks: overflow improved from 1649 to 1605 px", the
+  manga menus entry's note, not this work's; not re-recorded.
+- lint:input's calibrate button race, above.
+
+### For the owner, when flying
+
+Verification to choose: this is shell only, so **shots** or **fly it**
+would see it; verify would not. **Look for**, on a phone held sideways:
+the pack and mode along the top left, speed and height along the top right
+up to Pause, the lap clock small at the top with the launch prompt and
+the lap flash under it, and nothing over the gate; the Weight slider
+between the thumb pads when landed and gone in the air; Pause fading a
+few seconds into a flight and a tap on its corner still pausing. On a
+desk: the chips fading in the air and back when the mouse moves or the
+quad lands. On the pause screen everywhere: a Weight row under Rates
+that drags, steps with the arrows or the radio's stick, and moves the
+slider on the flight screen with it. **Wrong would be**: a line wrapping
+in a corner, the banner on the clock, a chip that cannot be tapped while
+faded, a Weight change on pause that is not there after a reload.
+
+## 2026-09-27 | integration, main | The polish effort concluded: the last batch to main, and what is left
+
+The owner asked to "push to main and conclude this effort". The last
+batch, merged into the working branch and pushed to main with this entry:
+
+- Polish items 22 (overcast clouds lit and inked, canopy blobs shaded
+  round, PATCH-world-trees.diff), 23 (the replay chase camera on the
+  replay's own clock) and 24 (the parked help row timed on the wall clock:
+  a stalled main thread had made the shell's timer lose time), and the
+  2022 AU Nationals fix (an opening credited inside its box is held until
+  the craft leaves the box, so one straight pass through gate 32 to 36
+  counts once), from polish-small (daf5b39).
+- Polish item 14 (the phone's flight OSD in the two top corners, nothing
+  in the centre third), the Weight slider made usable where it is shown
+  (landed, and a Weight row on the pause screen; the owner, 2026-09-26),
+  and item 12's chip fade (about 3 s into the air, back on landing, pause
+  or a pointer, Pause still reachable; the owner, 2026-09-27), from
+  phone-osd (282202a, merged as 6928650).
+
+### Checks on the final tree (6928650), a quiet machine
+
+    npm run verify               18 of 18 passing: build clean and vendor diff
+                                 empty; de0401cd4266 in both processes, Node
+                                 and Chrome, one hash across 30 to 240 Hz;
+                                 hover 0.2793, punch 80.0 m, terminal 31.0
+                                 m/s, motor step 26 ms, 671.7 deg/s, yaw
+                                 -0.10, sag 11.14%, ratio 1.2472; console
+                                 clean; audio; world scale 1.0000; map
+                                 isolation; world golden 35 of 35; crash
+                                 pacing 48 of 48. Run because item 24 touches
+                                 src/input/input.js.
+    git diff --stat vendor/betaflight  empty
+    npm run check:clip           942 passed, 0 failed
+    npm run score:selftest       all passed
+    npm run check:props          all passed
+    npm run check:world-golden   all passed
+    npm run check:world-engines  Node and Chromium equal to the bit
+    npm run input:selftest       all 200 passed
+    npm run replay:test          9 of 9
+    npm run lint:shell           PASS
+    npm run lint:devices         PASS, the phone flight OSD clear of the
+                                 centre third among its new assertions
+    npm run lint:responsive      PASS
+    npm run lint:input           all 160 passed
+    npm run lint:boot            9 of 9 clean
+    npm run lint:memory          PASS
+    npm run lint:preload         up to date
+
+### Not finished, and where it is
+
+- **Polish item 21, the town's budget.** Stopped at the owner's word to
+  conclude. The local branch town-budget holds step 2 (1a72f61: signs by
+  material, tiled textures shared, clouds as one) and step 5 (2bf47fa: the
+  level crossing's pieces by what moves), with step 3 half written and
+  uncommitted in its worktree; none of it has had its final checks, none
+  is merged, and the branch was never pushed, so it goes with this
+  container. Step 4 is not done on the owner's "leave all the physics
+  stuff alone" (it removes solids). CITY-PERF-PLAN.md is unchanged on
+  main.
+
+### Open for the owner
+
+- The AU Nationals board holds four laps by AsylumFPV; the two with ghosts
+  (50.516 s, the best, and 58.822 s) did not fly the loop. Nothing on the
+  board was changed; removing them is the owner's call.
+- Screentone is built and off, because it shimmers in motion; ?tone=1 at
+  High to judge it.
+- Found, not fixed: the turtle banner (three boxed lines) reaches about
+  150 px on a 390 px tall phone, into the centre third, while the quad is
+  on its back. src/game/proven.js is stale on nine rows unrelated to the
+  Maverick Loop's removal. The physics items the crash agent found (the
+  obstacle prop strike once a frame, the perch and stuck reset read at
+  frame ends) are left alone on the owner's word.
+
+The polish list (POLISH-PLAN.md): items 1 to 10, 12 to 19 and 22 to 24
+done and on main; 11 (the lens) and 20 (the race field restyle) declined;
+21 partly done on an unmerged branch as above.
+
 ## 2026-09-26 | city, landing | The town and its bake, buildable in steps
 
 ### What changed
@@ -52596,3 +54652,53 @@ September 2026. This commit is on the local branch only.
       npm run lint:preload      up to date: boot 115, city 74, built 34, 223
     npm run verify              not run: a map document's element list, no
                                 physics, plant, ABI or build
+
+## 2026-09-27 | release | This branch to main: the showpiece, the town in steps, the wall art's hanging
+
+### What changed
+
+`origin/main` (f1c156c) merged into this branch, and the branch to main. One
+conflict, PROGRESS.md, both sides kept, main's entries first. `src/fresh.js`
+and `src/maps/preload.js` merged clean and gen:preload writes nothing new.
+`src/maps/built/index.js` merged clean: main's edits there (the manga
+pipeline's import, the BuiltPipeline's manga layer, and buildMap's report)
+are all outside the ground section this branch moved to `ground.js`.
+
+### Why
+
+The owner, 27 September 2026: "push everything to main to such that the
+landing page works perfectly as designed with the new whoop room and
+freestyle builder". That supersedes the same day's "don't push changes to
+the simulator repo", which the entry above records as not pushed. The front
+door copies this code: the town's build and bake in steps, the built map's
+ground module and the wall art's hanging, and it links to the showpiece and
+the whoop room. With this branch on main, the front door can copy from main,
+which is the copy of record, rather than from a branch.
+
+### Checked
+
+On the merged tree:
+
+- The showpiece: no repairs with main's 57 element starter, byte for byte
+  the document published on the board as trk-1b4a7d7a.
+- The front door's four links, in headless Chromium against the merged tree
+  served locally, the live board read only through a relay that refuses any
+  write: `?map=built&mapshare=trk-1b4a7d7a&fly=1` flies the showpiece from
+  its pads with the yard loop's traffic running; the builder with
+  `?mapshare=trk-1b4a7d7a&mode=freestyle` opens it, 76 elements, 6 named
+  gaps, 5 vehicles; `?map=custom&craft=whoop65` lands in the sakura room on
+  RaceGOW5 Track 1 with the posters and banners hung, photographed through
+  `__setCam` at the north wall; `?map=city` builds the town. No errors, only
+  the autoplay warning a page with no gesture gets.
+
+### RUN LOG
+
+    npm run check:props         all passed
+    npm run check:roads         all passed (14.9 s)
+    npm run check:clip          942 passed, 0 failed
+    npm run check:fresh         18 passed, 0 failed
+    npm run lint:preload        up to date: boot 115, city 74, built 34, 223
+    npm run verify              not run: this branch changes no physics,
+                                plant, ABI or build; the merge brings main's
+                                crash judgement per step, which main's own
+                                entries record as verified and approved

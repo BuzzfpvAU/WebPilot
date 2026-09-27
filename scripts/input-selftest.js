@@ -718,6 +718,21 @@ section('the throttle-as-yaw verdict on an uncalibrated radio');
     rig.im.padSummary().guessYawParked === true);
 }
 {
+  /* The rest is timed on the wall clock, not on the polls' dtMs, which is
+   * capped at 100 ms: a page whose main thread is held up for seconds (the
+   * title's world still building) polls once either side of the stall, and
+   * summed from dtMs the stall counted as a tenth of a second. lint:input
+   * measured one of 5.2 s make this row 5.4 s late (POLISH-PLAN item 24). */
+  const rig = new Rig(makePad([0, 0, 0, -1, 0, 0], 4, 'Pocket on a slow title'));
+  rig.ax(2, 0.8); rig.step(); rig.ax(2, 0); rig.step();
+  rig.step(3000);
+  check('a three second stall with the throttle resting on the guessed yaw axis: not yet',
+    rig.im.padSummary().guessYawParked === false);
+  rig.step(1500);
+  check('four and a half seconds of wall across two stalls, the throttle never moved: the verdict',
+    rig.im.padSummary().guessYawParked === true);
+}
+{
   const rig = new Rig(makePad([0, 0, 0, -1, 0, 0], 4, 'Calibrated Pocket'));
   rig.im.map = { ...rig.im.map, stored: true };
   rig.run(6000);

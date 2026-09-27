@@ -1625,14 +1625,14 @@ export function vendingDraw(el, parts, K) {
  *           within half their depth rather than not at all.
  *   box     a box lorry's body.
  *
- * THE R32 is ours, not the town's: its sizes are the R32 table in
- * src/art/cars.js, which draws every car (the town's included, through the
- * vendored builder's hook), restated here for the same reason. Two fields
- * only it carries: `cw`, its glasshouse's width at the roof, since a coupe's
- * glass leans in far more than the town's boxes do and a solid at W - 0.14
- * would stand out of it; and `bonnet`, where its low bonnet begins in x and
- * how high it is, so the body's solid steps down to it rather than filling
- * the air over the nose to the waist.
+ * THE R32 AND THE E82 are ours, not the town's: their sizes are the R32 and
+ * E82 tables in src/art/cars.js, which draws every car (the town's
+ * included, through the vendored builder's hook), restated here for the
+ * same reason. Two fields only they carry: `cw`, the glasshouse's width at
+ * the roof, since a coupe's glass leans in far more than the town's boxes
+ * do and a solid at W - 0.14 would stand out of it; and `bonnet`, where
+ * the low bonnet begins in x and how high it is, so the body's solid steps
+ * down to it rather than filling the air over the nose to the waist.
  * ------------------------------------------------------------------ */
 
 export const CAR_KINDS = {
@@ -1651,6 +1651,10 @@ export const CAR_KINDS = {
   r32: {
     L: 4.50, W: 1.76, H: 1.34, sill: 0.30, waist: 0.86, roof: 1.34, cab: [-1.45, 0.55], rakeF: 0.62, rakeR: 0.50,
     cw: 1.32, bonnet: { x: 0.55, y: 0.80 },
+  },
+  e82: {
+    L: 4.36, W: 1.75, H: 1.41, sill: 0.33, waist: 0.92, roof: 1.41, cab: [-1.27, 0.63], rakeF: 0.50, rakeR: 0.50,
+    cw: 1.32, bonnet: { x: 0.63, y: 0.83 },
   },
 };
 /* The body's own width, which for the box lorry is the chassis's, 1.695:
@@ -1696,9 +1700,9 @@ export function carColourOf(seed) {
   return seededRandom(seed).pick(CAR_COLOURS);
 }
 
-/* The r32 takes its livery from its variant (src/art/cars.js r32Livery)
- * rather than a colour from its seed, so an author picks one; every other
- * car ignores the variant it is handed. */
+/* The r32 and the e82 take their livery from the variant (src/art/cars.js
+ * carLivery) rather than a colour from the seed, so an author picks one;
+ * every other car ignores the variant it is handed. */
 export function carDraw(el, parts, K) {
   K.town('car', { kind: CAR_KINDS[el.style] ? el.style : 'kei', colour: carColourOf(seedOf(el)), variant: el.dims?.variant }, [0, 0, 0], 0);
 }
@@ -1707,9 +1711,9 @@ export function carDraw(el, parts, K) {
  * TREES, the town's three: the cherry (buildSakura), the green broadleaf
  * of its groves (buildGrove) as the street tree, and the cedar of its
  * plantations (buildCedar) as the pine. Same proportions, same tones by
- * height, same faceted blobs and seven sided whorls; laid out with this
- * module's own sine and square root, so the solids are the same bits in
- * every engine.
+ * height, same icosahedral blobs, shaded round as the town's now are
+ * (K.leaf), and seven sided whorls; laid out with this module's own sine
+ * and square root, so the solids are the same bits in every engine.
  *
  * Every blob holds a solid sphere of the drawn icosahedron's inradius
  * (0.7947 of its smaller radius, taken as 0.78), and every whorl the
@@ -1981,7 +1985,7 @@ export function treeDraw(el, parts, K) {
     K.cyl(wood, l.a, l.b, l.r, l.seg, l.rTop);
   }
   for (const b of t.blobs) {
-    K.blob(tones[b.tone], b.c, b.r, b.ry, b.spin);
+    K.leaf(tones[b.tone], b.c, b.r, b.ry, b.spin);
   }
   if (t.cones.length) {
     const T = K.THREE;

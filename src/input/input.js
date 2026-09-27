@@ -232,9 +232,10 @@ const GUESS = {
   PARK_OFF: 0.35,
   /* ...and stays within this of where it settled... */
   PARK_STILL: 0.01,
-  /* ...for this long. A thumb holding yaw at the stop for four seconds is
-   * seven turns of a spin; a throttle waiting at the bottom on the title
-   * screen is there for minutes. */
+  /* ...for this long, on the wall clock (see noteYawParked). A thumb
+   * holding yaw at the stop for four seconds is seven turns of a spin; a
+   * throttle waiting at the bottom on the title screen is there for
+   * minutes. */
   PARK_MS: 4000,
 };
 
@@ -1054,7 +1055,7 @@ export class InputManager {
      * noteYawParked. */
     this.guessYawParked = false;
     this.yawParkAt = null;
-    this.yawParkMs = 0;
+    this.yawParkSince = 0;
     /* The radio's restart switch. See RESTART_STORE_KEY and
      * noteRestartSwitch. restartPrevOn starts unknown, so a switch that is
      * already on when the page loads is not a flip. */
@@ -1429,8 +1430,21 @@ export class InputManager {
    * worse than either answer. The one false positive is a thumb holding
    * full yaw against the stop for four seconds, and what it earns is an
    * offer to calibrate, which is not a wrong thing to offer.
+   *
+   * ON THE WALL CLOCK. How long a stick has rested is the pilot's time, so
+   * the rest is timed from the wall stamp of the first poll that saw it
+   * there, and not summed from the poll's dtMs. That dtMs is capped at
+   * 100 ms for the keyboard's integration, so a main thread held up for
+   * seconds (the title's world still building, shaders compiling) was
+   * credited 100 ms of however long it was. Measured in lint:input, where
+   * this row's check came in late or not at all in some runs: one run lost
+   * 5.4 s in six capped polls, 5.2 s of it a single stall, and the row
+   * arrived at 9.4 s of wall with 4.1 s credited; runs recorded in PROGRESS
+   * waited past the check's 20 s. A pilot with a radio in the wrong mode on a slow machine
+   * waited the same way. A stick read at the same place either side of a
+   * stall rested through it as far as anything can tell.
    */
-  noteYawParked(gp, dtMs) {
+  noteYawParked(gp, nowWall) {
     if (this.map.stored || this.guessYawParked) {
       return;
     }
@@ -1441,16 +1455,15 @@ export class InputManager {
     const v = gp.axes[spec.axis];
     if (!(Math.abs(v) >= GUESS.PARK_OFF)) {
       this.yawParkAt = null;
-      this.yawParkMs = 0;
+      this.yawParkSince = 0;
       return;
     }
     if (this.yawParkAt === null || Math.abs(v - this.yawParkAt) > GUESS.PARK_STILL) {
       this.yawParkAt = v;
-      this.yawParkMs = 0;
+      this.yawParkSince = nowWall;
       return;
     }
-    this.yawParkMs += dtMs;
-    if (this.yawParkMs >= GUESS.PARK_MS) {
+    if (nowWall - this.yawParkSince >= GUESS.PARK_MS) {
       this.guessYawParked = true;
     }
   }
@@ -1652,7 +1665,7 @@ export class InputManager {
     this.guessWrongOrder = false;
     this.guessYawParked = false;
     this.yawParkAt = null;
-    this.yawParkMs = 0;
+    this.yawParkSince = 0;
     /* And so is the stick resolution. Same line, same reason. */
     this.forgetAxisResolution();
     this.forgetFlightRecord();
@@ -2372,7 +2385,7 @@ export class InputManager {
     this.guessWrongOrder = false;
     this.guessYawParked = false;
     this.yawParkAt = null;
-    this.yawParkMs = 0;
+    this.yawParkSince = 0;
     /* Two outcomes, and the shell says which. See saveMap. */
     this.calResult = this.saveMap() ? 'saved' : 'saved-unstored';
     this.calibration = null;
@@ -3032,7 +3045,7 @@ export class InputManager {
       next = this.readGamepad(gp);
       this.noteThrottleParked(gp);
       this.noteGuessOrder(gp);
-      this.noteYawParked(gp, dtMs);
+      this.noteYawParked(gp, nowWall);
       this.noteRestartSwitch(gp);
       this.source = this.mapUsable() ? 'a radio' : 'a radio whose stick order is a guess';
       /* Keyboard still works while a pad is plugged in: any held stick

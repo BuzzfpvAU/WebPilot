@@ -174,6 +174,7 @@ import { ChaseHud, chaseCallText } from './chasehud.js';
 import {
   closeCallCount, drawMangaPage, drawRunCard, mangaPanels, pageSentence,
 } from './mangapage.js';
+import { paintTitle } from './lettering.js';
 import { formatScore } from '../game/score.js';
 import { PRACTICE_LAPS } from '../game/race.js';
 import { JOKE_MS, quotedJoke } from './loading.js';
@@ -963,12 +964,21 @@ const DEFAULTS = {
    * CLEAN FPV: the manga layer off (FREESTYLE-MAPS-PLAN.md sections 3.2 and
    * 3.3, decision 4). Off by default, because the layer is for freestyle
    * maps and on there unless the pilot turns it off; a race track is clean
-   * whatever this says. Today it takes the lettered callouts, their sound
-   * effects and the manga results page back to plain HUD text; Stage F's
-   * speed lines, screentone and impact frame answer to it when they land.
-   * See syncManga.
+   * whatever this says. It takes the lettered callouts, their sound effects
+   * and the manga results page back to plain HUD text, and the speed lines,
+   * the impact frame and the screentone out of the picture (src/main.js,
+   * mangaFrame, reads ui.manga). See syncManga.
    */
   cleanFpv: false,
+  /*
+   * THE IMPACT FRAME'S OWN SWITCH (the plan, section 3.2 item 4): a crash
+   * holds the moment for a beat, re-inked, then lets go. On by default on a
+   * freestyle map, and a row of its own as well as Clean FPV, because a
+   * flash is a photosensitivity question and not only a style one. Off
+   * whatever this says when the system asks for reduced motion. See
+   * src/render/manga.js, GENTLE.
+   */
+  impactFrame: true,
   packVoltage: 4.2,
   /*
    * How heavy the quad is, as a percentage of the weight the airframe is
@@ -1049,6 +1059,10 @@ const AIR_HINT_KEY = 'webfpv.airhint.v2';
  * to read two sentences in a hover, short enough that it is gone before the
  * pilot is looking at the ground it covers. */
 const AIR_HINT_AIR_MS = 8000;
+/* How long the flight chips stay up once the quad is in the air, or after
+ * the last pointer movement: see syncChipFade. Wall clock, because it is
+ * chrome, not flight. */
+const CHIPS_QUIET_MS = 3000;
 
 function airHintSeen() {
   try {
@@ -1777,6 +1791,144 @@ function wordmark() {
   const h = el('h1', 'wordmark');
   h.append(document.createTextNode('WEB'), el('span', 'fpv', 'FPV'));
   return h;
+}
+
+/*
+ * THE HEADINGS ARE LETTERED (polish item 19). The wordmark and every room's
+ * title are drawn in the lettering's own hand (src/ui/lettering.js
+ * paintTitle): heavy slanted capitals, a thick ink line and a hard drop,
+ * the hand the freestyle callouts and the results page already speak in,
+ * so the menus are the game's own voice and not a developer UI with a
+ * manga layer over it.
+ *
+ * THE TEXT STAYS. The heading keeps its words in the DOM, in its own place
+ * and at its own size, for a screen reader, for find in page and for a
+ * search engine; .is-lettered makes their fill transparent and the
+ * lettering is an aria-hidden canvas laid over them. So the layout is the
+ * text's, to the pixel, and lint:shell's measurements cannot move. With
+ * forced colours on, the canvas goes and the text comes back (index.html).
+ *
+ * THE MENUS USE THE HAND WHATEVER CLEAN FPV SAYS. Clean FPV is about
+ * flight: nothing drawn over the picture while flying. A menu is not
+ * flying, and a title is looked at, not read at 100 km/h.
+ *
+ * PAINTED ONCE. A heading is painted when its screen is shown and again
+ * only if what it says, its colour, its size or its room has changed
+ * (h.letterKey): show() and a settled resize ask, and a screen visited a
+ * second time paints nothing. Never per frame.
+ */
+const LETTER_PROBE = 'lettered-probe';
+const LETTER_ART = 'lettered-art';
+
+/* A heading's words as runs in their own colours: the wordmark is WEB in
+ * cream and FPV in sakura because its CSS says so, a record is mint for the
+ * same reason. */
+function headingRuns(h, cs) {
+  const runs = [];
+  for (const n of h.childNodes) {
+    if (n.nodeType === 3) {
+      runs.push({ text: n.textContent, fill: cs.color });
+    } else if (n.nodeType === 1 && !n.classList.contains(LETTER_PROBE) && !n.classList.contains(LETTER_ART)) {
+      runs.push({ text: n.textContent, fill: getComputedStyle(n).color });
+    }
+  }
+  const out = [];
+  for (const r of runs) {
+    const text = r.text.replace(/\s+/g, ' ');
+    if (text && (text.trim() || out.length)) {
+      out.push({ text, fill: r.fill });
+    }
+  }
+  if (out.length) {
+    out[0].text = out[0].text.replace(/^ /, '');
+    out[out.length - 1].text = out[out.length - 1].text.replace(/ $/, '');
+  }
+  return out.filter((r) => r.text);
+}
+
+/*
+ * Letter one heading, if it is on screen and anything it depends on has
+ * changed. The outline is a fifth of the size at callout sizes and thins
+ * toward a tenth on the wordmark, where a fifth of 104 px is a 21 px line
+ * and the letters close up into a blot.
+ */
+function letterHeading(h) {
+  if (!h || typeof window === 'undefined' || !h.isConnected) {
+    return;
+  }
+  const cs = getComputedStyle(h);
+  const px = parseFloat(cs.fontSize);
+  const box = h.getBoundingClientRect();
+  if (!(px > 0) || !box.width || cs.display === 'none') {
+    return;
+  }
+  const runs = headingRuns(h, cs);
+  if (!runs.length) {
+    h.classList.remove('is-lettered');
+    return;
+  }
+  const parent = h.parentElement;
+  const pcs = getComputedStyle(parent);
+  const pr = parent.getBoundingClientRect();
+  const right = Math.min(pr.right - parseFloat(pcs.paddingRight || '0'), window.innerWidth - 4);
+  const left = Math.max(pr.left + parseFloat(pcs.paddingLeft || '0'), 4);
+  /* Centred when its text is, or when its box is a shrink wrapped one in
+   * the middle of its column, which is how a flex column centres a title:
+   * the lettering is wider than the text, and set from the text's left
+   * edge it would sit right of the middle the text marked. */
+  const mid = (box.left + box.right) / 2;
+  const centred = cs.textAlign === 'center'
+    || (box.width < (right - left) - 2 && Math.abs(mid - (left + right) / 2) < 2);
+  const inkW = Math.min(0.2, Math.max(0.1, 7 / px));
+  const pad = px * (inkW + 0.12);
+  const maxW = Math.floor(centred ? right - left : right - box.left + pad);
+  const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  const key = `${runs.map((r) => `${r.text}\u0001${r.fill}`).join('\u0002')}|${px}|${maxW}|${centred}|${dpr}`;
+  let art = h.querySelector(`:scope > .${LETTER_ART}`);
+  let probe = h.querySelector(`:scope > .${LETTER_PROBE}`);
+  if (h.letterKey === key && art && probe && h.classList.contains('is-lettered')) {
+    return;
+  }
+  if (!probe) {
+    probe = el('span', LETTER_PROBE);
+    probe.setAttribute('aria-hidden', 'true');
+    h.append(probe);
+  }
+  if (!art) {
+    art = el('canvas', LETTER_ART);
+    art.setAttribute('aria-hidden', 'true');
+    h.append(art);
+  }
+  let m = null;
+  try {
+    m = paintTitle(art, runs, px, { maxW, inkW });
+  } catch (e) {
+    m = null;
+  }
+  if (!m) {
+    /* No 2D context: the text is the heading, as it was. */
+    h.classList.remove('is-lettered');
+    art.remove();
+    return;
+  }
+  h.classList.add('is-lettered');
+  /* On the text's own baseline, or, if the text wrapped to a second line
+   * on a narrow window, across the middle of its box. */
+  const baseline = probe.offsetTop;
+  const top = baseline > px * 1.5 ? h.clientHeight / 2 - (m.base - m.px * 0.36) : baseline - m.base;
+  const x = centred ? (h.clientWidth - m.w) / 2 : -m.left;
+  art.style.left = `${Math.round(x)}px`;
+  art.style.top = `${Math.round(top)}px`;
+  h.letterKey = key;
+}
+
+/* Set a lettered heading's words: textContent takes the lettering with it,
+ * so it is put back at once rather than leaving transparent text behind. */
+function setHeadingText(h, text) {
+  h.textContent = text;
+  h.classList.remove('is-lettered');
+  h.letterKey = '';
+  letterHeading(h);
 }
 
 /*
@@ -2825,6 +2977,41 @@ function ratesItem(s, midRun) {
  * offer. On Results and the pause menu only: those are the two places a
  * pilot has just been flying, which is when a feel report is worth
  * anything. */
+/*
+ * THE WEIGHT, AS A ROW ON THE PAUSE SCREEN. The owner, 2026-09-26: "finish
+ * the weight slider", usable where it is shown and not only visible there.
+ * The flight overlay's slider showed through the pause menu dimmed, under a
+ * screen that takes every pointer, and no key reached it, so the pause
+ * screen could show it and nobody could move it. It is a row now, in "Does
+ * it feel wrong?", because floaty or heavy is that question: the Rates and
+ * PIDs screens' own drag track with the number beside it. Drag lands on
+ * release, one arrow or one stick flick is one step of five, the number
+ * types. The same setting and the same save as the overlay's slider, which
+ * follows it (applySettings paints it), so neither can disagree with the
+ * other. Changing it voids a running lap, as the overlay's always has; see
+ * the weight in applySettings, src/main.js.
+ */
+function weightItem(s) {
+  const top = weightMaxFor(s.airframe);
+  const cur = clampWeight(s.weight, s.airframe);
+  const spec = {
+    cliMin: WEIGHT_MIN, cliMax: top, scale: 1, decimals: 0, unit: '%',
+  };
+  const set = (v) => { s.weight = clampWeight(v, s.airframe); };
+  const it = number(
+    'Weight',
+    `How heavy the quad feels. Right is heavier: it drops when you chop the throttle and stops hanging at the top of a jump. Left is lighter, and it floats. ${WEIGHT_STOCK} is the quad as it ships; changing it mid lap voids the lap, and a lap flown off ${WEIGHT_STOCK} stays off the public board.`,
+    spec,
+    cur,
+    set,
+  );
+  /* A step is five, the overlay's step: number() would step one, which
+   * clampWeight rounds straight back. */
+  it.adjust = (d) => set(cur + d * WEIGHT_STEP);
+  it.range = { min: WEIGHT_MIN, max: top, step: WEIGHT_STEP };
+  return it;
+}
+
 function feelItem() {
   return {
     label: 'Flight feel',
@@ -3512,12 +3699,30 @@ export class Ui {
     this.airHintAtMs = null;
     this.ptrX = null;
     this.ptrY = null;
+    /* The flight chips' fade: when this flight went into the air, when a
+     * pointer last moved, and whether the class is on. See syncChipFade. */
+    this.chipsAloftAt = null;
+    this.chipsWokeAt = -Infinity;
+    this.chipsQuiet = false;
     this.build();
     this.root.addEventListener('mousedown', (e) => {
       if (this.dropEl && !this.dropEl.contains(e.target) && !e.target.closest('.drop-btn')) {
         this.closeDrop();
       }
     });
+    /* A pointer moving or landing anywhere but on a thumb stick brings the
+     * chips back. A thumb flying a stick is not reaching for a chip, and on
+     * a phone the thumbs never leave the glass, so the stick zones do not
+     * count. Passive, and one comparison and at most one class write. */
+    const wakeChips = (e) => {
+      if (e.target && e.target.closest && e.target.closest('.touch-zone')) {
+        return;
+      }
+      this.chipsWokeAt = performance.now();
+      this.setChipsQuiet(false);
+    };
+    window.addEventListener('pointermove', wakeChips, { passive: true });
+    window.addEventListener('pointerdown', wakeChips, { passive: true });
     this.show('title');
     this.bindWikiHash();
   }
@@ -3540,20 +3745,42 @@ export class Ui {
      * when you are ahead of it, amber when it is ahead of you, the same
      * reading as everything else on this overlay: mint is the good news. */
     this.osdGhost = el('div', 'osd-ghost is-off', '');
+    /* The label and the clock, and the last lap, the record and the ghost,
+     * each in a wrapper of its own. On a desk the wrappers are plain blocks
+     * and change nothing; on a phone the sheet lays each one out as a line,
+     * so the clock ends high enough for the banner to hang under it. See
+     * THE PHONE OSD in index.html. The bounce count rides that line too on
+     * a phone, a second node off on a desk, because it is a count about the
+     * run like the lap and the record, and in the pack's corner it pushed
+     * the line into the middle of a 740 px phone. */
     const top = el('div', 'osd-top');
-    top.append(this.osdClockLabel, this.osdTimer, this.osdGate, this.osdLast, this.osdBest, this.osdGhost);
+    const clock = el('div', 'osd-clock');
+    clock.append(this.osdClockLabel, this.osdTimer);
+    const records = el('div', 'osd-records');
+    this.osdHitsTouch = el('div', 'osd-best osd-hits-touch', '');
+    records.append(this.osdLast, this.osdBest, this.osdGhost, this.osdHitsTouch);
+    top.append(clock, this.osdGate, records);
     this.osdPack = el('div', 'osd-value', '');
     this.osdPackBar = el('div', 'bar-fill');
     const packBar = el('div', 'bar');
     packBar.append(this.osdPackBar);
     const packBlock = el('div', 'osd-corner osd-left');
-    packBlock.append(el('div', 'osd-label', 'Pack'), this.osdPack, packBar);
+    /* The mode a second time, in the pack's line, for the phone: its top
+     * left corner is the pack and the mode, and the top right is speed and
+     * height up to Pause. Off on a desk, where the mode is under the speed. */
+    this.osdFlightTouch = el('div', 'osd-sub osd-mode osd-mode-touch', '');
+    packBlock.append(el('div', 'osd-label', 'Pack'), this.osdPack, packBar, this.osdFlightTouch);
     this.osdHits = el('div', 'osd-sub osd-hits', '');
     packBlock.append(this.osdHits);
     this.osdSpeed = el('div', 'osd-value', '');
     this.osdFlight = el('div', 'osd-sub osd-mode', '');
     this.osdLaunch = el('div', 'osd-launch is-off', '');
+    /* The height as a number and two tails: the desk's "above the ground"
+     * and the phone's "up", which fits beside the speed on a small phone
+     * held sideways. The sheet shows one; only the number is written. */
     this.osdAlt = el('div', 'osd-sub', '');
+    this.osdAltNum = el('span', '', '');
+    this.osdAlt.append(this.osdAltNum, el('span', 'osd-alt-long', ' above the ground'), el('span', 'osd-alt-short', ' up'));
     this.osdThrBar = el('div', 'bar-fill warm');
     const thrBar = el('div', 'bar');
     thrBar.append(this.osdThrBar);
@@ -5004,6 +5231,48 @@ export class Ui {
       this.musicDock.classList.toggle('under-chip', Boolean(bug));
     }
     this.syncMusicDock();
+    if (this.screen !== 'flight') {
+      this.syncChipFade(false);
+    }
+  }
+
+  /*
+   * THE FLIGHT CHIPS FADE (POLISH-PLAN.md item 12; the owner, 2026-09-27:
+   * "yes fade the chips too"). A real feed carries the OSD and nothing
+   * else, so the music dock, Report bug and Pause go after about three
+   * seconds in the air, and come back when the quad is down again (landed,
+   * perched, set down, on its back), on the pause screen, and the moment a
+   * pointer moves or a finger lands anywhere but on a thumb stick.
+   *
+   * From the frame loop with the Weight slider's own aloft test, and it
+   * does nothing a frame but compare two times: the fade is the sheet's
+   * transition on one class on the root, written on a change only.
+   *
+   * FADED, NOT GONE. Only the opacity goes: every chip still takes its
+   * click and its tap where it stands, so a thumb that knows where Pause
+   * is still pauses, and Escape and F8 never depended on a chip. There is
+   * no pause button on a radio in flight to keep working; a radio pilot
+   * pauses on Escape, and gets the chips back by landing or pausing.
+   */
+  syncChipFade(aloft, nowMs = performance.now()) {
+    if (!aloft || this.screen !== 'flight') {
+      this.chipsAloftAt = null;
+      this.setChipsQuiet(false);
+      return;
+    }
+    if (this.chipsAloftAt == null) {
+      this.chipsAloftAt = nowMs;
+    }
+    const from = Math.max(this.chipsAloftAt, this.chipsWokeAt);
+    this.setChipsQuiet(nowMs - from >= CHIPS_QUIET_MS);
+  }
+
+  setChipsQuiet(on) {
+    if (this.chipsQuiet === on) {
+      return;
+    }
+    this.chipsQuiet = on;
+    this.root.classList.toggle('chips-quiet', on);
   }
 
   /*
@@ -6670,17 +6939,30 @@ export class Ui {
         /*
          * THE MANGA LAYER'S ONE SWITCH (FREESTYLE-MAPS-PLAN.md section 3.3:
          * "a Clean FPV setting turns all of it off in one row"). The note
-         * says what it turns off today and that the rest of the layer will
-         * answer to it, so a pilot who turned it on does not find speed
-         * lines arriving in Stage F that ignore them.
+         * says everything it turns off, the picture's half (Stage F) as
+         * well as the lettering's.
          */
         toggle(
           'Clean FPV',
           s.cleanFpv
-            ? 'On: freestyle maps show plain HUD text, the way a race track does. Callouts are words and numbers, and the results are a list. Speed lines, screentone and the impact frame will answer to this switch too when they arrive.'
-            : 'Off: on a freestyle map, tricks, gaps and combos are hand lettered like a manga, with a small katakana sound effect beside the big ones, and the results come back as a page of panels. Race tracks are always clean. The rest of the manga layer, speed lines, screentone and the impact frame, will answer to this switch too.',
+            ? 'On: freestyle maps look and read the way a race track does. No speed lines and no impact frame; callouts are words and numbers, and the results are a list.'
+            : 'Off: on a freestyle map, ink speed lines gather at the edges of the picture above about 20 m/s, a crash lands as an impact frame, tricks, gaps and combos are hand lettered like a manga with a small katakana sound effect beside the big ones, and the results come back as a page of panels. Race tracks are always clean.',
           s.cleanFpv,
           (v) => { s.cleanFpv = v; },
+        ),
+        /*
+         * THE IMPACT FRAME'S OWN ROW, beside the switch that also turns it
+         * off: a flash is a photosensitivity question, so it can go without
+         * the rest of the look going with it. The note says what it does,
+         * that it is never a white flash, and what else stops it.
+         */
+        toggle(
+          'Impact frame',
+          s.impactFrame
+            ? 'On: a crash on a freestyle map holds the moment for a beat as a high contrast ink panel with impact lines, then lets go. Never a white flash, at most one every two seconds. Off under Clean FPV, and whenever your system asks for reduced motion.'
+            : 'Off: a crash cuts straight to where you are set down, with no held frame. The rest of the manga look stays.',
+          s.impactFrame,
+          (v) => { s.impactFrame = v; },
         ),
         { label: 'Sound', section: true },
         toggle('Sound', 'All sound: motors, wind, music, cues and every lap time called out loud.', s.sound, (v) => { s.sound = v; }),
@@ -6922,6 +7204,7 @@ export class Ui {
           action: 'rates',
           note: 'How far the sticks go, and the throttle limit. Yours, not the tune\'s. Changing them here leaves the quad where it is and the clock running.',
         },
+        weightItem(s),
         feelItem(),
         { label: 'Elsewhere', section: true },
         {
@@ -8439,7 +8722,7 @@ export class Ui {
     range.className = 'row-range';
     range.min = String(it.range.min);
     range.max = String(it.range.max);
-    range.step = '1';
+    range.step = String(it.range.step || 1);
     range.value = String(it.num.cli);
     range.setAttribute('aria-label', it.label);
     range.addEventListener('pointerdown', (e) => {
@@ -10380,11 +10663,13 @@ export class Ui {
     for (const [name, node] of Object.entries(this.screens)) {
       node.style.display = name === screen ? '' : 'none';
     }
+    this.letterScreen(screen);
     /* Paused keeps the flight display up, dimmed: the lap clock and the
      * pack are what the player paused to look at. */
     this.syncFrame();
     this.osd.style.display = screen === 'flight' || screen === 'paused' ? '' : 'none';
-    this.osd.className = screen === 'paused' ? 'osd dim' : 'osd';
+    /* A toggle, not a className: setOsd keeps is-free on the same node. */
+    this.osd.classList.toggle('dim', screen === 'paused');
     this.pauseAirSlider(screen);
     /* The score follows the OSD onto and off the screen, but only in
      * freestyle: a race has no score and an empty Score 0 over a lap timer
@@ -10986,15 +11271,15 @@ export class Ui {
 
     this.resultsKicker.textContent = this.resultsCourseName();
     if (!clean.length) {
-      this.resultsHead.textContent = 'Run ended';
+      setHeadingText(this.resultsHead, 'Run ended');
       this.resultsHeroTime.textContent = '';
       this.resultsHeroMeta.textContent = '';
       this.resultsHeroMeta.className = 'results-hero-meta';
       this.resultsBody.append(el('p', 'results-empty', 'No clean lap this run. Hitting the ground or a gate frame costs the time it takes to get going again. Only an out of sequence gate voids the lap and sends you back to the mint ring.'));
     } else {
-      this.resultsHead.textContent = isRecord
+      setHeadingText(this.resultsHead, isRecord
         ? 'New track record'
-        : (matched ? 'Matched the record' : 'Run complete');
+        : (matched ? 'Matched the record' : 'Run complete'));
       /*
        * RACEGOW IS SCORED ON THREE CONSECUTIVE LAPS, so on a micro track
        * that total is the headline and the best single lap moves to the
@@ -11396,6 +11681,13 @@ export class Ui {
 
   setOsd({ mode, lapMs, lastLapMs, gate, gateCount, gateCue, volts, packFrac, altitude, speedKph, throttle, flightMode, bounces, launchState, launchPitch, ghostGapMs, ghostFinal, runState, runRemainMs, runTimed, runScored }) {
     const freestyle = mode === 'freestyle';
+    /* A freestyle clock has no gate line and no records under it, so on a
+     * phone the banner can hang higher: see THE PHONE OSD in index.html.
+     * Written on a change only. */
+    if (this.osdFree !== freestyle) {
+      this.osdFree = freestyle;
+      this.osd.classList.toggle('is-free', freestyle);
+    }
     /* Before the first gate there is no lap to time, so the clock reads
      * zero and dims rather than showing a row of dashes. */
     const running = lapMs != null && Number.isFinite(lapMs);
@@ -11468,11 +11760,13 @@ export class Ui {
     Ui.klass(this.osdSpeed, speedKph == null ? 'osd-value is-off' : 'osd-value');
     Ui.text(this.osdSpeed, speedKph == null ? '' : `${speedKph.toFixed(0)} km/h`);
     if (this.osdFlight) {
-      Ui.text(this.osdFlight, flightMode === 'turtle'
+      const modeText = flightMode === 'turtle'
         ? 'Turtle'
         : (launchState === 1 || launchState === 2
           ? 'Launch'
-          : (flightMode === 'angle' ? 'Angle' : 'Acro')));
+          : (flightMode === 'angle' ? 'Angle' : 'Acro'));
+      Ui.text(this.osdFlight, modeText);
+      Ui.text(this.osdFlightTouch, modeText);
     }
     if (this.osdLaunch) {
       const on = launchState > 0;
@@ -11489,7 +11783,7 @@ export class Ui {
         Ui.text(this.osdLaunch, deg > 2 ? `LAUNCH ${deg}` : 'LAUNCH');
       }
     }
-    Ui.text(this.osdAlt, `${altitude.toFixed(1)} m above the ground`);
+    Ui.text(this.osdAltNum, `${altitude.toFixed(1)} m`);
     Ui.bar(this.osdThrBar, throttle);
     if (this.osdHits) {
       /*
@@ -11509,6 +11803,7 @@ export class Ui {
         this.osdHits.textContent = bounces === 1 ? '1 bounce' : `${bounces} bounces`;
         this.osdHits.className = 'osd-sub osd-hits';
       }
+      Ui.text(this.osdHitsTouch, this.osdHits.textContent);
     }
   }
 
@@ -11561,9 +11856,10 @@ export class Ui {
    * through refreshBest), and once at build. Each layer holds its own flag
    * and ignores a call that changes nothing.
    *
-   * What answers to it today: the score's names and verdict, the chase's
-   * callouts, the found mark's ray fans, and the results page. Stage F's
-   * speed lines, screentone and impact frame read `this.manga` too.
+   * What answers to it: the score's names and verdict, the chase's
+   * callouts, the found mark's ray fans, the results page, and Stage F's
+   * speed lines, impact frame and screentone, which src/main.js's
+   * mangaFrame reads from `this.manga` every frame.
    */
   syncManga() {
     this.manga = this.osdMode === 'freestyle' && !this.settings.cleanFpv;
@@ -11575,6 +11871,32 @@ export class Ui {
     }
     if (this.stfLayer) {
       Ui.klass(this.stfLayer, this.manga ? 'stf-found' : 'stf-found is-clean');
+    }
+  }
+
+  /*
+   * Letter a screen's headings: the wordmark on the title, the room's title
+   * everywhere else, the results' head. See letterHeading, which paints only
+   * what changed. Not ui.manga's: the menus use the hand whatever Clean FPV
+   * says, because Clean FPV is about flight. The first call installs one
+   * resize listener, which letters the screen on show again once the window
+   * has settled, because a heading's size is in vw.
+   */
+  letterScreen(screen) {
+    const node = this.screens && this.screens[screen];
+    if (!node || typeof window === 'undefined') {
+      return;
+    }
+    if (!this.letterResize) {
+      this.letterResize = true;
+      this.letterTimer = 0;
+      window.addEventListener('resize', () => {
+        clearTimeout(this.letterTimer);
+        this.letterTimer = setTimeout(() => this.letterScreen(this.screen), 150);
+      });
+    }
+    for (const h of node.querySelectorAll(':scope > h2, h1.wordmark, h2.results-head')) {
+      letterHeading(h);
     }
   }
 
@@ -11774,9 +12096,9 @@ export class Ui {
     this.resultsKicker.textContent = summary.timed === false
       ? `${where}, free flight`
       : where;
-    this.resultsHead.textContent = scored
+    setHeadingText(this.resultsHead, scored
       ? (clean ? 'Clean run' : 'Run complete')
-      : 'Run ended';
+      : 'Run ended');
     this.resultsHeroCap.textContent = 'Score';
     this.resultsHeroTime.textContent = formatScore(counter);
     /* A town has no plan drawing, and an empty blueprint plate beside a
@@ -12257,8 +12579,17 @@ export class Ui {
    * carries is-aloft while the quad flies and the sheet does the fade, so
    * nothing here runs per frame beyond the cached class write. It stays up
    * while its card is, because the card is pointing at it.
+   *
+   * ON GLASS THE CARD WAITS FOR THE GROUND. `touch` is the thumb sticks
+   * flying. There the slider sits between the plates and fades the moment
+   * the quad is in the air, card or no card (POLISH-PLAN.md item 14: no
+   * Weight slider in flight on touch), and a card held up in the air was a
+   * panel over the middle of a phone's picture for eight seconds with both
+   * thumbs busy. So it is raised on the first time the quad is down again
+   * after some air, sitting still with the slider under it and a thumb
+   * free, and it retires, remembered, on the next takeoff.
    */
-  setAirSlider(show, ready = true, { airMs = 0, padFlying = false } = {}) {
+  setAirSlider(show, ready = true, { airMs = 0, padFlying = false, touch = false } = {}) {
     const air = this.osdAir;
     if (!air) {
       return;
@@ -12278,7 +12609,10 @@ export class Ui {
      */
     const dialog = Boolean(this.nameDialog && !this.nameDialog.hidden);
     if (!air.hint.hidden) {
-      if (!ready || padFlying || airMs - this.airHintAtMs >= AIR_HINT_AIR_MS) {
+      const done = touch
+        ? ready
+        : (!ready || padFlying || airMs - this.airHintAtMs >= AIR_HINT_AIR_MS);
+      if (done) {
         this.dismissAirHint();
       } else if (dialog) {
         /* Never drawn under a modal. Put away, not retired: it comes back
@@ -12303,7 +12637,8 @@ export class Ui {
      * collision is a layout problem and it is solved in the sheet, where the
      * card flips below the slider on a short screen.
      */
-    if (!this.airHintDone && air.hint.hidden && ready && !padFlying && !dialog && !airHintSeen()) {
+    const raise = touch ? (!ready && airMs > 0) : (ready && !padFlying);
+    if (!this.airHintDone && air.hint.hidden && raise && !dialog && !airHintSeen()) {
       air.hint.hidden = false;
       /* The first raise starts its eight seconds. A raise after a pause
        * keeps the stamp, so the pause does not buy the card more air. */
@@ -12316,8 +12651,10 @@ export class Ui {
 
   /*
    * Off the screen, the card is put away rather than retired, so it is
-   * never drawn through the pause menu or a dialog over it. The slider
-   * itself comes back on the pause screen: see setAirSlider.
+   * never drawn through the pause menu or a dialog over it. On the pause
+   * screen the Weight is the menu's own row (weightItem), and the sheet
+   * puts this slider away under the dimmed OSD; is-aloft comes off so it
+   * is up again the moment the pilot resumes on the ground.
    */
   pauseAirSlider(screen) {
     const air = this.osdAir;

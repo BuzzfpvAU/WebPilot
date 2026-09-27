@@ -141,6 +141,29 @@ const PASS_MARGIN_MICRO = 0.008;
 const LEG_MIN_DEPTHS = 1;
 
 /*
+ * THE SAME OPENING TWICE IN A ROW IS TWO PASSES, NOT ONE.
+ *
+ * 2022 AU Nationals flies its gate "32-36" twice running: through it, round
+ * a loop its document marks with three waypoints, and through it again. The
+ * rule above cannot tell that from RaceGOW6 Track 1's pair of different
+ * gates on one spot, which ARE flown as one pass, because a distance is all
+ * it looks at: one straight pass through 32-36 was credited at the box's
+ * face and again at its plane, and the lap skipped the loop (the owner,
+ * 2026-09-26: "fix the au nats track").
+ *
+ * What does tell them apart is the opening itself. An opening credited
+ * while the craft is still inside its box is HELD, and a held opening is not
+ * credited again until the craft has left that box, by any way out. Two
+ * different openings on one spot are two openings, and nothing about them
+ * changes. The opening is its element and hole (openingKey); a station with
+ * no element (the built in circuit) is its own opening. A one gate course is
+ * the same case as 32-36, and was a lap in half a metre.
+ */
+function openingKey(g, k) {
+  return g.elementId != null ? `${g.elementId}#${g.apertureIndex ?? k}` : `@${g.idx}#${k}`;
+}
+
+/*
  * The same length in a DOCUMENT's metres, for the builder's warning that
  * two stations of a flying order stand closer than it
  * (src/trackbuilder/warnings.js). A room's constants are RaceGOW's own
@@ -396,6 +419,9 @@ export class Race {
     /* Metres flown since the last credited pass: infinite with none, so
      * the first station of a run is never kept waiting. See LEG_MIN_DEPTHS. */
     this.flownM = Infinity;
+    /* Openings credited that the craft has not yet left the box of: see
+     * openingKey. */
+    this.held = [];
     this.lap = 0;
     this.lapStartMs = null; /* sim clock */
     this.lastLapMs = null;
@@ -554,6 +580,23 @@ export class Race {
     return t0;
   }
 
+  /* Whether a point is inside opening k of station g's box, the same box
+   * openingHits clips against. */
+  insideOpening(g, k, p) {
+    const ap = g.apertures[k];
+    const q = this.local(g, ap.centreY, p.x, p.y, p.z);
+    return Math.abs(q.x) <= ap.clearW * 0.5 - this.passMargin
+      && Math.abs(q.y) <= ap.clearH * 0.5 - this.passMargin
+      && Math.abs(q.z) <= this.passDepth;
+  }
+
+  /* Let go of every held opening the craft is no longer inside. */
+  leaveOpenings(p) {
+    if (this.held.length) {
+      this.held = this.held.filter((h) => this.insideOpening(h.g, h.k, p));
+    }
+  }
+
   /* Segment prev to curr against the next gate. A pass is the travel
    * intersecting the opening's box in the direction of travel. Returns
    * the sim time of first contact, or null. */
@@ -584,9 +627,17 @@ export class Race {
      * folded in: collision already owns a clip of the tube, and shrinking
      * the hole by that radius made a clean edge line miss.
      */
+    /*
+     * An opening still held from its last credit is not tested at all: the
+     * travel starts inside its box, and a straight travel that starts
+     * inside a box cannot leave it and come back. See openingKey.
+     */
     let used = -1;
     let t = 0;
     for (let k = 0; k < g.apertures.length && tMin <= 1; k += 1) {
+      if (this.held.some((h) => h.key === openingKey(g, k))) {
+        continue;
+      }
       const ap = g.apertures[k];
       const a = this.local(g, ap.centreY, prev.x, prev.y, prev.z);
       const b = this.local(g, ap.centreY, curr.x, curr.y, curr.z);
@@ -600,9 +651,14 @@ export class Race {
       t = tk;
       break;
     }
+    this.leaveOpenings(curr);
     if (used < 0) {
       this.flownM += len;
       return null;
+    }
+    /* Held while the travel ends inside the box it was credited in. */
+    if (this.insideOpening(g, used, curr)) {
+      this.held.push({ key: openingKey(g, used), g, k: used });
     }
     /* The flying for the next station starts from this crossing. */
     this.flownM = (1 - t) * len;
@@ -666,10 +722,12 @@ export class Race {
      * clip through the dirt or an inverted tumble on the grass. False
      * still advances the clock so the next legal pass is not timed
      * across the burial. Its travel is not flying, so it does not count
-     * towards LEG_MIN_DEPTHS either.
+     * towards LEG_MIN_DEPTHS either. It still carries the craft wherever it
+     * went, so out of a held opening's box is out of it (openingKey).
      */
     if (!allow) {
       this.prevSimMs = simMs;
+      this.leaveOpenings(curr);
       return { passed: null, hitFrame: false };
     }
     const prevSimMs = this.prevSimMs ?? simMs;
