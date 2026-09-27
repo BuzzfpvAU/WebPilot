@@ -56581,3 +56581,113 @@ does not wait for the browser to go, and never removes the /tmp/sim-page-*
 profile it made (about 130 had piled up here, some near 90 MB). Not changed
 here, because it is under tests/ and is its own change: wait for the exit,
 SIGKILL after a few seconds, signal the process group, remove the profile.
+
+## 2026-09-27 | review | The input lag change reviewed: nine findings and a plan
+
+### Why
+
+The owner, after the input lag change (903f95b, merged as fd0bba1) was handed
+over: "review the work and find more performance improvements, find bugs,
+then make a plan for opus to follow to implement your findings." A review
+run because it was directed, by a second model reading the diff and the code
+it plugs into, with four probes in the container's headless Chromium. No
+code changed in this turn. The plan is `prompts/input-lag-review-2026-09-27.md`
+and this entry records the findings, as CLAUDE.md asks of any review.
+
+### What the review agrees with
+
+The low latency canvas really was never requested and is now; the layout,
+bar, nub and OSD rate work is right; `contain: layout style` on the OSD
+blocks has no fixed descendants; nothing relied on a transparent canvas
+(`post.js` clears to alpha 0 only into its own normal target); the pause on
+leaving fullscreen is the Escape idiom; the physics path is untouched and the
+trace hash unchanged; the lint:input failures during the work were the two
+orphaned browsers.
+
+### Findings
+
+Ranked, with the evidence; the fixes are in the plan.
+
+- F1 (high). Auto graphics and the Render scale slider do nothing on the
+  town or a built map. `loadMap` is handed `renderScale` and nothing under
+  `src/maps/` reads it; no post object defines `userScale`, so
+  `applyRenderScale`'s branch for it never runs; the city and built pipelines
+  size their targets with their own math and restore the pixel ratio they
+  captured at construction on every resize (`src/maps/city/index.js` 502,
+  `src/maps/built/index.js` 324), which undoes Auto's change to the shell's
+  ratio. lint:quality's "the Render scale slider reaches the internal
+  buffer" tests `internalScale` the formula, not the pipeline. Pre-existing
+  for the slider; the change's note claims otherwise. Only the race field
+  and a custom track on it follow the factor, which is where the owner's
+  ticket was flown, so the fix for that ticket stands; the built maps do not
+  have it.
+- F2 (high). Auto and the gate measure against a 60 Hz display (18.5 and
+  17.5 ms constants, `1000 / 60` in the gate). On the Steam Deck's 40 Hz mode,
+  which quality.js names as Low's target, or any browser holding
+  requestAnimationFrame at 30 or 50 Hz, Auto reads the idle machine as late
+  from the first second, paces it to the floor, demotes, and can never climb
+  back because "easy" needs under 17.5 ms.
+- F3 (medium). The gate learns from time that was not GPU time. Probed: a
+  page frozen for three seconds with a fence pending took the average from
+  155 ms to 759 ms two samples later. `reset()` is never called. On a real
+  GPU that is the guard halving the draw rate for 20 to 70 frames after every
+  alt tab.
+- F4 (medium). Auto's demote flag survives a hand picked preset. Probed end
+  to end: demote set on Low in flight, Medium picked by hand from pause, Auto
+  picked again, Quit to title: within five seconds the preset was Low again
+  on the old evidence. The flag also survives map swaps and resizes.
+- F5 (medium). The boot time GPU name guess (`src/main.js` 747 to 776) still
+  runs when graphicsAuto is true, and Auto now persists the preset it settles
+  on with that flag set: an iGPU Auto promoted to High is put back to Medium
+  at every boot and promoted again after 45 s, a world rebuild on the title
+  every session; promote and demote are per session, so a session that did
+  both repeats both. By reading.
+- F6 (the owner's decision). Auto paces Low and Medium below rubric F4's
+  1.2 Mpx floor (0.39 Mpx at the owner's window on Low); the change honours
+  F4 on High only. Recommended: keep the exception on Low, where there is no
+  preset to fall to, honour F4 on Medium, and write the decision down.
+- F7 (cleanup). pace.js is dead (its guard needs an `applyPace` nothing
+  implements; `__pace` is read by nothing) and autoscale.js duplicates it.
+- F8 (low). `.bar-fill` and `.osd-nub-track` have no `will-change`;
+  `notePadRoster` builds a Set and strings on every 2 ms poll and
+  `listGamepads` runs twice a poll. Benched: `getSyncParameter` on a pending
+  fence and `navigator.getGamepads()` cost nothing measurable (under a
+  nanosecond and 3 ns a call), so the poll is not the cost, the garbage is.
+- F9 (low). Event Timing reports events of 16 ms and over in 8 ms steps, so
+  Input to screen cannot read below about 24 ms and may not move in the
+  owner's A/B of Low latency view. A page side press to next frame reading
+  beside it would.
+
+Checked and found fine: `Page.captureScreenshot` of the desynchronized canvas
+(identical pixel statistics with Low latency view on and off, so shots.js is
+unaffected here), the fence poll's cost, the `Ui.text` guard on the bounce
+count, the orbit page's context.
+
+### Declined
+
+- Stepping the physics to the frame's presentation time (one frame ahead)
+  to take a frame off the picture's age. It would make which stick samples
+  a step sees depend on frame timing, which is the frame independence check
+  4 pins and the rule "physics never reads frame time". Not proposed.
+
+### RUN LOG
+
+No repository check was run: no code changed. The probes, scratch tools in
+the session's scratchpad (`review-probes.mjs`), on fd0bba1:
+
+    bench        WebGL2 fence pending: getSyncParameter 0.000 us a call,
+                 clientWaitSync 0.000; signalled: the same; getGamepads
+                 0.003 us; performance.now 0.000 (2000 calls each)
+    shot         Flags and cones in flight at 960 by 540, Low latency view
+                 on: centre mean 81.3, sd 25.0; off: 81.2, 24.9; both
+                 granted as asked (desynchronized true then false, opaque
+                 true both)
+    hidden       title at 320 by 180, Low: gate 155.3 ms over 64 samples;
+                 frozen 3 s through Page.setWebLifecycleState; two samples
+                 later 758.7 ms
+    stale        built map, Low, Auto, flying: demote at 15 s (floorOverMs
+                 3266); paused; Medium by hand: demote still true; Auto
+                 again: demote still true, factor 1; Quit to title: at 5 s
+                 graphics low, demoted true, floorOverMs 0; then Low's own
+                 factor walked to 0.55 by 20 s
+    npm run verify   not run: nothing changed
