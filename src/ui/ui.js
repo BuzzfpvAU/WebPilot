@@ -1051,6 +1051,26 @@ const DEFAULTS = {
    * touch one the pilot picked. Picking any value in Settings clears this
    * for good, including picking the one detection would have chosen. */
   graphicsAuto: true,
+  /*
+   * LOW LATENCY VIEW: ask the browser to present the flight canvas without
+   * the compositor's frame queue (the canvas's desynchronized attribute, see
+   * buildShell in src/render/shell.js). On by default because that queue is
+   * one or two frames the pilot feels in the sticks and never sees in the
+   * frame rate. It can tear, and it is a request that some platforms do not
+   * grant, so it is a row: a context's attributes are fixed when it is made,
+   * so a change here takes effect on the next load, and the note says so.
+   */
+  lowLatency: true,
+  /*
+   * FULLSCREEN IN FLIGHT: Fly, Restart and Resume take the page fullscreen,
+   * and the title gives the window back. A window in a desktop is composited
+   * by the desktop, which on many a Linux laptop is one more frame between
+   * the sticks and the glass, and a fullscreen window is one most desktop
+   * compositors hand straight to the display. On by default; a browser that
+   * will not go fullscreen simply stays where it is. See main.js,
+   * enterFlightFullscreen.
+   */
+  fullscreenFly: true,
 };
 
 /*
@@ -1634,7 +1654,14 @@ function makeGimbal(caption) {
   const box = el('div', 'osd-gimbal');
   const plate = el('div', 'osd-gimbal-plate');
   plate.append(el('div', 'osd-cross-x'), el('div', 'osd-cross-y'));
-  const nub = el('div', 'osd-nub');
+  /* The dot rides a transparent layer the plate's own size, and it is that
+   * layer that moves, by transform: a percentage in translate() is a
+   * fraction of the element's own box, so on a plate of any size 50 per cent
+   * is half the plate, and nothing is laid out when a stick moves. The dot
+   * used to move by left and top, a layout every frame the keys were held.
+   * See placeNub. */
+  const nub = el('div', 'osd-nub-track');
+  nub.append(el('div', 'osd-nub'));
   plate.append(nub);
   /* The caption is kept because it is not a constant any more: it names the
    * channels this pilot's stick mode put on this plate. See setStickMode. */
@@ -1715,8 +1742,16 @@ function makePadCard() {
 }
 
 function placeNub(nub, x, y) {
-  nub.style.left = `${50 + x * 50}%`;
-  nub.style.top = `${50 - y * 50}%`;
+  /* A thousandth of the plate is well under a pixel on any plate this page
+   * draws, and the compare stops a stick at rest writing anything at all. */
+  const tx = Math.round(x * 50000) / 1000;
+  const ty = Math.round(-y * 50000) / 1000;
+  if (nub.__wfX === tx && nub.__wfY === ty) {
+    return;
+  }
+  nub.__wfX = tx;
+  nub.__wfY = ty;
+  nub.style.transform = `translate(${tx}%, ${ty}%)`;
 }
 
 /*
@@ -3036,16 +3071,99 @@ function feelItem() {
   };
 }
 
-function graphicsItem(s) {
+/*
+ * GRAPHICS, WITH AUTO FIRST. Auto is graphicsAuto, the flag this row always
+ * cleared when a preset was picked: until 2026-09-27 it only meant "detected
+ * from the GPU's name", and now it means the frames choose (see
+ * src/render/autoscale.js). Picking Auto hands the preset back to it from
+ * wherever it stands; picking a preset fixes it by hand, as before.
+ * `scaleNow` is Auto's resolution factor, from main.js, so the note can say
+ * what it is doing rather than what it might do.
+ */
+function graphicsItem(s, scaleNow) {
   const id = normalizeGraphics(s.graphics);
+  const pct = Math.round((Number(scaleNow) || 1) * 100);
+  const note = s.graphicsAuto
+    ? `Auto: drawing at ${graphicsLabel(id)}${pct < 100 ? `, at ${pct} percent resolution right now` : ''}. It watches how the frames actually arrive, lowers the resolution when the picture runs late, and changes the preset between runs. Pick a preset to fix it by hand.`
+    : graphicsNote(id);
   return choice(
     'Graphics',
-    graphicsNote(id),
-    GRAPHICS_IDS,
-    id,
-    graphicsLabel,
-    (v) => { s.graphics = v; s.graphicsAuto = false; },
+    note,
+    ['auto', ...GRAPHICS_IDS],
+    s.graphicsAuto ? 'auto' : id,
+    (v) => (v === 'auto' ? `Auto (${graphicsLabel(id)})` : graphicsLabel(v)),
+    (v) => {
+      if (v === 'auto') {
+        s.graphicsAuto = true;
+      } else {
+        s.graphics = v;
+        s.graphicsAuto = false;
+      }
+    },
   );
+}
+
+/*
+ * What Low latency view is doing on this machine, in one sentence a pilot
+ * can act on. `info.lowLatency` is what the browser granted when the canvas
+ * was made (see main.js, beside setGpuInfo), which can differ from what the
+ * row says now: the row takes effect on the next load.
+ */
+function lowLatencyNote(on, info) {
+  const granted = Boolean(info && info.lowLatency);
+  const what = 'Draws each frame straight to the screen instead of queueing it behind the page, which can take a frame or two off the time between your sticks and the picture. It can tear.';
+  if (!on) {
+    return granted
+      ? `Off from the next load. ${what} This browser is using it until you reload.`
+      : `Off. ${what} Reload after switching it on.`;
+  }
+  return granted
+    ? `On, and this browser is using it. ${what}`
+    : `On, but this browser did not grant it, so frames still queue behind the page. ${what} Not every browser can; if you just switched it on, reload.`;
+}
+
+/*
+ * INPUT TO SCREEN, the measured row. `p` is main.js's latency probe: key to
+ * screen from the browser's Event Timing (null before a reported press), the
+ * refresh rate, the GPU's time over a frame and whether the low latency
+ * canvas was granted. It says what it is and what it is not: a browser's
+ * reading, not the monitor's own delay after it.
+ */
+function latencyItem(p) {
+  const key = p && p.key;
+  const bits = [];
+  if (p && p.hz) {
+    bits.push(`the screen refreshes at ${p.hz} Hz`);
+  }
+  if (p && p.gpuMs != null) {
+    bits.push(`the GPU takes about ${Math.round(p.gpuMs)} ms over a frame`);
+  }
+  if (p) {
+    bits.push(p.lowLatency ? 'Low latency view is in use' : 'frames queue behind the page (Low latency view is not in use)');
+  }
+  const facts = bits.length ? ` Here ${bits.join(', ')}.` : '';
+  if (!p || !p.supported) {
+    return {
+      label: 'Input to screen',
+      value: 'Not measurable here',
+      note: `This browser does not report input timing, so the time from a press to the screen cannot be read.${facts}`,
+      info: true,
+    };
+  }
+  if (!key) {
+    return {
+      label: 'Input to screen',
+      value: 'Press a few keys',
+      note: `Measured from your own key presses and clicks to the frame that first showed them, so it fills in as you use the menus.${facts}`,
+      info: true,
+    };
+  }
+  return {
+    label: 'Input to screen',
+    value: `About ${key.ms} ms`,
+    note: `From a key press to the frame that first showed it, the median of your last ${key.n}, as this browser reports it; the display's own delay after that is not included. One frame at 60 Hz is 17 ms.${facts}`,
+    info: true,
+  };
 }
 
 function gpuItem(info) {
@@ -3427,6 +3545,24 @@ function clearLocationHash() {
   history.replaceState(null, '', url);
 }
 
+/*
+ * THE OSD'S NUMBERS AT OSD RATE, NOT FRAME RATE. Every readout that changes
+ * continuously used to be rewritten every frame: the lap clock to the
+ * hundredth, the speed, the height and the pack. Each write is a style and
+ * layout pass and a re-raster of its text under the OSD's ink edge, and on
+ * 2026-09-27 a headless trace put that edge at about half a millisecond of
+ * raster a frame over plain text. The edge stays, because it is what keeps
+ * the small print readable over a lit world; the numbers change less often
+ * instead. Fifteen a second for speed, height and pack, thirty for the clock,
+ * which nobody reads faster, and a real OSD updates slower still. Anything
+ * that is a change of state (a clock starting, a readout coming or going, a
+ * gate, the launch call) is still written the frame it happens. The gates
+ * are a hair under the periods so a 60 Hz frame lands on every fourth and
+ * every second frame rather than beating against them.
+ */
+const OSD_NUMBERS_MS = 62;
+const OSD_CLOCK_MS = 31;
+
 export class Ui {
   constructor(root) {
     this.root = root;
@@ -3749,6 +3885,10 @@ export class Ui {
 
     /* Flight overlay: the on screen display a pilot actually reads. */
     this.osd = el('div', 'osd');
+    /* When the continuous readouts were last written: see OSD_NUMBERS_MS.
+     * Far in the past, so the first frame of a flight writes them all. */
+    this.osdNumbersAt = -1e9;
+    this.osdClockAt = -1e9;
     /* The clock is a lap on the race field and an airtime in freestyle, and
      * an unlabelled number that means two different things is how a pilot
      * learns to distrust an instrument. */
@@ -5492,6 +5632,15 @@ export class Ui {
        * rate. That is twitchy, from code that did not change.
        */
       stick: this.stickProbe ? this.stickProbe() : null,
+      /*
+       * WHAT THE FRAMES COST WHILE FLYING. bug-e82b8bb8 was a pilot saying
+       * the lag made the track unflyable and a report saying 60 fps, read
+       * on the pause screen, which is a statement about the pause screen.
+       * This is the flying frames' own record, whether the browser granted
+       * the low latency canvas, and the render scale. One key: the board's
+       * cap is 32.
+       */
+      perf: this.perfProbe ? this.perfProbe() : null,
       graphics: s.graphics || '',
       cameraAngle: s.cameraAngle,
       cameraFov: s.cameraFov,
@@ -6950,7 +7099,7 @@ export class Ui {
           note: `Those belong to the machine, not to you, so they are one room over under ${SCREEN_TITLES.quad}. Camera angle and flight mode are there too.`,
         },
         { label: 'Screen', section: true },
-        graphicsItem(s),
+        graphicsItem(s, this.autoScaleNow),
         gpuItem(this.gpuInfo),
         choice(
           'Render scale',
@@ -6968,6 +7117,30 @@ export class Ui {
           (n) => (n === 0 ? 'Uncapped' : `${n} fps`),
           (n) => { s.fpsCap = n; },
         ),
+        /*
+         * THE SHORT PATH TO THE GLASS, as a row because it can tear and
+         * because it is a request a platform may refuse. The note says which
+         * happened on this machine, from what the browser actually granted,
+         * and that a change waits for the next load: see lowLatency in
+         * DEFAULTS and buildShell in src/render/shell.js.
+         */
+        toggle(
+          'Low latency view',
+          lowLatencyNote(s.lowLatency, this.gpuInfo),
+          s.lowLatency,
+          (v) => { s.lowLatency = v; },
+        ),
+        toggle(
+          'Fullscreen in flight',
+          s.fullscreenFly
+            ? 'On: Fly, Restart and Resume go fullscreen, and back to the title gives the window back. Many desktops hand a fullscreen window straight to the display, which can take a frame off the time between your sticks and the picture. Escape leaves fullscreen and pauses, and Resume goes back to it.'
+            : 'Off: the page stays in its window. Fullscreen can take a frame off the time between your sticks and the picture on many desktops.',
+          s.fullscreenFly,
+          (v) => { s.fullscreenFly = v; },
+        ),
+        /* What the pieces above add up to on this machine, measured: see
+         * src/render/latency.js. Read only, like the GPU row. */
+        latencyItem(this.latencyProbe ? this.latencyProbe() : null),
         /*
          * THE MANGA LAYER'S ONE SWITCH (FREESTYLE-MAPS-PLAN.md section 3.3:
          * "a Clean FPV setting turns all of it off in one row"). The note
@@ -7257,7 +7430,7 @@ export class Ui {
            * right. The rows that still restart a run carry it themselves. */
           note: 'Your name, your radio, rates, graphics and sound.',
         },
-        graphicsItem(s),
+        graphicsItem(s, this.autoScaleNow),
         { label: 'How to fly', action: 'howto' },
         { label: 'FPV wiki', action: 'wiki', note: 'The plant, the compiled controller, and every catalog key. Opens the wiki on webfpv.org.' },
         { label: 'Support', action: 'support', note: PATREON_NOTE },
@@ -11700,23 +11873,53 @@ export class Ui {
     }
   }
 
-  /* Bars are a width in per cent. Rounded to one decimal before the compare,
-   * because a battery that drains by a ten thousandth of a per cent per frame
-   * would otherwise defeat the guard entirely while moving nothing a pilot
-   * can see. */
+  /* Bars are a fraction of their track, drawn as a horizontal scale.
+   * Rounded to a thousandth before the compare, because a battery that
+   * drains by a ten thousandth of a per cent per frame would otherwise defeat
+   * the guard entirely while moving nothing a pilot can see.
+   *
+   * A TRANSFORM, NOT A WIDTH. The throttle bar moves nearly every frame, and
+   * a width is layout: it was a style, layout and paint pass every frame,
+   * behind a 120 ms width transition that also drew the throttle a tenth of
+   * a second late. A scale is composited and never lays anything out; the
+   * fill is full width in the stylesheet and scaled from its left edge. */
   static bar(el, frac) {
     if (!el) {
       return;
     }
-    const pct = Math.round(Math.max(0, Math.min(1, frac)) * 1000) / 10;
-    if (el.__wfBar !== pct) {
-      el.__wfBar = pct;
-      el.style.width = `${pct}%`;
+    const f = Math.round(Math.max(0, Math.min(1, frac)) * 1000) / 1000;
+    if (el.__wfBar !== f) {
+      el.__wfBar = f;
+      el.style.transform = `scaleX(${f})`;
+    }
+  }
+
+  /* The clock's text, written now if it is a change of state (live false)
+   * or on the clock's tick if it is a running number: see OSD_CLOCK_MS. A
+   * method and a flag rather than a closure, because setOsd runs every frame
+   * and the frame loop allocates nothing (P8). */
+  osdClock(text, live) {
+    if (!live || this.osdClockDue) {
+      Ui.text(this.osdTimer, text);
     }
   }
 
   setOsd({ mode, lapMs, lastLapMs, gate, gateCount, gateCue, volts, packFrac, altitude, speedKph, throttle, flightMode, bounces, launchState, launchPitch, ghostGapMs, ghostFinal, runState, runRemainMs, runTimed, runScored }) {
     const freestyle = mode === 'freestyle';
+    /* Whether the continuous readouts are due this frame: see
+     * OSD_NUMBERS_MS. A running clock waits for its tick; a clock that has
+     * just stopped, started or changed what it counts is written at once,
+     * because that is a change of state and not a number moving. */
+    const nowMs = performance.now();
+    const numbersDue = nowMs - this.osdNumbersAt >= OSD_NUMBERS_MS;
+    const clockDue = nowMs - this.osdClockAt >= OSD_CLOCK_MS;
+    if (numbersDue) {
+      this.osdNumbersAt = nowMs;
+    }
+    if (clockDue) {
+      this.osdClockAt = nowMs;
+    }
+    this.osdClockDue = clockDue;
     /* A freestyle clock has no gate line and no records under it, so on a
      * phone the banner can hang higher: see THE PHONE OSD in index.html.
      * Written on a change only. */
@@ -11744,7 +11947,7 @@ export class Ui {
          * seconds spent reading the banner. See airtimeMs there.
          */
         Ui.text(this.osdClockLabel, 'Air');
-        Ui.text(this.osdTimer, running ? formatTime(lapMs) : '0.00');
+        this.osdClock(running ? formatTime(lapMs) : '0.00', running);
         Ui.klass(this.osdTimer, running ? 'osd-timer' : 'osd-timer waiting');
       } else if (runTimed === false) {
         /*
@@ -11752,20 +11955,20 @@ export class Ui {
          * where a number belongs reads as a fault. It says what it is.
          */
         Ui.text(this.osdClockLabel, 'Run');
-        Ui.text(this.osdTimer, 'Free');
+        this.osdClock('Free', false);
         Ui.klass(this.osdTimer, 'osd-timer waiting');
       } else {
         const ready = runState !== 'flying' && runState !== 'over';
         const left = Number.isFinite(runRemainMs) ? runRemainMs : 0;
         Ui.text(this.osdClockLabel, 'Run');
-        Ui.text(this.osdTimer, ready ? '2:00' : formatRunClock(left));
+        this.osdClock(ready ? '2:00' : formatRunClock(left), !ready);
         Ui.klass(this.osdTimer, ready
           ? 'osd-timer waiting'
           : (left <= 10_000 ? 'osd-timer is-late' : 'osd-timer'));
       }
     } else {
       Ui.text(this.osdClockLabel, 'Lap');
-      Ui.text(this.osdTimer, running ? formatTime(lapMs) : '0.00');
+      this.osdClock(running ? formatTime(lapMs) : '0.00', running);
       Ui.klass(this.osdTimer, running ? 'osd-timer' : 'osd-timer waiting');
     }
     if (freestyle) {
@@ -11775,7 +11978,10 @@ export class Ui {
     } else {
       Ui.text(this.osdGate, `Gate ${gate} of ${gateCount}`);
     }
-    Ui.text(this.osdPack, `${volts.toFixed(1)} volts`);
+    if (numbersDue) {
+      Ui.text(this.osdPack, `${volts.toFixed(1)} volts`);
+      Ui.bar(this.osdPackBar, packFrac);
+    }
     Ui.text(this.osdLast, !freestyle && lastLapMs != null ? `Last lap ${formatTime(lastLapMs)}` : '');
     if (this.osdGhost) {
       if (ghostGapMs == null || freestyle) {
@@ -11790,11 +11996,15 @@ export class Ui {
         Ui.klass(this.osdGhost, `osd-ghost ${ahead ? 'ahead' : 'behind'}`);
       }
     }
-    Ui.bar(this.osdPackBar, packFrac);
     /* Gone, not blank, on an airframe that has no speed to print: see
-     * osdSpeed in configs/airframes.js. */
+     * osdSpeed in configs/airframes.js. Going or coming is written at once,
+     * the number itself at OSD rate. */
     Ui.klass(this.osdSpeed, speedKph == null ? 'osd-value is-off' : 'osd-value');
-    Ui.text(this.osdSpeed, speedKph == null ? '' : `${speedKph.toFixed(0)} km/h`);
+    if (speedKph == null) {
+      Ui.text(this.osdSpeed, '');
+    } else if (numbersDue || this.osdSpeed.__wfText === '') {
+      Ui.text(this.osdSpeed, `${speedKph.toFixed(0)} km/h`);
+    }
     if (this.osdFlight) {
       const modeText = flightMode === 'turtle'
         ? 'Turtle'
@@ -11819,7 +12029,11 @@ export class Ui {
         Ui.text(this.osdLaunch, deg > 2 ? `LAUNCH ${deg}` : 'LAUNCH');
       }
     }
-    Ui.text(this.osdAltNum, `${altitude.toFixed(1)} m`);
+    if (numbersDue) {
+      Ui.text(this.osdAltNum, `${altitude.toFixed(1)} m`);
+    }
+    /* The throttle bar every frame: it is an instrument the thumb is reading,
+     * and since it moves by transform it costs no layout. See Ui.bar. */
     Ui.bar(this.osdThrBar, throttle);
     if (this.osdHits) {
       /*
@@ -11833,13 +12047,15 @@ export class Ui {
        * row says that, in the neutral colour, and it says nothing at all
        * until there is something to say.
        */
-      if (!bounces) {
-        this.osdHits.textContent = '';
-      } else {
-        this.osdHits.textContent = bounces === 1 ? '1 bounce' : `${bounces} bounces`;
-        this.osdHits.className = 'osd-sub osd-hits';
+      /* Through the guards like every other readout. It wrote textContent
+       * and className raw, every frame, which replaced the text node and
+       * dirtied the layout even when the count had not moved. */
+      const hits = !bounces ? '' : (bounces === 1 ? '1 bounce' : `${bounces} bounces`);
+      Ui.text(this.osdHits, hits);
+      if (bounces) {
+        Ui.klass(this.osdHits, 'osd-sub osd-hits');
       }
-      Ui.text(this.osdHitsTouch, this.osdHits.textContent);
+      Ui.text(this.osdHitsTouch, hits);
     }
   }
 
@@ -13100,6 +13316,18 @@ export class Ui {
     saveSettings(this.settings);
   }
 
+  /* Auto graphics' resolution factor as it stands, for the Graphics row's
+   * note. Repainted only where that row is showing. */
+  setAutoScale(f) {
+    if (this.autoScaleNow === f) {
+      return;
+    }
+    this.autoScaleNow = f;
+    if (this.screen === 'pilot') {
+      this.renderMenu();
+    }
+  }
+
   setGpuInfo(info) {
     this.gpuInfo = info || null;
     if (this.screen === 'pilot') {
@@ -13121,6 +13349,19 @@ export class Ui {
    */
   setStickProbe(fn) {
     this.stickProbe = typeof fn === 'function' ? fn : null;
+  }
+
+  /* What the frames cost while flying and what the browser gave the canvas,
+   * read when a report is written, for the same reason the stick path is:
+   * see setPerfProbe's caller in main.js. */
+  setPerfProbe(fn) {
+    this.perfProbe = typeof fn === 'function' ? fn : null;
+  }
+
+  /* Input to screen and the facts beside it, for the Settings row: see
+   * latencyItem. A function for the same reason the stick probe is one. */
+  setLatencyProbe(fn) {
+    this.latencyProbe = typeof fn === 'function' ? fn : null;
   }
 
   /*

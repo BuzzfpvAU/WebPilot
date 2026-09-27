@@ -1,0 +1,221 @@
+/*
+ * autoscale.js: Auto graphics' resolution, chosen from how this machine is
+ * actually drawing, and the evidence for moving the preset.
+ *
+ * WHY THIS EXISTS. Until 2026-09-27 the preset was a guess from the GPU's
+ * name, made once at boot (main.js, beside setGpuInfo): a software rasteriser
+ * got Low, a name that looked integrated got Medium, everything else High.
+ * Nothing measured whether the guess held, and src/render/pace.js, written to
+ * hold 60 by scaling the buffer, was never connected to a map (its caller's
+ * comment says so). bug-e82b8bb8 was a laptop on Low that could not be flown
+ * for lag. So Auto now watches the frames and moves the one lever that costs
+ * nothing to move, the resolution, and says when the preset itself should
+ * move, which the shell does only between runs because a preset rebuilds the
+ * world.
+ *
+ * THE LEVER is a factor on the Render scale slider, from FLOOR to 1: the same
+ * path the slider takes (renderScaleOf and the guarded resize in main.js), so
+ * every map follows it and nothing new touches a pipeline. The city's and the
+ * built map's pipelines clamp it again to their own floors; on High those are
+ * the rubric's 1,200,000 pixels (prompts/bando-perf-loop.md, F4), so Auto
+ * cannot pace a High picture into 720p. On the race field the shell applies
+ * the same absolute floor at High.
+ *
+ * THE SIGNALS, per frame, allocation free:
+ *   dt       the frame interval: is the page holding sixty
+ *   gpuMs    from gpugate.js: how long the GPU takes over a frame, queue
+ *            included. The one signal that sees a GPU saturated at vsync,
+ *            where dt says 16.7 ms and the frames are late anyway
+ *   render   and block: the F5 rule from pace.js. A frame that is long
+ *            because of the page's own script is not helped by fewer
+ *            pixels, so a CPU bound frame does not drop the scale
+ *
+ * THE RULES, with the reasons in the numbers:
+ *   over budget  dt average over 18.5 ms (under about 54 fps) and not CPU
+ *                bound, or the GPU over 90 percent of a 60 Hz frame. Half
+ *                a second of it steps the scale down a tenth.
+ *   headroom     dt average under 17.5 ms and the GPU under 55 percent of a
+ *                frame. Three seconds of it steps the scale up a twentieth.
+ *                Down fast and up slowly, so a pilot sees one change and not
+ *                a shimmer. Without GPU timing (no fences) a 60 Hz display
+ *                cannot show headroom at all, so it only climbs on a clearly
+ *                faster display.
+ *   a drop blocks climbing for ten seconds, so a change cannot ping pong.
+ *   a change is followed by a cooldown, and the first frames after it are
+ *                not believed: resizing the targets hitches, and a hitch
+ *                read as load would drop the scale again (pace.js had this
+ *                right and it is kept).
+ *
+ * THE PRESET. Three seconds over budget at the floor sets `demote`; forty
+ * five seconds at full scale with the GPU under 45 percent sets `promote`.
+ * main.js acts on them on the title, between runs: down a step each time the
+ * evidence says so, because a machine the name guessed wrong may need two,
+ * and up at most once a session and never in a session that came down, so
+ * the preset cannot ping pong.
+ *
+ * This file is part of WebFPVSimulator.
+ *
+ * WebFPVSimulator is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or (at
+ * your option) any later version.
+ *
+ * WebFPVSimulator is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/* The lowest factor Auto will use, the Render scale slider's lowest step. */
+export const AUTO_FLOOR = 0.55;
+const STEP_DOWN = 0.1;
+const STEP_UP = 0.05;
+const FRAME_MS = 1000 / 60;
+const OVER_DT_MS = 18.5;
+const EASY_DT_MS = 17.5;
+const FAST_DISPLAY_DT_MS = 14.5;
+const OVER_GPU = 0.9;
+const EASY_GPU = 0.55;
+const PROMOTE_GPU = 0.45;
+const OVER_HOLD_MS = 500;
+const EASY_HOLD_MS = 3000;
+const CLIMB_BLOCK_MS = 10000;
+const DEMOTE_HOLD_MS = 3000;
+const PROMOTE_HOLD_MS = 45000;
+/*
+ * Time after a change whose samples are not believed, and time after it
+ * before another change. In milliseconds, not frames: counted in frames, a
+ * machine at ten frames a second waited nine seconds between steps, measured
+ * on 2026-09-27 under SwiftShader, which made the slowest machine the slowest
+ * to be helped. The warm up is time for the same reason.
+ */
+const HITCH_MS = 200;
+const COOL_MS = 1500;
+const WARM_MS = 500;
+
+export function createAutoScale() {
+  const s = {
+    scale: 1,
+    want: 1,
+    dirty: 0,
+    floor: AUTO_FLOOR,
+    dtEma: FRAME_MS,
+    renderEma: 3,
+    shellEma: 3,
+    warmMs: 0,
+    coolMs: 0,
+    overMs: 0,
+    easyMs: 0,
+    climbBlockMs: 0,
+    floorOverMs: 0,
+    easyFullMs: 0,
+    demote: false,
+    promote: false,
+    cpuBound: 0,
+    changes: 0,
+  };
+
+  /*
+   * One frame. dt is the capped frame interval, renderMs the part of the
+   * frame callback inside the draw, blockMs the whole callback, gate the
+   * gpugate state (or null), and drew whether this frame drew the world at
+   * all. Returns nothing; `dirty` and `want` say whether the caller should
+   * apply a new scale.
+   *
+   * The render and shell averages learn only from frames that drew. A frame
+   * the GPU guard or the frame cap held back has a render time of nothing,
+   * and fed to F5 that reads as "the page is the cost, not the pixels":
+   * measured on 2026-09-27, it stopped the scale dropping on exactly the
+   * saturated GPU the guard had just found.
+   */
+  function observe(dt, renderMs, blockMs, gate, drew) {
+    s.dirty = 0;
+    if (!(dt > 0) || dt > 250) {
+      return;
+    }
+    if (s.coolMs > COOL_MS - HITCH_MS) {
+      s.coolMs -= dt;
+      return;
+    }
+    s.dtEma += (dt - s.dtEma) * 0.1;
+    if (drew) {
+      s.renderEma += (renderMs - s.renderEma) * 0.1;
+      s.shellEma += ((blockMs - renderMs) - s.shellEma) * 0.1;
+    }
+    if (s.warmMs < WARM_MS) {
+      s.warmMs += dt;
+      return;
+    }
+    /* Ten timed fences: the average moves a tenth a sample, so ten is
+     * where it has left its first reading behind, and on a machine drawing
+     * a few frames a second thirty took most of a minute. */
+    const gpuKnown = Boolean(gate && gate.on && gate.samples >= 10);
+    const gpuShare = gpuKnown ? gate.gpuMs / FRAME_MS : 0;
+    /* F5: fewer pixels cannot buy back the page's own script. */
+    s.cpuBound = s.renderEma < 7 && s.shellEma > 9 && s.dtEma > OVER_DT_MS ? 1 : 0;
+    const over = (s.dtEma > OVER_DT_MS && !s.cpuBound) || (gpuKnown && gpuShare > OVER_GPU);
+    const easy = s.dtEma < EASY_DT_MS
+      && (gpuKnown ? gpuShare < EASY_GPU : s.dtEma < FAST_DISPLAY_DT_MS);
+    s.overMs = over ? s.overMs + dt : 0;
+    s.easyMs = easy ? s.easyMs + dt : 0;
+    if (s.climbBlockMs > 0) {
+      s.climbBlockMs -= dt;
+    }
+    /* The preset's evidence, gathered whatever the cooldown says. */
+    s.floorOverMs = over && s.scale <= s.floor + 0.001 ? s.floorOverMs + dt : 0;
+    s.easyFullMs = easy && s.scale >= 0.999 && gpuKnown && gpuShare < PROMOTE_GPU
+      ? s.easyFullMs + dt : 0;
+    if (s.floorOverMs >= DEMOTE_HOLD_MS) {
+      s.demote = true;
+    }
+    if (s.easyFullMs >= PROMOTE_HOLD_MS) {
+      s.promote = true;
+    }
+    if (s.coolMs > 0) {
+      s.coolMs -= dt;
+      return;
+    }
+    if (s.overMs >= OVER_HOLD_MS && s.scale > s.floor + 0.001) {
+      const next = s.scale - STEP_DOWN;
+      s.want = next < s.floor ? s.floor : next;
+      s.dirty = 1;
+      s.climbBlockMs = CLIMB_BLOCK_MS;
+    } else if (s.easyMs >= EASY_HOLD_MS && s.scale < 0.999 && s.climbBlockMs <= 0) {
+      const next = s.scale + STEP_UP;
+      s.want = next > 1 ? 1 : next;
+      s.dirty = 1;
+    }
+  }
+
+  /* The caller applied `want`. */
+  function applied(scale) {
+    s.scale = scale;
+    s.dirty = 0;
+    s.coolMs = COOL_MS;
+    s.overMs = 0;
+    s.easyMs = 0;
+    s.changes += 1;
+  }
+
+  /* A new floor, from the caller: it depends on the preset and the window. */
+  function setFloor(floor) {
+    s.floor = floor > 1 ? 1 : (floor < AUTO_FLOOR ? AUTO_FLOOR : floor);
+  }
+
+  /* A new preset or a new flight: the evidence starts again, the scale
+   * stays where it is (the caller resets it when the preset changes). */
+  function resetEvidence() {
+    s.warmMs = 0;
+    s.overMs = 0;
+    s.easyMs = 0;
+    s.floorOverMs = 0;
+    s.easyFullMs = 0;
+    s.demote = false;
+    s.promote = false;
+  }
+
+  return { state: s, observe, applied, setFloor, resetEvidence };
+}

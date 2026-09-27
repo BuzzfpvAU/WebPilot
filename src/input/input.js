@@ -1241,6 +1241,12 @@ export class InputManager {
     this.flying = false;
     this.windowFlying = true;
     this.flightRec = null;
+    /* The record of the source that flew BEFORE this one, kept rather than
+     * dropped when the kind of source changes. bug-e82b8bb8 was filed on
+     * the keyboard four seconds after a radio had flown the complaint, and
+     * the radio's record, the one that could have said how the flight went,
+     * was gone. See flightRecord. */
+    this.flightRecBefore = null;
 
     /*
      * STICK RESOLUTION, AND WHY THE MEASUREMENT IS ONE SIDED.
@@ -3264,12 +3270,23 @@ export class InputManager {
    * is timestamped rather than assumed to be on a grid. Calling poll() from
    * the frame as well is harmless: dtMs is measured off lastWall, so the
    * keyboard integration cannot be double counted.
+   *
+   * `alsoEach` rides the same tick, after the sticks: main.js hangs the GPU
+   * guard's fence poll here (see src/render/gpugate.js) rather than start a
+   * second timer at the same rate, because every tick is a wakeup a laptop
+   * pays for, and a slow laptop is who the guard is for.
    */
-  startPolling(periodMs = 2) {
+  startPolling(periodMs = 2, alsoEach = null) {
     if (this.timer !== null) {
       return;
     }
-    this.timer = setInterval(() => this.poll(performance.now()), periodMs);
+    this.timer = setInterval(() => {
+      const now = performance.now();
+      this.poll(now);
+      if (alsoEach) {
+        alsoEach(now);
+      }
+    }, periodMs);
   }
 
   stopPolling() {
@@ -3332,6 +3349,7 @@ export class InputManager {
   /* And the flight's record, for the same reason. See flightRec. */
   forgetFlightRecord() {
     this.flightRec = null;
+    this.flightRecBefore = null;
   }
 
   /*
@@ -3343,6 +3361,11 @@ export class InputManager {
   flightRecord() {
     const kind = this.source.startsWith('a radio') ? 'a radio' : this.source;
     if (!this.flightRec || this.flightRec.source !== kind) {
+      /* The one it replaces moves aside rather than out, if it ever flew:
+       * a record with no travel says nothing a report could use. */
+      if (this.flightRec && this.flightRec.travel) {
+        this.flightRecBefore = this.flightRec;
+      }
       this.flightRec = { source: kind, ms: 0, padHzMax: 0, sampleHzMax: 0, travel: null };
     }
     return this.flightRec;
@@ -3372,22 +3395,35 @@ export class InputManager {
    * 0.5213541666 only looks more careful.
    */
   flightReport() {
-    const r = this.flightRec;
-    if (!r || !r.travel) {
-      return null;
-    }
     const two = (v) => Math.round(v * 100) / 100;
-    const travel = {};
-    for (const name of IDENT_CHANNELS) {
-      travel[name] = r.travel[name].map(two);
-    }
-    return {
-      source: r.source,
-      seconds: Math.round(r.ms / 100) / 10,
-      padHzMax: r.padHzMax,
-      sampleHzMax: r.sampleHzMax,
-      travel,
+    const summary = (r) => {
+      if (!r || !r.travel) {
+        return null;
+      }
+      const travel = {};
+      for (const name of IDENT_CHANNELS) {
+        travel[name] = r.travel[name].map(two);
+      }
+      return {
+        source: r.source,
+        seconds: Math.round(r.ms / 100) / 10,
+        padHzMax: r.padHzMax,
+        sampleHzMax: r.sampleHzMax,
+        travel,
+      };
     };
+    /*
+     * The source flying now, and under it the one that flew before it when
+     * there was one. A report sent from the keyboard after a radio flew the
+     * complaint carries both; with nothing flown now, the earlier record is
+     * the report's record, as it would have been had the source not moved.
+     */
+    const now = summary(this.flightRec);
+    const before = summary(this.flightRecBefore);
+    if (!now) {
+      return before;
+    }
+    return before ? { ...now, before } : now;
   }
 
   stats() {

@@ -199,7 +199,11 @@
          reads over any background. */
       .osd { position: absolute; inset: 0; }
       .osd.dim { opacity: 0.4; }
+      /* contain: layout style on the two blocks whose numbers change in
+         flight, so a new number lays out its own block and nothing around
+         it. */
       .osd-top {
+        contain: layout style;
         position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
         text-align: center; text-shadow: var(--osd-edge);
       }
@@ -225,6 +229,7 @@
       .osd-ghost.ahead { color: var(--mint); }
       .osd-ghost.behind { color: var(--amber); }
       .osd-corner {
+        contain: layout style;
         position: absolute; bottom: 20px; width: 190px;
         text-shadow: var(--osd-edge); font-size: 15px;
       }
@@ -1017,8 +1022,17 @@
         box-shadow: inset 0 0 0 1px rgba(157, 179, 200, 0.35);
         overflow: hidden;
       }
-      .bar-fill { height: 100%; width: 0%; background: var(--mint); transition: width 0.12s linear; }
-      .bar-fill.warm { background: var(--amber); }
+      /* The fill is full width and SCALED from its left edge (Ui.bar in
+         src/ui/ui.js): a scale is composited, where a width was a layout
+         pass every frame the throttle moved. The pack still eases; the
+         throttle does not, because it is an instrument the thumb reads and
+         a 120 ms ease drew it a tenth of a second late. */
+      .bar-fill {
+        height: 100%; width: 100%; background: var(--mint);
+        transform: scaleX(0); transform-origin: left center;
+        transition: transform 0.12s linear;
+      }
+      .bar-fill.warm { background: var(--amber); transition: none; }
       .osd-hits { margin-top: 10px; margin-bottom: 0; }
       .osd-hits.warn { color: var(--amber); }
 
@@ -1066,6 +1080,11 @@
       }
       .osd-cross-x { left: 10%; right: 10%; height: 1px; top: 50%; }
       .osd-cross-y { top: 10%; bottom: 10%; width: 1px; left: 50%; }
+      /* The layer the dot rides, the plate's own size, moved by transform:
+         see placeNub in src/ui/ui.js. */
+      .osd-nub-track {
+        position: absolute; inset: 0; pointer-events: none;
+      }
       .osd-nub {
         position: absolute; left: 50%; top: 50%;
         width: 11px; height: 11px;

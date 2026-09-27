@@ -46,12 +46,16 @@
 
 import * as THREE from 'three';
 import { buildShell } from './render/shell.js';
-import { applyPixelRatio, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
+import { applyPixelRatio, graphicsLabel, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
 import { createPace, PACE_COOL } from './render/pace.js';
 import { readGpuInfo } from './render/gpuinfo.js';
 import { makeAttractCamera } from './render/attract.js';
 import { MangaLayer } from './render/manga.js';
 import { measureBudget } from './render/budget.js';
+import { createFlightPerf } from './render/flightperf.js';
+import { createGpuGate } from './render/gpugate.js';
+import { AUTO_FLOOR, createAutoScale } from './render/autoscale.js';
+import { createLatencyMeter } from './render/latency.js';
 import { simPosToThree, simQuatToThree, simLenToWorld, threePosToSim, threeDirToSim, WORLD_SCALE } from './render/frame.js';
 import { CAMERA_MOUNT_FORWARD, CAMERA_MOUNT_UP, cameraTiltRad, clampCameraAngle, makeLensShake, fpvLensClear } from './render/lens.js';
 import { MotorAudio } from './render/audio.js';
@@ -78,7 +82,7 @@ import { uploadWorld, setWorldFrame, setMover, setBoxHeight, kindOf, setVehicleC
 import { Chase, CHASE_EVERY, pays } from './game/chase.js';
 import { sincos } from './props/trig.js';
 import { setCraftAirframe, CRAFT_R, CRAFT_WORLD_R, CRAFT_V_UP, CRAFT_V_DOWN, craftVerticalHalf, craftVerticalOffset, canPerch, shouldScorePass, shouldEnterTurtle, uprightPlantQuat, turtleFlipEase, turtleFlipLift, turtleSlerpQuat, TURTLE_STICK_MIN, TURTLE_SPEED, TURTLE_RATE, TURTLE_FLIP_MS, TURTLE_INVERT_UPZ, TURTLE_EXIT_UPZ, turtleClearance, findRestSpot, PROP_PLANE_MAX_UP_DOT, GRAZE_SPEED_MAX, BOUNCE_SPEED_MAX, BOUNCE_COOLDOWN_MS, LAND_DESCENT_MAX, LAND_HORIZONTAL_MAX, LAND_TILT_MAX_DEG, LAND_TILT_HARD_DEG, LAND_TIP_SPEED_MAX, GROUND_MU, GROUND_E, CLIP_SPAWN_GRACE_MS, CrashJudge, emptyWorldReport, foldWorldReport } from './game/collide.js';
-import { Ui, formatTime, WEIGHT_STOCK, clampWeight, gravityScaleFor } from './ui/ui.js';
+import { Ui, formatTime, WEIGHT_STOCK, clampWeight, gravityScaleFor, loadSettings } from './ui/ui.js';
 import {
   adoptMapFromLocation, adoptMostFlownTrack, adoptShareFromLocation, boardPageUrl, fetchGhost,
   fetchMapDocument, fetchTrackDocument, fetchTrackTimes, postFreestyleRun, postTime,
@@ -587,16 +591,45 @@ export async function boot({ loading, bootStart, mapId }) {
    * high-performance. A dual-GPU laptop must not pick the battery chip
    * because a debug URL was opened once; this query is not stored. */
   const gpuQuery = new URLSearchParams(window.location.search).get('gpu');
+  /*
+   * Read before the Ui exists because a context's attributes are fixed when
+   * it is made: Low latency view in Settings takes effect on the next load,
+   * and its note says so. loadSettings is the same read the Ui makes a few
+   * lines down, and it writes nothing.
+   */
+  const bootSettings = loadSettings();
   const shell = buildShell(canvas, {
-    desynchronized: true,
+    desynchronized: bootSettings.lowLatency !== false,
+    opaque: true,
     powerPreference: gpuQuery === 'low' ? 'low-power' : 'high-performance',
   });
+  /*
+   * How long the GPU takes over a frame, and the guard that keeps a saturated
+   * one from queueing frames: see gpugate.js. Polled on the sticks' own timer
+   * (input.startPolling below) as well as at each frame, so a fence is seen
+   * signalled close to when the GPU finished rather than a frame later. Four
+   * null checks when idle.
+   */
+  const gpuGate = createGpuGate(shell.renderer.getContext());
+  /*
+   * Auto graphics' resolution factor and the controller that moves it: see
+   * autoscale.js and renderScaleOf. Declared here, before the first thing
+   * that sizes the picture, because renderScaleOf reads it from boot on.
+   * 1 until the frames say otherwise, and on every boot: the preset Auto
+   * settles on is remembered, the factor is re-earned each session.
+   */
+  let autoFactor = 1;
+  const autoScale = createAutoScale();
+  /* Whether Auto has already moved the preset this session, each way. */
+  let autoDemoted = false;
+  let autoPromoted = false;
   const input = new InputManager();
   /*
    * Sample the sticks on their own timer rather than once per rendered frame.
-   * See src/input/input.js for what that was costing feedforward.
+   * See src/input/input.js for what that was costing feedforward. The GPU
+   * guard's fences are polled on the same tick: one timer, not two.
    */
-  input.startPolling(2);
+  input.startPolling(2, (now) => gpuGate.poll(now));
   /* Hide UI in replay clean mode. failReplay puts both back. */
   if (replayClean) {
     uiRoot.style.display = 'none';
@@ -688,6 +721,10 @@ export async function boot({ loading, bootStart, mapId }) {
   });
 
   const gpuInfo = readGpuInfo(shell.renderer);
+  /* Whether the browser granted the short path to the glass, for the Low
+   * latency view row's note: it is a request, and not every platform can
+   * honour it. See buildShell. */
+  gpuInfo.lowLatency = shell.granted.desynchronized;
   ui.setGpuInfo(gpuInfo);
   window.__gpu = gpuInfo;
   /*
@@ -949,6 +986,8 @@ export async function boot({ loading, bootStart, mapId }) {
     if (view && view.post && mapReady) {
       view.post.setSize(d.w, d.h);
     }
+    /* A new window is a new floor on High: see autoFloorFor. */
+    autoScale.setFloor(autoFloorFor(ui.settings));
   }
   const audio = new MotorAudio();
   /* The lap time said out loud. Beside the audio because it answers to the
@@ -4769,9 +4808,96 @@ export async function boot({ loading, bootStart, mapId }) {
     }
   }
 
-  /* The pilot's render scale as a multiplier, 100 percent being native. */
+  /*
+   * The pilot's render scale as a multiplier, 100 percent being native: the
+   * Render scale slider, times Auto's own factor when Auto graphics is
+   * on (see autoscale.js). Every path that sizes the picture reads this, so
+   * the factor reaches the race field's pixel ratio and the town's and the
+   * built map's internal scale alike, and each of those still clamps to its
+   * own floor. A preset the pilot picked by hand gets exactly the slider.
+   */
   function renderScaleOf(s) {
-    return (Number(s.renderScale) || 100) / 100;
+    const user = (Number(s.renderScale) || 100) / 100;
+    return s.graphicsAuto ? user * autoFactor : user;
+  }
+
+  /*
+   * Set the ratio and walk the same guarded resize path a window resize
+   * takes, so the composer and every prepass target follow in one place.
+   * Shared by a Settings change and by Auto's resolution.
+   */
+  function applyRenderScale(s) {
+    const userScale = renderScaleOf(s);
+    const wantPr = pixelRatioFor(s.graphics, userScale);
+    const userChanged = !!(view && view.post && view.post.userScale != null
+      && view.post.userScale !== userScale);
+    if (view && view.post && view.post.userScale != null) {
+      view.post.userScale = userScale;
+    }
+    if (shell.pixelRatio !== wantPr || userChanged) {
+      if (shell.pixelRatio !== wantPr) {
+        applyPixelRatio(shell, s.graphics, userScale);
+      }
+      const d = shell.resize();
+      if (view && view.post && mapReady) {
+        view.post.setSize(d.w, d.h);
+      }
+    }
+    autoScale.setFloor(autoFloorFor(s));
+  }
+
+  /*
+   * How far down Auto may take the resolution on this preset and window. The
+   * Render scale slider's lowest step on Low and Medium; on High, never under
+   * the rubric's 1,200,000 internal pixels (prompts/bando-perf-loop.md, F4),
+   * so Auto cannot pace a High picture into 720p on the race field either.
+   * The town's and the built map's pipelines clamp to their own floors on
+   * top of this.
+   */
+  function autoFloorFor(s) {
+    if (normalizeGraphics(s.graphics) !== 'high') {
+      return AUTO_FLOOR;
+    }
+    const w = shell.cssSize.w;
+    const h = shell.cssSize.h;
+    const pr = pixelRatioFor(s.graphics, (Number(s.renderScale) || 100) / 100);
+    const px = w * h * pr * pr;
+    return px > 0 ? Math.sqrt(1.2e6 / px) : 1;
+  }
+
+  /*
+   * Auto moves the preset one step, through the same path a Settings change
+   * takes (applySettings rebuilds the world when the preset no longer
+   * matches it). graphicsAuto stays true: this is still Auto's choice, and it
+   * is what the next visit starts from. The resolution factor starts again
+   * at 1 on the new preset. A pilot who picks a preset by hand in Settings
+   * ends all of this.
+   */
+  function autoMovePreset() {
+    const order = ['low', 'medium', 'high'];
+    const at = order.indexOf(normalizeGraphics(ui.settings.graphics));
+    let next = null;
+    if (autoScale.state.demote && at > 0) {
+      next = order[at - 1];
+      autoDemoted = true;
+    } else if (autoScale.state.promote && !autoDemoted && !autoPromoted && at >= 0 && at < order.length - 1) {
+      next = order[at + 1];
+      autoPromoted = true;
+    }
+    autoScale.resetEvidence();
+    if (!next) {
+      return;
+    }
+    ui.settings.graphics = next;
+    autoFactor = 1;
+    autoScale.applied(1);
+    ui.setAutoScale(1);
+    ui.persistSettings();
+    notice = {
+      text: `Auto graphics: ${graphicsLabel(next)}, to keep the picture on time on this machine.`,
+      untilMs: performance.now() + 4200,
+    };
+    applySettings(ui.settings);
   }
 
   /*
@@ -4855,25 +4981,16 @@ export async function boot({ loading, bootStart, mapId }) {
       shell.camera.fov = s.cameraFov;
       shell.camera.updateProjectionMatrix();
     }
-    /* Render scale changes are free, no world rebuild: set the ratio and
-     * walk the same guarded resize path a window resize takes, so the
-     * composer and every prepass target follow in one place. */
-    const userScale = renderScaleOf(s);
-    const wantPr = pixelRatioFor(s.graphics, userScale);
-    const userChanged = !!(view && view.post && view.post.userScale != null
-      && view.post.userScale !== userScale);
-    if (view && view.post && view.post.userScale != null) {
-      view.post.userScale = userScale;
+    /* Render scale changes are free, no world rebuild. See
+     * applyRenderScale. A pilot who picks a preset by hand leaves Auto, so
+     * its factor stops applying here and the picture goes back to exactly
+     * the slider. */
+    if (!s.graphicsAuto && autoFactor !== 1) {
+      autoFactor = 1;
+      autoScale.applied(1);
+      ui.setAutoScale(1);
     }
-    if (shell.pixelRatio !== wantPr || userChanged) {
-      if (shell.pixelRatio !== wantPr) {
-        applyPixelRatio(shell, s.graphics, userScale);
-      }
-      const d = shell.resize();
-      if (view && view.post && mapReady) {
-        view.post.setSize(d.w, d.h);
-      }
-    }
+    applyRenderScale(s);
     if (mode === 'title') {
       /* Between runs the choice takes effect at once. During a run it
        * waits for the next one, so the record it is measured against is
@@ -5914,9 +6031,85 @@ export async function boot({ loading, bootStart, mapId }) {
     ghostQueryId = time.id;
   };
 
+  /*
+   * FULLSCREEN IN FLIGHT. See fullscreenFly in ui.js for why: a desktop
+   * composites a window, which on many a Linux laptop is one more frame
+   * between the sticks and the glass, and most desktops hand a fullscreen
+   * window straight to the display.
+   *
+   * Asked for from the press that starts or resumes a flight, because a
+   * browser grants fullscreen only to a person's own gesture; a harness or a
+   * fly=1 link has none and is simply refused, which costs nothing. Only a
+   * fullscreen this page asked for is given back, on the way to the title.
+   *
+   * Escape is the pause key and the browser's own way out of fullscreen. The
+   * browser takes the press and leaves fullscreen, and leaving fullscreen
+   * mid flight pauses, so the key still does what the pilot pressed it for;
+   * Resume is a press, and goes back to fullscreen.
+   *
+   * NOT THE KEYBOARD LOCK API, which would let the page keep Escape and stay
+   * fullscreen. Tried on 2026-09-27: in headless Chromium,
+   * navigator.keyboard.lock(['Escape']) in fullscreen never settled, and
+   * every key after it was swallowed, W and M included, which is a quad that
+   * cannot be flown on the keyboard. A convenience is not worth a platform
+   * where that happens for real.
+   */
+  let fullscreenOurs = false;
+  function enterFlightFullscreen() {
+    if (ui.settings.fullscreenFly === false || replayMode || document.fullscreenElement) {
+      return;
+    }
+    const root = document.documentElement;
+    if (!root || typeof root.requestFullscreen !== 'function') {
+      return;
+    }
+    let asked = null;
+    try {
+      asked = root.requestFullscreen({ navigationUI: 'hide' });
+    } catch (e) {
+      asked = null;
+    }
+    if (!asked || typeof asked.then !== 'function') {
+      return;
+    }
+    asked.then(() => {
+      fullscreenOurs = true;
+    }).catch(() => {
+      /* No gesture, or the browser said no. The window stays a window. */
+    });
+  }
+  function leaveFlightFullscreen() {
+    if (!fullscreenOurs) {
+      return;
+    }
+    fullscreenOurs = false;
+    if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+      document.exitFullscreen().catch(() => {
+        /* Already out. */
+      });
+    }
+  }
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) {
+      return;
+    }
+    const ours = fullscreenOurs;
+    fullscreenOurs = false;
+    if (ours && mode === 'flight' && ui.screen === 'flight') {
+      ui.act('pause');
+      ui.show('paused');
+    }
+  });
+
   ui.onAction = (action, s) => {
     if (s) {
       applySettings(s);
+    }
+    /* Before anything waits: the press is the gesture fullscreen needs. */
+    if (action === 'fly' || action === 'restart' || action === 'resume') {
+      enterFlightFullscreen();
+    } else if (action === 'title') {
+      leaveFlightFullscreen();
     }
     if (action === 'fly' || action === 'restart') {
       /* A tune fetch in flight would sim_init under a run whose lastTs had
@@ -6608,12 +6801,13 @@ export async function boot({ loading, bootStart, mapId }) {
       ui.setTargetLock(LOCK_OFF);
       return;
     }
-    const el = shell.renderer.domElement;
     /* CSS pixels. The overlay is a DOM layer over the canvas, and the
      * drawing buffer is a different size on any display whose pixel ratio
-     * is above one. */
-    const vw = el.clientWidth;
-    const vh = el.clientHeight;
+     * is above one. From the shell's record of its last resize, not
+     * clientWidth: read here, after the OSD's writes, that forced a second
+     * layout of the page every frame. See cssSize in shell.js. */
+    const vw = shell.cssSize.w;
+    const vh = shell.cssSize.h;
     if (vw < 2 || vh < 2) {
       ui.setTargetLock(LOCK_OFF);
       return;
@@ -8195,11 +8389,25 @@ export async function boot({ loading, bootStart, mapId }) {
         capLastDraw = nowWall;
       }
     }
+    /*
+     * THE GPU GUARD: when the GPU is saturated and still has the last frame,
+     * this draw waits a frame rather than queue behind it, so what the
+     * pilot sees is never two frames older than the sticks. Same contract as
+     * the cap above: input and physics have already run. Never for the film
+     * or a replay step capture, whose frames must all be drawn, and only
+     * while Low latency view is on. See gpugate.js for why it waits for the
+     * GPU to be saturated on average before it believes one late fence.
+     */
+    if (worldLive && drawThis && !film && !replayStepMode
+      && gpuGate.shouldSkip(renderStart, ui.settings.lowLatency !== false)) {
+      drawThis = false;
+    }
     if (worldLive) {
       mangaFrame(dt);
     }
     if (worldLive && drawThis) {
       view.post.render();
+      gpuGate.submitted(performance.now());
     }
     /* In the same task as the draw: the canvas keeps no drawing buffer, so
      * this is the one moment it still holds the frame. */
@@ -8715,6 +8923,48 @@ export async function boot({ loading, bootStart, mapId }) {
         pace.state.dirty = 0;
       }
     }
+    /* Flying frames only, and never a replay's: a report about lag is a
+     * report about flying. See flightperf.js. */
+    if (mode === 'flight' && ui.screen === 'flight' && !replayMode) {
+      flightPerf.note(dt, blockMs);
+    }
+    /* Every frame, for the refresh rate: see latency.js. */
+    latency.noteFrame(dt);
+    /*
+     * AUTO GRAPHICS, from the frames the pilot is looking at: flight, and the
+     * title's attract flight over the same world, which is the free
+     * benchmark every visit already runs. Not a menu, whose frames are the
+     * menu's, nor a film or a replay, nor a frame with the world frozen,
+     * which costs nothing and would read as headroom. The resolution moves
+     * here, at once and through the Render scale path; the preset moves
+     * only between runs, below. See autoscale.js.
+     */
+    if (ui.settings.graphicsAuto && mapReady && !swapInFlight && !replayMode && !film && worldLive
+      && ((mode === 'flight' && ui.screen === 'flight') || (mode === 'title' && ui.screen === 'title'))) {
+      autoScale.observe(dt, renderMs, blockMs, gpuGate.state, drawThis);
+      if (autoScale.state.dirty) {
+        autoFactor = autoScale.state.want;
+        applyRenderScale(ui.settings);
+        autoScale.applied(autoFactor);
+        ui.setAutoScale(autoFactor);
+      }
+    }
+    /*
+     * The preset, between runs only, and on the title only: never in the air
+     * and never on pause, because a preset rebuilds the world behind a
+     * loading screen, and not on the results either, because the rebuild
+     * lands on the title (syncWorld's STAY_SCREENS has no results) and would
+     * take the lap and its upload away from the pilot. Down when the
+     * resolution is at its floor and the frames are still late; up once, and
+     * only in a session that has not come down, when full resolution has had
+     * the GPU under half a frame for most of a minute. The choice is
+     * remembered as the pilot's Auto preset.
+     */
+    if (ui.settings.graphicsAuto && mapReady && !swapInFlight
+      && (autoScale.state.demote || autoScale.state.promote)
+      && mode === 'title' && ui.screen === 'title') {
+      autoMovePreset();
+    }
     if (frames > 2) {
       if (blockMs > worstBlockMs) {
         worstBlockMs = blockMs;
@@ -8824,6 +9074,11 @@ export async function boot({ loading, bootStart, mapId }) {
   /* Render statistics for the harness and the frame budget gate. */
   const renderStats = { calls: 0, triangles: 0 };
   const pace = createPace();
+  /* The flight's own frame record, for the bug report: see flightperf.js. */
+  const flightPerf = createFlightPerf();
+  /* Input to screen and the refresh rate, for Settings and the report: see
+   * latency.js. */
+  const latency = createLatencyMeter();
   shell.renderer.info.autoReset = false;
   window.__renderStats = () => ({ ...renderStats });
   window.__pace = () => ({
@@ -10013,6 +10268,54 @@ export async function boot({ loading, bootStart, mapId }) {
      * input.js. bug-08577148. */
     flight: input.flightReport(),
   }));
+  /*
+   * WHAT THE FRAMES COST WHILE FLYING, and what the browser gave the canvas,
+   * for a report about lag: bug-e82b8bb8 said 60 fps from the pause screen
+   * and nothing else. One top level key, `perf`, because the board caps a
+   * report at 32 of them and a feel report already carries about twenty
+   * five. `flight` is the flying frames only (see flightperf.js); the rest
+   * is read at the moment of sending, and none of it changes mid flight.
+   */
+  ui.setPerfProbe(() => ({
+    flight: flightPerf.report(),
+    lowLatency: shell.granted.desynchronized,
+    opaque: shell.granted.opaque,
+    pixelRatio: Math.round(shell.pixelRatio * 100) / 100,
+    /* Auto graphics: its resolution factor now, and whether it moved the
+     * preset this session. Null when the pilot fixed a preset by hand. */
+    auto: ui.settings.graphicsAuto
+      ? { scale: Math.round(autoFactor * 100) / 100, down: autoDemoted, up: autoPromoted }
+      : null,
+    /* The GPU's time over a frame, queue included, and draws the guard held
+     * back for it: see gpugate.js. */
+    gpuMs: gpuGate.state.samples ? Math.round(gpuGate.state.gpuMs * 10) / 10 : null,
+    held: gpuGate.state.skipped,
+    /* Key to screen as this browser reports it, and the refresh rate: see
+     * latency.js. And whether the flight was fullscreen. */
+    keyToScreen: latency.report(),
+    hz: latency.refreshHz(),
+    fullscreen: Boolean(document.fullscreenElement),
+    cores: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 0,
+  }));
+  ui.setLatencyProbe(() => ({
+    supported: latency.supported,
+    key: latency.report(),
+    hz: latency.refreshHz(),
+    gpuMs: gpuGate.state.samples ? gpuGate.state.gpuMs : null,
+    lowLatency: shell.granted.desynchronized && ui.settings.lowLatency !== false,
+  }));
+  window.__perfProbe = () => (ui.perfProbe ? ui.perfProbe() : null);
+  /* Auto graphics and the GPU guard as they stand. Harness only. */
+  window.__auto = () => ({
+    auto: ui.settings.graphicsAuto,
+    graphics: ui.settings.graphics,
+    factor: autoFactor,
+    pixelRatio: shell.pixelRatio,
+    ...autoScale.state,
+    gate: { ...gpuGate.state },
+    demoted: autoDemoted,
+    promoted: autoPromoted,
+  });
   window.__stickPath = () => ({
     ...input.stats(),
     rcHz: RC_HZ,

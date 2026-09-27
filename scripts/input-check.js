@@ -822,8 +822,16 @@ async function mousePage(page) {
   let picking = true;
   await page.until("window.__ui.screen === 'padpick' && !!document.querySelector('.pad-card')", 10000).catch(() => { picking = false; });
   check('the picker opens from Settings', picking);
+  /* Where each dot sits, as left and top in per cent of its plate. The dot
+   * rides a track layer moved by translate() since bug-e82b8bb8 (a layout
+   * every frame the keys were held, see placeNub in src/ui/ui.js); the
+   * translate is in the same per cent, from the centre, so 50 plus it is the
+   * left and top this check always read. */
+  const NUB_AT = `(n) => { const t = n.querySelector('.osd-nub-track');
+    const m = /translate\\(([-0-9.]+)%,\\s*([-0-9.]+)%\\)/.exec((t && t.style.transform) || '');
+    return m ? [50 + parseFloat(m[1]), 50 + parseFloat(m[2])] : [50, 50]; }`;
   const plates = `const c = document.querySelector('.pad-card'); const g = c.querySelectorAll('.osd-gimbal');
-    const at = (n) => { const s = n.querySelector('.osd-nub').style; return [parseFloat(s.left) || 0, parseFloat(s.top) || 0]; };
+    const at = ${NUB_AT};
     const cap = (n) => n.querySelector('.osd-gimbal-cap');`;
   const pick0 = await ev(`${plates}
     return JSON.stringify({ left: at(g[0]), right: at(g[1]), caps: [cap(g[0]).textContent, cap(g[1]).textContent],
@@ -836,8 +844,8 @@ async function mousePage(page) {
   /* Waited on, not slept on: the plates are repainted by the frame loop,
    * and with two browsers on this machine a frame took longer than the
    * 300 ms this used to sleep. */
-  await page.until(`(() => { const n = document.querySelectorAll('.pad-card .osd-gimbal')[1].querySelector('.osd-nub');
-    return Math.abs((parseFloat(n.style.left) || 0) - ${pick0.right[0]}) > 20; })()`, 3000).catch(() => {});
+  await page.until(`(() => { const n = document.querySelectorAll('.pad-card .osd-gimbal')[1];
+    return Math.abs((${NUB_AT})(n)[0] - ${pick0.right[0]}) > 20; })()`, 3000).catch(() => {});
   const pick1 = await ev(`${plates} return JSON.stringify({ left: at(g[0]), right: at(g[1]) });`).then(JSON.parse);
   await page.evaluate('window.__pad.axes[0] = 0; window.__pad.timestamp += 1;');
   /* Sideways, not rightwards: section 5b reversed this page's roll and

@@ -155,30 +155,81 @@ export function buildShell(canvas, opts) {
    * only a software rasteriser still boots. Orbit thumbnails pass
    * low-power explicitly because they are a second context.
    */
+  const powerPreference = options.powerPreference || 'high-performance';
+  /*
+   * Opt out of the compositor's frame queue when the caller asks.
+   *
+   * A canvas normally hands its finished frame to the browser compositor,
+   * which may hold one or two more before anything reaches the glass.
+   * That queue is invisible in the frame rate and is felt in the sticks:
+   * it is why a machine can report 45 frames per second and still fly
+   * like a late radio, because the number counts frames produced, not
+   * frames seen. desynchronized lets the canvas present closer to
+   * directly, at the cost of tearing.
+   *
+   * Off unless asked, because the orbit thumbnail page reads its frames
+   * back to record a clip, and a buffer that bypasses the compositor is
+   * exactly the one a reader may find empty.
+   *
+   * THE CONTEXT IS MADE HERE WHEN EITHER IS ASKED FOR, NOT BY THREE.JS,
+   * because three.js r160 passes on neither. WebGLRenderer builds its
+   * context from a fixed list (contextAttributes in three.module.js): alpha
+   * is always true there and desynchronized is not on the list at all. So
+   * the desynchronized this shell was handed from at least 2026-09-14 on
+   * never reached the browser, on any platform, and every pilot flew behind
+   * the queue described above while getContextAttributes() said so to
+   * anyone who asked. Found on 2026-09-27 chasing bug-e82b8bb8, "nearly
+   * impossible to fly with input lag", with a headless probe that asked.
+   *
+   * opaque is the other half of a short path. The flight canvas covers the
+   * window and nothing behind it is meant to show through; an opaque canvas
+   * is one the compositor need not blend, and the kind it can hand to an
+   * overlay. Asked for by main.js only: the orbit page keeps exactly the
+   * context it always had, because it passes neither and so never reaches
+   * this branch.
+   *
+   * A browser that cannot make a WebGL2 context with these returns null,
+   * and three.js is then left to make its own, as before. Whether the
+   * browser actually granted desynchronized is read back below: it is a
+   * request, and Chrome honours it on some platforms and not others.
+   */
+  let context = null;
+  if (options.desynchronized || options.opaque) {
+    try {
+      context = canvas.getContext('webgl2', {
+        alpha: !options.opaque,
+        depth: false,
+        stencil: false,
+        antialias: false,
+        premultipliedAlpha: true,
+        preserveDrawingBuffer: false,
+        powerPreference,
+        failIfMajorPerformanceCaveat: false,
+        desynchronized: Boolean(options.desynchronized),
+      });
+    } catch (e) {
+      context = null;
+    }
+  }
   const renderer = new THREE.WebGLRenderer({
     canvas,
+    context,
     antialias: false,
     depth: false,
     stencil: false,
-    powerPreference: options.powerPreference || 'high-performance',
+    powerPreference,
     failIfMajorPerformanceCaveat: false,
-    /*
-     * Opt out of the compositor's frame queue when the caller asks.
-     *
-     * A canvas normally hands its finished frame to the browser compositor,
-     * which may hold one or two more before anything reaches the glass.
-     * That queue is invisible in the frame rate and is felt in the sticks:
-     * it is why a machine can report 45 frames per second and still fly
-     * like a late radio, because the number counts frames produced, not
-     * frames seen. desynchronized lets the canvas present closer to
-     * directly, at the cost of tearing.
-     *
-     * Off unless asked, because the orbit thumbnail page reads its frames
-     * back to record a clip, and a buffer that bypasses the compositor is
-     * exactly the one a reader may find empty.
-     */
-    desynchronized: Boolean(options.desynchronized),
   });
+  /* What the browser actually gave, for the bug report and the latency note
+   * in Settings. A request that was not granted reads false here. */
+  const granted = (() => {
+    try {
+      const a = renderer.getContext().getContextAttributes() || {};
+      return { desynchronized: Boolean(a.desynchronized), opaque: a.alpha === false };
+    } catch (e) {
+      return { desynchronized: false, opaque: false };
+    }
+  })();
   const pixelRatio = options.pixelRatio != null
     ? options.pixelRatio
     : Math.min(window.devicePixelRatio, 2);
@@ -213,6 +264,17 @@ export function buildShell(canvas, opts) {
 
   let craft = buildCraft(opts.airframe);
 
+  /*
+   * THE CANVAS'S CSS SIZE, AS OF THE LAST RESIZE, so nothing in a frame has
+   * to ask the page for it. Reading clientWidth in the frame loop, after the
+   * OSD has written its numbers, makes the browser lay the page out there
+   * and then, a second layout every frame: updateTargetLock in main.js did
+   * exactly that, measured on 2026-09-27. resize() below is the only thing
+   * that sizes the canvas, so it is the one place this can go stale, and it
+   * is written there. One object, mutated, never replaced.
+   */
+  const cssSize = { w: 1, h: 1 };
+
   function resize() {
     /*
      * The stylesheet sizes the canvas (100 percent of the viewport). Measuring
@@ -229,6 +291,8 @@ export function buildShell(canvas, opts) {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    cssSize.w = w;
+    cssSize.h = h;
     return { w, h };
   }
   resize();
@@ -322,6 +386,8 @@ export function buildShell(canvas, opts) {
     renderer,
     camera,
     canvas,
+    cssSize,
+    granted,
     pixelRatio,
     quad: craft.group,
     discs: craft.discs,

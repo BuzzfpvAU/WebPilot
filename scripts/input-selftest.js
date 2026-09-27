@@ -1279,6 +1279,12 @@ section('what the flight measured: a feel report\'s stick path is the flight\'s,
   check('another kind of source starts a record of its own rather than lending this one its travel',
     other && other.source === 'the harness override' && other.travel.throttle.join() === '0.9,0.9',
     JSON.stringify(other));
+  /* bug-e82b8bb8: filed on the keyboard after a radio flew the complaint,
+   * and the radio's record was the one thrown away. */
+  check('and the radio\'s record rides under it as before, whole, rather than being dropped',
+    other && other.before && other.before.source === 'a radio' && other.before.padHzMax === 31
+      && other.before.travel.throttle.join() === '0,0.52' && other.before.seconds === 2,
+    JSON.stringify(other && other.before));
   im.flying = true;
   fly(32);
   im.flying = false;
