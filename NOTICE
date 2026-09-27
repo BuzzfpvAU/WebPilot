@@ -93,6 +93,34 @@ font file is copied into this repository: the generator uses the pack's own
 font block to lay the art out and keeps only the rendered pixels, and the OFL
 governs the font software, not images made with it.
 
+## The partners' marks
+
+    Files       assets/partners/, two per partner, named in
+                src/partners/roster.js
+    Licence     NOT GPLv3. Each mark is its owner's trade mark, used with
+                their permission to show them as a WebFPV partner.
+
+Three partners back WebFPV, agreed with the owner in September 2026: Global
+Drone Solutions, Mantis FPV and the West Coast Multirotor Club. Their marks
+are in the repository so that the simulator can paint them into its maps and
+the front door and the board can show them, and for nothing else. The
+project's GPLv3 grant does not extend to them: nobody may take a partner's
+mark from here and use it as their own, and a fork that is not WebFPV has no
+partnership to show.
+
+  * `gds/colour.svg` and `gds/mono.svg` are WebFPV's redraw of the public
+    Global Drone Solutions logo, not files GDS supplied, and each one's
+    title says so. They stand until GDS approves them or sends their own.
+  * `mantisfpv/colour.svg` is the official Mantis FPV 2022 logo as they
+    supplied it. `mantisfpv/mono.svg` is made from it by
+    scripts/partners.js: the same letters in one colour.
+  * `wcmrc/colour.png` is the club's logo as supplied, a 708 by 252 PNG.
+    `wcmrc/mono.png` is made from it by scripts/partners.js, every pixel
+    cream and its transparency kept.
+
+The copies in the front door's and the board's repositories are these files,
+copied byte for byte, and this entry covers them there too.
+
 ## three.js
 
     Upstream    https://github.com/mrdoob/three.js

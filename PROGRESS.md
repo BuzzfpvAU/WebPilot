@@ -55258,3 +55258,86 @@ showing the oldest, and `?status=` is the way to ask what is still open.
 beyond the checks in the two entries above. The first pilot to fly a
 standard pad on it is a visitor, and the three reporters were asked to
 report again from the page if a stick still does the wrong thing.
+
+## 2026-09-27 | partners | The partners' roster and their marks, phase 1
+
+### What changed
+
+Three partners back WebFPV: Global Drone Solutions (official training
+partner), Mantis FPV (official retail partner) and the West Coast Multirotor
+Club (official club partner). The owner asked for their marks on the front
+door, on Tracks and Times and painted into the simulator's freestyle maps,
+with a find achievement like the STF mark's, a partners page, and a sign in
+for each partner showing the site's statistics and their own. A plan with
+mockups went to the owner first; the in-sim frames in it were this shell with
+the marks added at runtime through `__mapScene` and `__three`, nothing
+committed. The owner's answer, 27 September 2026: "go with your
+recommendations, start phase 1". The twelve recommendations it adopts:
+
+ 1. "Partners" on every page, not "Sponsors".
+ 2. "Official" in each role title.
+ 3. On the front door, one moment each: Mantis FPV under the Build order
+    instrument, the club under the race field's lap timer, GDS under "You
+    must practise.", plus a partner row in the footer.
+ 4. In the town, spots by theme: Mantis as a shop sign on the pilot's street,
+    GDS and the club at the drone practice field.
+ 5. STF keeps its wall on every map; partners take the next walls.
+ 6. A find gets the callout, the panel, the combo bonus and a results row;
+    no badge on the map cards, the pill removed for STF on 26 September
+    stays removed.
+ 7. Clicks are counted per day only, so the board's privacy sentence stands.
+ 8. One sign in per partner, issued by the owner.
+ 9. GDS to approve the redraw or send a vector; the club to send a vector.
+10. Each partner signs off their own card's copy.
+11. The "Partner with WebFPV" contact to be confirmed by the owner.
+12. A "Partners" row in this shell's menu beside Credits and Support.
+
+Phase 1 is the list and the files, in this repository, which is the copy of
+record for anything the three share:
+
+- `src/partners/roster.js`: slug, name, short name, role, a draft of what
+  they do, their links, their two logo files and the colour of the panel
+  the simulator paints them on. Pure data and three small lookups
+  (`partnerBySlug`, `roleTitle`, `partnerHref`, which tags a link out with
+  utm_source=webfpv so the partner sees WebFPV in their own analytics).
+  Nothing imports it yet, so no page loads it and lint:preload is unchanged.
+- `assets/partners/<slug>/colour.*` and `mono.*`: each partner's own
+  artwork, and the same mark in the palette's cream for the chrome.
+- `scripts/partners.js` (`npm run gen:partners`, `npm run lint:partners`):
+  makes the two one colour files that follow from their colour file by a
+  rule, and checks the roster against its files.
+- NOTICE: the marks are their owners' trade marks, used with permission,
+  and not under the project's GPLv3 grant.
+
+The club's links are the three the owner gave: westcoastmultirotors.com.au,
+the club's YouTube channel and its Facebook group. wcmrc.com.au is a
+different club, West Coast Model RC, which races cars; the roster says so and
+the check refuses a link to it.
+
+### What went wrong
+
+The first draft of GDS's blurb said "Courses in every state". GDS call them
+courses, and noun-lint rightly cannot tell a training course from the track
+noun it guards, so the blurb says "Training in every state" instead of
+arguing an exception. The same run shows noun-lint already failing on main
+before this change, on `src/maps/built/showpiece.js:149`, the tandem's
+"Drift course" layer name. That is not this change's, and it is left alone
+here.
+
+The check's PNG reader and writer are new code, and its own "current" test
+compares its output with itself, so it cannot see a reader that is wrong
+the same way both times. So the six committed files were drawn in Chromium
+from this checkout's server, the one colour marks on the page's dark ground
+and the colour ones on cream: all six whole and the club's drone and
+lettering intact.
+
+### RUN LOG
+
+    npm run lint:partners       42 passed, 0 failed
+    npm run lint:preload        up to date: boot 115, city 74, built 34, 223
+    node scripts/noun-lint.js   FAIL, 1: src/maps/built/showpiece.js:149,
+                                on main before this change; 0 from the roster
+    the six logo files in Chromium, served from this checkout: all draw
+    dash scan of every changed file: none in prose (the check's own regex
+    names the two dashes as escapes)
+    npm run verify              not run: no physics, plant, ABI or build
