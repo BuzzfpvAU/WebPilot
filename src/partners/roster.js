@@ -27,9 +27,18 @@
  *           over the flying, a table column.
  *   role    'training', 'retail' or 'club'. ROLE_TITLES says it in words.
  *   about   what they do, in a sentence or two, for their card on the
- *           partners page. DRAFTS, written from each partner's own website
- *           on 2026-09-27, and each partner signs off their own before the
- *           page ships.
+ *           partners page. DRAFTS, and each partner signs off their own
+ *           before the page ships. THE RULE FOR THEM: say only what the
+ *           partner says about themselves on their own site. Checked line
+ *           by line against those sites on 2026-09-27, which took out
+ *           GDS's office suburb (it is on their contact page, not something
+ *           they promote), "every state" (they say across the country) and
+ *           Mantis FPV's delivery offers, which carry conditions a sentence
+ *           here would drop: free standard delivery over $150 and express
+ *           over $250 excluding bulky items, and same day processing only
+ *           for in stock orders before 11 am AEST on weekdays. An offer
+ *           goes on a card in the partner's own words, conditions and all,
+ *           or not at all.
  *   links   where their card sends people, first link first. `kind` is one of
  *           LINK_KINDS, because the board counts each link as a closed word.
  *   logo    the files under assets/partners/, as paths from the repository
@@ -111,7 +120,7 @@ export const PARTNERS = Object.freeze([
     name: 'Global Drone Solutions',
     short: 'GDS',
     role: 'training',
-    about: 'CASA approved drone training, from a first Remote Pilot Licence to BVLOS and the Powered Lift endorsement. Training in every state, run from Bentley in Perth, with more than 7,500 graduates.',
+    about: 'CASA approved drone training across Australia, from a first Remote Pilot Licence to Beyond Visual Line of Sight and the Powered Lift endorsement. Over 7,500 graduates.',
     links: [
       /* globaldronesolutions.com.au answers with a redirect to this address,
        * so the link goes to where it lands rather than through a hop. */
@@ -125,7 +134,7 @@ export const PARTNERS = Object.freeze([
     name: 'Mantis FPV',
     short: 'Mantis FPV',
     role: 'retail',
-    about: 'Australian FPV parts, repairs and one to one coaching, online and in store in Parramatta, Sydney. Same day shipping, and free delivery on orders over $150.',
+    about: 'Australian FPV drone parts and service, online and in store in Parramatta, Sydney, with a repair and build service and one to one coaching in their workshop.',
     links: [
       { kind: 'site', label: 'Visit Mantis FPV', href: 'https://www.mantisfpv.com.au/' },
     ],
@@ -137,9 +146,13 @@ export const PARTNERS = Object.freeze([
     name: 'West Coast Multirotor Club',
     short: 'WCMRC',
     role: 'club',
-    about: "Perth's FPV drone racing club. Fortnightly race days, plus beginner friendly race and freestyle days, at Thomas Kelly Pavilion in Kwinana.",
+    about: "Perth's FPV drone racing club. Fortnightly race events through the year, plus casual beginner friendly race and freestyle days, at their home base, Thomas Kelly Pavilion in Kwinana.",
     /* The three the owner named on 2026-09-27. wcmrc.com.au is a different
-     * club, West Coast Model RC, which races cars: never link it. */
+     * club, West Coast Model RC, which races cars: never link it. The
+     * club's own site links its Facebook group by name,
+     * facebook.com/groups/westcoastmultirotorclub; the number here is the
+     * one the owner gave, and whether the two are one group could not be
+     * checked without a Facebook login. */
     links: [
       { kind: 'site', label: 'Visit the club', href: 'https://westcoastmultirotors.com.au/' },
       { kind: 'youtube', label: 'YouTube', href: 'https://www.youtube.com/@westcoastmultirotorsclub' },

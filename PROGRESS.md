@@ -55341,3 +55341,52 @@ lettering intact.
     dash scan of every changed file: none in prose (the check's own regex
     names the two dashes as escapes)
     npm run verify              not run: no physics, plant, ABI or build
+
+## 2026-09-27 | partners | The partners' blurbs say only what the partners say
+
+### What changed
+
+The owner, after phase 1: "Review the sponsors websites to ensure we only
+promote things they promote". Each draft in src/partners/roster.js was
+checked claim by claim against the partner's own pages (their home pages,
+and Mantis FPV's delivery, repair and coaching pages), and two drafts said
+more than the partners do:
+
+- GDS. "Run from Bentley in Perth" came from the office address on their
+  contact page, which is not a thing they promote; out. "Training in every
+  state" was ours: they say "across the country", so the card says across
+  Australia. Everything else is theirs: CASA approved training, the Remote
+  Pilot Licence, Beyond Visual Line of Sight, the Powered Lift endorsement
+  and "over 7,500 graduates".
+- Mantis FPV. "Same day shipping, and free delivery on orders over $150"
+  dropped every condition they attach: free standard delivery is over
+  $150 and free express over $250, both excluding bulky items and both
+  asterisked, and same day means in stock orders received before 11 am AEST
+  on weekdays. The card now says what they are, in their own words
+  ("Australian FPV drone parts and service, online and in-store"), with the
+  repair and build service and the one to one coaching, which their
+  coaching page says happens in their store's workshop. An offer can come
+  back in their own words with its conditions if Mantis ask for it.
+- The club. Every claim matched their site; the wording now follows it more
+  closely ("fortnightly race events through the year, plus casual
+  beginner-friendly race and freestyle days", "our home base at Thomas
+  Kelly Pavilion, Kwinana").
+
+The roster's header now states the rule, so the next draft is held to it.
+
+One thing could not be settled: the club's site links its Facebook group as
+facebook.com/groups/westcoastmultirotorclub, and the owner gave
+facebook.com/groups/657768627690432. Both answer only with Facebook's login
+page, so whether they are one group is unchecked. The roster keeps the
+owner's link and says so beside it.
+
+### RUN LOG
+
+    npm run lint:partners       42 passed, 0 failed
+    node scripts/noun-lint.js   FAIL, 1: src/maps/built/showpiece.js:149, on
+                                main before this change; 0 from the roster
+    the partners' pages, fetched 27 September 2026 through the proxy:
+    gdronesolutions.com, mantisfpv.com.au and its delivery-policy,
+    fpv-repair-and-build-service and one-to-one-fpv-coaching pages,
+    westcoastmultirotors.com.au; each claim found in their text
+    npm run verify              not run: copy only, no physics
