@@ -472,6 +472,48 @@ export function craneLayout(el) {
   /* The mast, from its base frame to the slewing ring. */
   squareLattice(P, Y, MAST_HALF, 0.25, H, MAST_PANEL, 0.1, 0.05);
 
+  /*
+   * The foot, SOLID: the concrete pad (5.8 m square, 0.15 m) and the base
+   * frame on it (2.9 m square, to 0.25 m), both drawn in craneDraw. They
+   * were drawn only, because a crane turns freely and a turned box is
+   * inflated, and it left a slot 0.19 m tall under the mast's bottom frame
+   * bar that the drawing fills with yellow steel. A craft skidding along
+   * the ground went through the pad and under the bar into the mast, and a
+   * crash there was set down under the bar (the owner, 2026-09-27).
+   *
+   * So the foot is capsules SUNK INTO THE GROUND, which turn with the crane
+   * like every other member: a metre round, lying along x, each centred a
+   * metre under the drawn top it reaches. What shows above its drawn foot
+   * is a low arch, widest at that foot and never wider than the drawing
+   * there (the pad's 0.53 m either side of its axis at the ground, the
+   * frame's 0.44 m at the pad's top, and 0.66 m at the ground, inside the
+   * pad), so the solid is never outside what is drawn. The axes are close
+   * enough that the dip between two is 3 cm: a surface to stand on, and no
+   * groove to find. At the frame bar the base frame's solid stands 0.2 m
+   * up, over the bar's underside, so the slot is shut.
+   *
+   * An arch comes down to nothing at its edge, which left a craft set down
+   * beside the pad with a prop 10 cm over the drawn edge, so the pad has a
+   * kerb as well: a capsule as thick as the pad along each edge, touching
+   * the drawn face at mid height and inside it everywhere else.
+   */
+  const FOOT_R = 1.0;
+  const footing = (m, name, base, top, half, n) => {
+    const d = FOOT_R - (top - base);
+    const a = half - rootOf(FOOT_R * FOOT_R - d * d);
+    for (let i = 0; i < n; i += 1) {
+      const z = -a + (2 * a * i) / (n - 1);
+      P.cap(m, [-a, top - FOOT_R, z], [a, top - FOOT_R, z], FOOT_R, { draw: false, name, kind: 'wall' });
+    }
+  };
+  footing('concrete', 'foundation', 0, 0.15, 2.9, 11);
+  footing(D, 'baseFrame', 0.15, 0.25, 1.45, 5);
+  const kr = 0.075;
+  const ke = 2.9 - kr;
+  for (const [a, b] of [[[-ke, -ke], [ke, -ke]], [[ke, -ke], [ke, ke]], [[ke, ke], [-ke, ke]], [[-ke, ke], [-ke, -ke]]]) {
+    P.cap('concrete', [a[0], kr, a[1]], [b[0], kr, b[1]], kr, { draw: false, name: 'foundation', kind: 'wall' });
+  }
+
   /* The slewing drum (drawn in craneDraw, 1.3 m round and 0.95 m tall):
    * solid as a star of four capsules inside it, which reaches within about
    * 0.2 m of its drawn edge all the way round. */

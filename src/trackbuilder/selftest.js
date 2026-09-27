@@ -5471,6 +5471,7 @@ function suiteRecoverSpot() {
   let asked = 0;
   let setDown = 0;
   let trappedAt = '';
+  let onFoot = '';
   for (let dx = -3.5; crane && dx <= 3.5; dx += 0.5) {
     for (let dz = -3.5; dz <= 3.5; dz += 0.5) {
       for (const cy of [0.1, 1.0]) {
@@ -5485,12 +5486,34 @@ function suiteRecoverSpot() {
         if (!canRise(yardSolids, out) && !trappedAt) {
           trappedAt = `crash ${dx}, ${cy}, ${dz} from the crane, set down at ${spot()} under something`;
         }
+        if (Math.max(Math.abs(out.x - crane.x), Math.abs(out.z - crane.z)) <= 2.9 && !onFoot) {
+          onFoot = `crash ${dx}, ${cy}, ${dz} from the crane, set down at ${spot()} on its drawn foot`;
+        }
       }
     }
   }
   check('Hibari Yard\'s crane: every crash round its foot is set down, and where the craft can take off',
     Boolean(crane) && !trappedAt && setDown === asked,
     trappedAt || `${setDown} of ${asked} set down, all with room over them`);
+  check('and none of them in the drawing of its foot, the concrete pad 2.9 m either way of the mast',
+    Boolean(crane) && !onFoot, onFoot || `${setDown} set down off it`);
+
+  /* The foot is solid where it is drawn (src/props/industrial.js
+   * craneLayout): a craft standing on the ground anywhere on the drawn pad,
+   * the base frame or under the mast's frame bar is standing in a solid.
+   * Before 2026-09-27 every one of these was clear. */
+  let clearOnFoot = '';
+  let footSamples = 0;
+  for (let fx = -2.9; crane && fx <= 2.9 + 1e-9; fx += 0.1) {
+    for (let fz = -2.9; fz <= 2.9 + 1e-9; fz += 0.1) {
+      footSamples += 1;
+      if (clearAt(yardSolids, crane.x + fx, fiveR, crane.z + fz) && !clearOnFoot) {
+        clearOnFoot = `clear at ${fx.toFixed(1)}, ${fz.toFixed(1)} from the crane`;
+      }
+    }
+  }
+  check('Hibari Yard\'s crane: nothing stands on the ground inside its drawn foot, under the frame bar included',
+    Boolean(crane) && !clearOnFoot, clearOnFoot || `${footSamples} spots on the pad, every one in a solid`);
 
   /*
    * A CRASH ON A ROAD IS SET DOWN ON THE VERGE, the owner's decision of

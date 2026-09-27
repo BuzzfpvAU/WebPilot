@@ -54804,3 +54804,86 @@ measured, not committed, waiting on the owner's answer:
     npm run check:props         all passed, with the foot in
     npm run verify              not run: no physics, plant, ABI or build
     node scripts/shots.js       not run: asked of the owner, with flying it
+
+## 2026-09-27 | props | The crane's foot is solid where it is drawn
+
+### The owner's answer
+
+27 September 2026, asked in the conversation whether to make the crane's
+foot solid at the cost of moving two runs in `tests/goldens/world.json`, the
+scaffold board run (a shape index only) and the crane mast chord run (the
+craft lands on the foot): "Yes, make it solid", which covered committing the
+foot as measured in the entry above and re-recording the golden for those
+two runs. On verification of the set down fix: "None further" than the cheap
+checks already run.
+
+### What changed
+
+`craneLayout` in `src/props/industrial.js` has 20 more solids, all
+`draw: false`, kind wall, placed after the mast so the mast's own indices do
+not move:
+
+- `foundation`: 11 capsules a metre round, lying along x under the concrete
+  pad, each centred 0.85 m under the ground so its top is the pad's 0.15 m.
+- `baseFrame`: 5 more under the yellow base frame, tops at its 0.25 m, their
+  width taken at the pad's top where the frame's drawing starts.
+- `foundation`: 4 kerb capsules 0.075 m round along the pad's edges.
+
+The comment in `craneDraw` that says nothing at the foot can be a solid
+block is now half true: nothing there can be a BOX, and the foot is not one.
+Measured as in the entry above: no solid above the drawing anywhere, 0.1995
+m of solid under the frame bar's 0.19 m, and of 2523 crash points round the
+foot, none set down inside the mast or on the frame, 2334 fully clear of the
+pad and 189 overhanging its edge by under 5 cm.
+
+### The golden, re-recorded
+
+`node scripts/world-golden.js --write`, which records every run. Compared
+with the golden before it, run by run:
+
+- trace moved, "built: one of everything, along a scaffold board's
+  underside": the same flight, 559 contact steps on the same board, whose
+  shape index is 1333 where it was 1313, because the crane is earlier in the
+  document and has 20 more solids.
+- trace moved, "built: one of everything, a crane mast chord at 5 m/s":
+  from step 3697 the craft that bounced off the chord comes down on the foot
+  and not through it. Contact steps 785 to 765, end speed 3.621 to 1.924 m/s,
+  end height 0.781 to 0.416.
+- the world inputs only, trace unchanged: the other five built runs, the
+  starter's lift off and four in one of everything, because their world
+  holds a crane.
+- `wasmSha256` is now 5408b3e2, the `dist/sim.wasm` in the repository. It
+  was b0f89e9a, a module the golden was written against earlier; every other
+  trace in it was already equal on 5408b3e2, which is the claim the golden
+  tests.
+
+### Checks added
+
+`src/trackbuilder/selftest.js`, suiteRecoverSpot, beside the crane set down
+check: none of the 450 crashes round Hibari Yard's crane is set down with
+its centre on the drawn pad, and none of 3481 spots on the ground inside the
+drawn foot is clear for a parked craft. With the foot backed out both fail:
+a crash at 2.5, 2.5 from the mast set down on the pad, and all 3481 spots
+clear, the frame bar's underside among them.
+
+### What went wrong
+
+Nothing new in this step. The golden's `--write` cannot record a subset, so
+the diff was read run by run afterwards to confirm nothing but the two named
+traces moved.
+
+### RUN LOG
+
+    npm run check:clip          948 passed, 0 failed (2 new)
+      with the foot backed out: 946 passed, 2 failed, the two above
+    npm run check:world-golden  before --write: 2 FAILED, exactly the two
+                                named runs; after: all passed
+    npm run check:props         all passed
+    npm run check:counter       all passed (the CRANE GAP)
+    npm run check:roads         all passed (10.2 s)
+    npm run check:chase         all passed
+    npm run lint:preload        up to date: boot 115, city 74, built 34, 223
+    npm run verify              not run: no physics, plant, ABI or build;
+                                the module is unchanged and the world golden
+                                flies the world this changes
+    node scripts/shots.js       not run: the owner's answer above
