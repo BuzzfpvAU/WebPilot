@@ -55250,3 +55250,11 @@ showing the oldest, and `?status=` is the way to ask what is still open.
                                      changes only the pages' import maps,
                                      which lint:boot covers
     npm run verify                   not run: no physics, plant, ABI or build
+
+### The owner's answer on verification
+
+27 September 2026, asked whether to fly a standard pad on the live page:
+"leave it". No verification pass of any scale was run on the gamepad change
+beyond the checks in the two entries above. The first pilot to fly a
+standard pad on it is a visitor, and the three reporters were asked to
+report again from the page if a stick still does the wrong thing.
