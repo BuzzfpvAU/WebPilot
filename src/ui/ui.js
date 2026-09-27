@@ -126,6 +126,7 @@ import { BOARD_WINDOW, WIKI_WINDOW, openNamedWindow } from '../share/windows.js'
 import { BUG_KINDS, submitBug } from '../share/bugs.js';
 import { nameRules, readPilotName, writePilotName } from '../share/pilot.js';
 import { stampFor, stampKeyForMap } from '../share/stamps.js';
+import { MARK_FINDS } from '../game/egg.js';
 import { courseChip, hasFlyableTrack, inspectCourse, isEmptyCanvas } from '../share/listing.js';
 import { isoLapMs, drawIso, drawPlan, fieldSize, planCanvas, planFromDocument } from '../share/plan.js';
 import { activeCourseSummary } from '../share/summary.js';
@@ -547,7 +548,8 @@ export function gravityScaleFor(weight, airframeId) {
  *
  * THE COUNTER COUNTS ON EVERY ONE OF THEM (FREESTYLE-MAPS-PLAN.md section 7
  * and decision 2, Stage C). Named gaps, skims, unders, threads, low passes,
- * the chase and the STF mark are geometry, so they cannot misname anything,
+ * the chase and the STF mark are geometry, so they cannot misname anything
+ * (the mark only while finds are on, MARK_FINDS in src/game/egg.js),
  * and every freestyle map counts them into combos on the score overlay
  * whatever this row says. What the row decides is TRICK NAMES, which are
  * still being built, and the clock.
@@ -587,8 +589,8 @@ const SCORING_WARNING = 'Trick names are an unfinished feature and still being b
 
 /* `where` is the world seated: the town, Your map, or this map when it came
  * from the board. */
-const scoringOff = (where) => `Lines only: ${where} counts gaps, skims, unders, threads, low passes, the`
-  + ' chase and the STF mark into combos. No trick names and no clock.';
+const scoringOff = (where) => `Lines only: ${where} counts gaps, skims, unders, threads, low passes and the`
+  + ' chase into combos. No trick names and no clock.';
 const SCORING_FREE_ON = 'Free flight: tricks too, named and scored as you land them in the same combos,'
   + ' with no clock and no board, and the run never ends.';
 /* What the other two add, said once from Lines only, where a pilot reads
@@ -9249,8 +9251,11 @@ export class Ui {
        * that can change in another tab while this one sits on the menu. It
        * reads the seat and the stamp record and builds nothing: well under
        * a millisecond for the starter's document.
+       *
+       * No stamp at all while finds are off (MARK_FINDS in src/game/egg.js),
+       * including one this browser wrote before they were.
        */
-      const found = Boolean(stampFor(stampKeyForMap(c.id)));
+      const found = MARK_FINDS && Boolean(stampFor(stampKeyForMap(c.id)));
       if (c.stamp.hidden === found) {
         c.stamp.hidden = !found;
       }
@@ -9272,7 +9277,8 @@ export class Ui {
    *
    * The found STF mark stamps these cards as it does the worlds'. A map
    * from the board keys its stamp by its document's id, which is the id it
-   * has on the board (stfKey in src/maps/built/egg.js).
+   * has on the board (stfKey in src/maps/built/egg.js). While finds are off
+   * (MARK_FINDS in src/game/egg.js) no card wears one.
    */
   renderBoardMapCards() {
     const host = this.boardMapHost;
@@ -9342,7 +9348,7 @@ export class Ui {
       if (c.canvas && !c.painted) {
         c.painted = drawPlan(c.canvas, c.canvas.planData);
       }
-      const found = Boolean(stampFor(`built:${c.id}`));
+      const found = MARK_FINDS && Boolean(stampFor(`built:${c.id}`));
       if (c.stamp.hidden === found) {
         c.stamp.hidden = !found;
       }

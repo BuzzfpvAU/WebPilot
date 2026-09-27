@@ -57,6 +57,21 @@
  */
 
 /*
+ * WHETHER A FIND IS REWARDED. Off, the owner's call on 2026-09-27: the STF
+ * mark stays painted in every freestyle map, but finding it is no longer an
+ * achievement. With this false the shell never asks seesMark (findEgg in
+ * src/main.js), so there is no callout, no stamp written, no bonus in the
+ * combo, no manga panel and no summary row, and the Freestyle screen's cards
+ * show no stamp pill, even for a map this browser stamped before
+ * (src/ui/ui.js, the map cards and the board's map cards).
+ *
+ * The machinery is all kept, this file, src/share/stamps.js, score.js's egg
+ * and ui.js's stfFound, because it is meant to come back for paid sponsors'
+ * marks. Turning it back on is this one constant.
+ */
+export const MARK_FINDS = false;
+
+/*
  * How near, in metres: the plan's "about 4 m", for a mark FIND_REF_W wide
  * or smaller. From there a 1.8 m mark spans about a fifth of the default
  * frame's width, which is near enough to have come looking and far enough

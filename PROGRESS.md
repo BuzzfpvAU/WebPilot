@@ -54703,6 +54703,63 @@ On the merged tree:
                                 crash judgement per step, which main's own
                                 entries record as verified and approved
 
+## 2026-09-27 | freestyle | Finding the STF mark is no longer an achievement, and the cards lose the pill
+
+### What changed
+
+One switch, `MARK_FINDS` in `src/game/egg.js`, false. With it off:
+
+- The shell never asks `seesMark` from the frame loop (`src/main.js`, the
+  call to findEgg), so a run never finds the mark: no "Mark found" callout,
+  no stamp written, no EGG_POINTS in the combo, no manga panel and no
+  "STF mark, Found" row in the summary. All four hung off that one call.
+- The STF pill on the Freestyle screen's cards (`.map-card-stamp`, on both
+  the worlds' cards and the board's map cards in `src/ui/ui.js`) stays
+  hidden, including on a map this browser stamped before today. The
+  stamp record in local storage is left alone, not cleared.
+- The Lines only copy no longer says the STF mark is counted into combos.
+
+The painted mark in every map is unchanged: `src/art/stf.js`, its
+placement in the town and in built maps, and the builder all stay as they
+were. So does all the find machinery, egg.js, `src/share/stamps.js`,
+score.js's egg, ui.js's stfFound and the manga panel, because it is meant to
+come back for paid sponsors' marks. Turning it back on is the one constant.
+FREESTYLE-MAPS-PLAN.md section 9 says so at the top.
+
+### Why
+
+The owner, 27 September 2026, with a picture of the Freestyle screen: "remove
+the achievement for finding stf and also the pill that appear on the maps
+stf, retain the in map logo and retain the logic code as we will use it for
+paid sponsors". Not a physics, plant, ABI or build change, so nothing to put
+to the owner first beyond the request itself.
+
+### Left as it is
+
+- A counter best kept in this browser before today may include a found
+  mark's 1000 points. It stands; nothing rewrites stored bests.
+- `window.__egg` still reports the map's mark, and `foundThisFlight` is now
+  always false.
+
+### What went wrong
+
+Nothing in the change. `npm run lint:nouns` fails on
+`src/maps/built/showpiece.js:149`, "Drift course", and fails the same way
+on the tree without this change, so it came in with the showpiece merge and
+is not fixed here.
+
+### RUN LOG
+
+    node --check src/game/egg.js    clean; MARK_FINDS imports as false
+    npm run lint:shell              PASS
+    npm run lint:boot               9 of 9 checks clean
+    npm run lint:preload            up to date: boot 115, city 74, built 34, 223
+    npm run score:selftest          all passed (score.js's egg still pays once)
+    npm run lint:nouns              FAIL, pre-existing, see above
+    npm run verify                  not run: no physics, plant, ABI or build
+    node scripts/shots.js           not run: offered, and the owner chose
+                                    none on 2026-09-27
+
 ## 2026-09-27 | recovery | A crash is never set down where the craft cannot take off
 
 ### The report
@@ -54887,3 +54944,26 @@ traces moved.
                                 the module is unchanged and the world golden
                                 flies the world this changes
     node scripts/shots.js       not run: the owner's answer above
+
+## 2026-09-27 | release | The crane fixes to main
+
+### What changed
+
+The owner, 27 September 2026: "merge it to main". `origin/main` (0efb81e,
+the STF find switch) merged into `claude/trusting-ritchie-fqnfoo`, and the
+branch to `main` as a fast forward. One conflict, PROGRESS.md, where both
+sides had appended: main's entry first, then this branch's two, each checked
+unchanged against its own side. Nothing else overlapped: main touched
+`src/game/egg.js`, `src/main.js`, `src/ui/ui.js` and FREESTYLE-MAPS-PLAN.md,
+this branch `src/game/collide.js`, `src/props/industrial.js`, the selftest
+and the world golden.
+
+### RUN LOG
+
+    on the merged tree:
+    npm run check:clip          948 passed, 0 failed
+    npm run check:world-golden  all passed
+    npm run lint:preload        up to date: boot 115, city 74, built 34, 223
+    npm run check:fresh         18 passed, 0 failed
+    npm run verify              not run: neither side changes physics, the
+                                plant, the ABI or the build
