@@ -55662,3 +55662,47 @@ that publicise the project.
                                 failure panel hide it, as meant
     npm run verify              not run: markup and a comment, nothing in the
                                 physics, the plant, the ABI or the build
+
+## 2026-09-27 | catalog | Five settings that do nothing here, a feature that does not exist, and plain notes
+
+### What changed and why
+
+The owner asked for the front door's wiki to be fixed, and the wiki's
+settings pages are built from this catalog, copied. Checking the pages
+against Betaflight 4.5.1's source and against the list of files
+`scripts/build-wasm.sh` compiles turned up three things that are this
+catalog's to fix, because it is the copy of record.
+
+- Five settings were LIVE and nothing in this build reads them. The wiki's
+  pages for two of them said so in their own words, under a Works here
+  label. `pid_at_min_throttle` and `airmode_start_throttle_percent` are read
+  only by `fc/core.c`, which is not compiled. `dyn_idle_start_increase`
+  applies only while `isAirmodeActivated()` is false, and `bf_stubs.c`
+  returns true. `ez_landing_speed` is multiplied by a GPS ground speed that is
+  always zero. `max_check` is read only by the stick commands in `core.c` and
+  by the RPM limiter, which does not run. All five are APPLIED_INERT now,
+  with the reason. LIVE goes from 161 to 156 and APPLIED_INERT from 14 to 19;
+  the settings screen greys the five, which is what they do.
+- The feature list had `SERVO`. Betaflight's CLI has no such feature; it is
+  `SERVO_TILT` (`featureNames` in `cli/cli.c`).
+- Every reason is a plain sentence now, with a full stop. They are shown on
+  the settings screen and at the foot of each grey wiki page, and "Plant
+  owns pack current", "No UART grid. The sim is not a radio link" and
+  "Configurator chrome" were this project's shorthand, not something a
+  reader could use. The facts are the same.
+
+The front door recopies the catalog and records the rest of the wiki's
+corrections in its `docs/wiki-betaflight-2026-09.md`.
+
+### RUN LOG
+
+    npm run lint:catalog        ok, covers valueTable, LIVE keys are in
+                                bf_settings.c
+    npm run lint:fc             33 of 33 traces clean
+    npm run lint:presets        4 of 4 presets clean
+    npm run lint:shell          PASS
+    git diff --stat vendor/betaflight
+                                empty (checked out at 77d01ba to read it)
+    npm run verify              not run: the catalog decides what the
+                                settings screen greys and what its notes
+                                say, not what flies
