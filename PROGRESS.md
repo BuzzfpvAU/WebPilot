@@ -54202,3 +54202,81 @@ that drags, steps with the arrows or the radio's stick, and moves the
 slider on the flight screen with it. **Wrong would be**: a line wrapping
 in a corner, the banner on the clock, a chip that cannot be tapped while
 faded, a Weight change on pause that is not there after a reload.
+
+## 2026-09-27 | integration, main | The polish effort concluded: the last batch to main, and what is left
+
+The owner asked to "push to main and conclude this effort". The last
+batch, merged into the working branch and pushed to main with this entry:
+
+- Polish items 22 (overcast clouds lit and inked, canopy blobs shaded
+  round, PATCH-world-trees.diff), 23 (the replay chase camera on the
+  replay's own clock) and 24 (the parked help row timed on the wall clock:
+  a stalled main thread had made the shell's timer lose time), and the
+  2022 AU Nationals fix (an opening credited inside its box is held until
+  the craft leaves the box, so one straight pass through gate 32 to 36
+  counts once), from polish-small (daf5b39).
+- Polish item 14 (the phone's flight OSD in the two top corners, nothing
+  in the centre third), the Weight slider made usable where it is shown
+  (landed, and a Weight row on the pause screen; the owner, 2026-09-26),
+  and item 12's chip fade (about 3 s into the air, back on landing, pause
+  or a pointer, Pause still reachable; the owner, 2026-09-27), from
+  phone-osd (282202a, merged as 6928650).
+
+### Checks on the final tree (6928650), a quiet machine
+
+    npm run verify               18 of 18 passing: build clean and vendor diff
+                                 empty; de0401cd4266 in both processes, Node
+                                 and Chrome, one hash across 30 to 240 Hz;
+                                 hover 0.2793, punch 80.0 m, terminal 31.0
+                                 m/s, motor step 26 ms, 671.7 deg/s, yaw
+                                 -0.10, sag 11.14%, ratio 1.2472; console
+                                 clean; audio; world scale 1.0000; map
+                                 isolation; world golden 35 of 35; crash
+                                 pacing 48 of 48. Run because item 24 touches
+                                 src/input/input.js.
+    git diff --stat vendor/betaflight  empty
+    npm run check:clip           942 passed, 0 failed
+    npm run score:selftest       all passed
+    npm run check:props          all passed
+    npm run check:world-golden   all passed
+    npm run check:world-engines  Node and Chromium equal to the bit
+    npm run input:selftest       all 200 passed
+    npm run replay:test          9 of 9
+    npm run lint:shell           PASS
+    npm run lint:devices         PASS, the phone flight OSD clear of the
+                                 centre third among its new assertions
+    npm run lint:responsive      PASS
+    npm run lint:input           all 160 passed
+    npm run lint:boot            9 of 9 clean
+    npm run lint:memory          PASS
+    npm run lint:preload         up to date
+
+### Not finished, and where it is
+
+- **Polish item 21, the town's budget.** Stopped at the owner's word to
+  conclude. The local branch town-budget holds step 2 (1a72f61: signs by
+  material, tiled textures shared, clouds as one) and step 5 (2bf47fa: the
+  level crossing's pieces by what moves), with step 3 half written and
+  uncommitted in its worktree; none of it has had its final checks, none
+  is merged, and the branch was never pushed, so it goes with this
+  container. Step 4 is not done on the owner's "leave all the physics
+  stuff alone" (it removes solids). CITY-PERF-PLAN.md is unchanged on
+  main.
+
+### Open for the owner
+
+- The AU Nationals board holds four laps by AsylumFPV; the two with ghosts
+  (50.516 s, the best, and 58.822 s) did not fly the loop. Nothing on the
+  board was changed; removing them is the owner's call.
+- Screentone is built and off, because it shimmers in motion; ?tone=1 at
+  High to judge it.
+- Found, not fixed: the turtle banner (three boxed lines) reaches about
+  150 px on a 390 px tall phone, into the centre third, while the quad is
+  on its back. src/game/proven.js is stale on nine rows unrelated to the
+  Maverick Loop's removal. The physics items the crash agent found (the
+  obstacle prop strike once a frame, the perch and stuck reset read at
+  frame ends) are left alone on the owner's word.
+
+The polish list (POLISH-PLAN.md): items 1 to 10, 12 to 19 and 22 to 24
+done and on main; 11 (the lens) and 20 (the race field restyle) declined;
+21 partly done on an unmerged branch as above.
