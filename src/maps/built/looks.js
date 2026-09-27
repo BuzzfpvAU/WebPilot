@@ -157,19 +157,19 @@ export const TIMES = {
    * The clouds are the anime overcast: heavy, pale masses a step LIGHTER
    * than the sky they hang in, with a shaded underside and an ink line
    * round them (cloudInk, see paintSky). Drawn darker than the sky, as they
-   * first were, they read as smudges on the lens. And the sun has a touch
-   * more of the light than it had (1.05 from 0.6), the hemisphere a touch
-   * less (2.3 from 2.55), so what faces up stands a little further from
-   * what faces sideways instead of closing to one flat lavender. Measured
-   * on Hibari Yard from the same camera, the plot comes out 3 percent
-   * brighter and a wall's two faces 5 levels further apart in 255, so
-   * `flats` still holds.
+   * first were, they read as smudges on the lens. The touch more ramp
+   * contrast is the cloud's own two step ramp, lit layer over shaded
+   * underside, pulled further apart. The light is left as it was: a sun of
+   * 1.05 against a hemisphere of 2.3 was tried, and from the same camera it
+   * moved the plot 3 percent and the difference between a wall's two faces
+   * by less than the wall's own texture, so it bought nothing but a change
+   * to what `flats` was measured against.
    */
   overcast: {
-    sun: { color: 0xe9e6f2, intensity: 1.05, at: [-30, 85, 40], soft: 6 },
+    sun: { color: 0xe9e6f2, intensity: 0.6, at: [-30, 85, 40], soft: 6 },
     fill: { color: 0xc4c9e0, intensity: 0.45, at: [40, 60, -30] },
     bounce: { color: 0xc6bed0, intensity: 0.22, at: [10, -18, 40] },
-    hemi: { sky: 0xe6e4f2, ground: 0xa7a0b3, intensity: 2.3 },
+    hemi: { sky: 0xe6e4f2, ground: 0xa7a0b3, intensity: 2.55 },
     fog: { color: 0xc9c6d6, near: 0.8, far: 0.86 },
     sky: {
       top: 0xb2afc7, mid: 0xc2bfd3, haze: 0xcecbd9, bands: 26,
