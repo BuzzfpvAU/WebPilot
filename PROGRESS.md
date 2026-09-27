@@ -53701,3 +53701,230 @@ it, and it failed 10 ways on the old code (the crash agent's entry above).
 The browser's other checks ran on 3040628 plus each branch in the agents'
 own worktrees, and on the merge: check:clip 936 and score:selftest all
 passed, lint:boot 9 of 9, lint:memory PASS, lint:preload up to date.
+
+## 2026-09-27 | shell, hud, checks | Polish item 14: the phone OSD in the two top corners; the Weight slider finished; the flight chips fade
+
+POLISH-PLAN.md item 14, and two requests of the owner's passed on by the
+lead while it was under way, a commit each. On branch phone-osd, from
+claude/vibrant-wozniak-v2pg5e at c77149a, with 9ce6d61 (crash judgement
+per physics step) merged in at c834fd9; not pushed, the lead merges it.
+Shell, UI and one check only: no physics, plant, module ABI or build
+change; nothing under src/game, src/native, src/render, vendor or patches.
+
+**The owner's requests, as passed on by the lead:**
+
+- 2026-09-26, "finish the weight slider" (POLISH-PLAN.md, the later
+  answers, 4): usable where it is shown, landed and on the pause screen,
+  draggable on a desk and on touch, reachable from the keyboard on pause,
+  its value saved as it is today, and still faded in flight.
+- 2026-09-27, "yes fade the chips too" (polish item 12): the music chip,
+  Report bug and Pause fade after about three seconds of flight, come back
+  on pointer movement, on touch, on pause and when landed, by a CSS
+  transition on a class change with no per frame work, and Pause stays
+  reachable all the while.
+
+### What moved where on a phone (9a5e38c)
+
+With the thumb sticks up (.touch-fly-on) the OSD used to stack pack,
+speed, height, throttle and the Weight slider in one centre column, to
+about 270 px of a 390 px screen, and the launch banner was drawn on the
+lap clock. Now:
+
+- **Top left, one line:** the pack's volts, its charge bar and the flight
+  mode ("25.2 volts, bar, ACRO"). The PACK label goes: the volts beside a
+  charge bar say what it is. The mode is a second node in the pack block,
+  shown only on glass, so a desk's layout is untouched.
+- **Top right, one line:** speed and height ("24 km/h 12.3 m up"), running
+  up to Pause, which has the corner itself (top 8 px). "above the ground"
+  is the desk's wording and does not fit beside the speed at 740 px; the
+  height is a number and two tails, and the sheet shows one. The
+  THROTTLE bar goes: the left plate's nub already draws the channel.
+- **The chips:** the music dock and Report bug wait on the pause screen in
+  flight on glass, where both already are. Pause stays up.
+- **The lap clock:** tighter. The label rides beside the clock, and the
+  last lap, the record, the ghost and the bounce count share one line,
+  so the block ends at 67 px, where it ended at 106 to 147. The bounce
+  count went there from the pack's line when lint:devices found "2
+  bounces" pushed that line into the middle third at 740 px.
+- **The banner:** hangs under the clock, from 74 px on a race and 58 px
+  on a freestyle map (whose clock has no gate line), sized off the height
+  (clamp 15 to 19 px on 4.6vh, where 4.4vw made it 30 px) and let out wide
+  so a second line stays one line. Measured: 74 to 117 px at 844 by 390,
+  74 to 114 at 740 by 360 (a third of the height is 120), the yard's three
+  line prompt 58 to 123 of 130 at 844 and 58 to 118 of 120 at 740. The
+  launch control call
+  (.osd-launch) is left to the banner, which says the same words there.
+- **The Weight slider:** landed only, at the bottom between the plates,
+  clear of both and in the bottom third; on glass its first flight card
+  waits for the first landing instead of holding the slider up for eight
+  seconds of air, and retires on the next takeoff.
+- **Upright:** the two lines ride just above the plates, the slider stays
+  off in flight as it always did upright, and the turn sideways pill goes
+  up out of the middle of the height to 24 percent.
+
+Nothing of the OSD or the banner reaches the centre third (the middle
+third of the width and of the height) at 844 by 390, 915 by 412 and 740
+by 360, on the pads, in the air, on a lap and landed, except the first
+landing's Weight card, once in a browser's life.
+
+### The Weight slider, finished (6321c69)
+
+Landed, the overlay's slider was already a control: dragged 100 to 125
+and saved with a mouse at 1600 by 900, with a pretend radio, and with a
+thumb at 844 by 390. In the air it is faded and a drag there moved
+nothing. On the pause screen it showed through the menu at 0.4, under a
+screen that takes every pointer and every key, so nobody could move it.
+
+- **A Weight row on the pause menu**, in "Does it feel wrong?" after
+  Rates: the Rates and PIDs screens' drag track with the number beside
+  it. Drag lands on release; one arrow or one radio stick flick is a step
+  of five; the number types. Same setting and save; the overlay's slider
+  follows through applySettings. A change voids a running lap, as it
+  always did from the overlay, and the note says so.
+- The overlay's slider is put away under the dimmed pause OSD on every
+  device, so the row is the one Weight control on that screen. It
+  replaces 9a5e38c's lift of the slider into the command bar on glass,
+  which a thumb could drag and no key could reach.
+- Measured: keyboard, 4 presses from Resume to the row, a right arrow 125
+  to 130 saved, a drag 130 to 95 saved and the overlay reading "Weight
+  95%"; the pretend radio, 5 stick flicks, a flick right 125 to 130 saved;
+  a thumb at 844 by 390, a drag 130 to 95 saved.
+
+### The flight chips fade (d88179b)
+
+syncChipFade runs from the frame loop on the slider's own aloft test and
+compares two times; the fade is a transition on one class on the root
+(chips-quiet), written on a change. Up on the pads; gone about three
+seconds into the air (3.3 to 3.5 s of wall clock from the punch, measured);
+back on landing, on pause, and on any pointer that moves or lands off the
+thumb sticks (a thumb flying the left stick did not wake them, a finger
+at the top of the picture did). Opacity only: a faded chip keeps its place
+and its pointer, so a click or a tap where Pause stands paused while it
+was faded, and Escape paused as ever. There is no radio pause button in
+flight to keep working: a radio pilot with no pointer keeps the chips
+faded until landing or Escape. On a phone in flight the music dock and
+Report bug are already away, so the one chip that fades there is Pause,
+beside the speed line.
+
+### Checks added, and no threshold, baseline or golden moved
+
+lint:devices has a new section, the flight OSD on a phone held sideways:
+Hibari Yard on the five inch at 844 by 390 and 740 by 360, and the first
+shipped track on the whoop at 740 by 360, each on the pads, in the air
+and paused. It asserts nothing drawn by the OSD or the banner is in the
+centre third or on a thumb plate, each corner is one line in its own outer
+third along the top, the banner is below the clock, the bug chip and the
+dock are away, Pause is up on the pads, faded in the air and takes a touch
+at its middle either way, the slider is up and touchable on the ground and
+gone in the air, and on the pause screen the Weight row's track takes a
+touch and the overlay's slider does not show through. Its first version,
+run on c77149a, failed 96 ways, 32 in each case. tests/shell-baseline.json
+is untouched.
+
+### RUN LOG
+
+On d88179b, the branch head, browser profiles in a private temp folder:
+
+    npm run lint:preload      up to date, boot 115 modules, city 74, built
+                              33; 220 served, no regeneration needed
+    npm run lint:boot         9 of 9 checks clean
+    npm run lint:responsive   PASS, freestyle 272 frames, worst gap 466 ms,
+                              0 over 500 ms
+    npm run lint:devices      PASS, five devices all clear, four builder
+                              windows clear (19, 19, 19, 18 controls),
+                              results at 1280x720 and 1600x900 clear, the
+                              three phone flights clear
+    npm run lint:shell        PASS, title overflow 0 px, every screen at or
+                              under its baseline, paused 14 stops (13
+                              before the Weight row); notes as below
+    npm run lint:memory       PASS, every world lazy and freed
+    npm run lint:input        1 failed, 159 passed; see below
+    dash scan                 none, U+2012 to U+2015 by code point, in
+                              every added line
+    npm run verify            not run: no physics, plant, ABI or build
+                              change, and the brief said not to
+
+lint:input's one failure is "and the input layer and the button agree
+with the setting": the calibrate screen's button read "Stick mode 2" a
+moment after M set mode 3. It failed the same way on 9ce6d61, the merged
+main without this work, in this session, and passed once on c77149a; the
+quick wins entry recorded it on 716562b as a race between the key and the
+button's next paint. Nothing here touches calibration or the input path.
+
+### Pictures
+
+In the session scratchpad, never committed:
+`/tmp/claude-0/-home-user-WebFPVSimulator/6ddfd91b-7f5b-543b-a441-691d12014517/scratchpad/phone-osd/shots/`.
+b- is before, served from a git archive of c77149a; a3- after the OSD
+commit; a5- after all three; w1- the Weight slider; c1- the chips. The
+real shell through tests/lib/page.js, touch on: Flags and cones (the
+board's document) seeded as the race, Hibari Yard through the gate's
+Freestyle card. Looked at, every one:
+
+- **Race** at 844 by 390, 915 by 412, 740 by 360 and 390 by 844: -race-1-pads
+  (the launch prompt), -2-air, -3-lap (running clock, gate line, last lap,
+  record, ghost, bounces and the lap flash), -4-landed, -5-pause.
+- **Hibari Yard** at 844 by 390 and 390 by 844: -free-1-pads, -2-air-hud
+  (the score HUD and the chase meter up), -3-air-call (a chase callout),
+  -4-pause; and a5-740x360-free-1-pads, the yard's prompt on the
+  narrowest phone.
+- **Weight**: w1-keys-1600x900, w1-radio-1600x900 and w1-touch-844x390,
+  -1-landed, -2-air, -3-paused-row, -4-paused-drag.
+- **Chips**: c1-keys-1600x900, c1-radio-1600x900 and c1-touch-844x390,
+  -1-pads, -2-air-faded, -3-woken, -4-paused, -5-landed.
+
+### What went wrong
+
+- window.__race() is defined twice in main.js and the second returns a
+  copy, so writing a lap onto it did nothing. Chords flown along the
+  racing line with __placeCraft credited the timing gate and no flag
+  after it (not traced). The lap pictures fly the timing gate for real,
+  so the clock and the gate line are the race's, and put the last lap,
+  a record, a bounce count and the lap flash on the OSD through a wrapper
+  round setOsd and setBanner.
+- The banner at 64vw wrapped the yard's prompt to three lines reaching
+  139 px of 390, into the centre third; it is let out wide now and hangs
+  higher on a freestyle map. The bounce count in the pack's line took it
+  into the middle third at 740 px; lint:devices caught that one.
+- show() wrote the OSD's className, which would have taken the new
+  is-free class off on every screen change; it is a toggle now.
+- The first flight check picked a full size shipped track, and there are
+  none: every shipped track is a whoop track. It flies the whoop there and
+  the yard on the five inch.
+- The first pause design on glass lifted the overlay's slider into the
+  command bar. It could be dragged and no key could reach it, so the
+  owner's request replaced it with the menu row before it shipped.
+- The pretend radio could not walk the pause menu until the harness's
+  stick override was released: while it holds, the pad's axes reach
+  nothing, the menu included.
+- The container restarted mid run and took the browser profiles; the
+  worktree and the scratchpad survived, and the profiles went to a fresh
+  private folder, removed at the end.
+
+### Found, not fixed
+
+- The turtle banner is three panelled lines; by arithmetic it reaches
+  about 150 px on a 390 px phone, into the centre third, for as long as
+  the quad is on its back. Not pictured.
+- The first landing's Weight card on glass covers part of the centre
+  third (y 190 to 335 at 844 by 390) until Got it, a touch on the track
+  or the next takeoff, once in a browser's life.
+- lint:shell notes "tricks: overflow improved from 1649 to 1605 px", the
+  manga menus entry's note, not this work's; not re-recorded.
+- lint:input's calibrate button race, above.
+
+### For the owner, when flying
+
+Verification to choose: this is shell only, so **shots** or **fly it**
+would see it; verify would not. **Look for**, on a phone held sideways:
+the pack and mode along the top left, speed and height along the top right
+up to Pause, the lap clock small at the top with the launch prompt and
+the lap flash under it, and nothing over the gate; the Weight slider
+between the thumb pads when landed and gone in the air; Pause fading a
+few seconds into a flight and a tap on its corner still pausing. On a
+desk: the chips fading in the air and back when the mouse moves or the
+quad lands. On the pause screen everywhere: a Weight row under Rates
+that drags, steps with the arrows or the radio's stick, and moves the
+slider on the flight screen with it. **Wrong would be**: a line wrapping
+in a corner, the banner on the clock, a chip that cannot be tapped while
+faded, a Weight change on pause that is not there after a reload.
