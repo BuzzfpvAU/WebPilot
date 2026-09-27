@@ -135,6 +135,15 @@ copied byte for byte, and this entry covers them there too.
     Vendored as a git submodule at vendor/betaflight, unmodified; every
     change is a patch file in patches/ applied at build time.
 
+The Betaflight logo, assets/credits/betaflight.svg, and the one colour
+assets/credits/betaflight-mono.svg that scripts/partners.js makes from it,
+are the Betaflight project's mark and not under this project's GPLv3 grant.
+They name Betaflight where its work is used: in the credits, and under
+"Powered by" beside the partners on the front door and the board, because
+the control loop is Betaflight. Neither is a claim that Betaflight endorses
+WebFPV. The copies in the front door's and the board's repositories are
+these files, copied byte for byte.
+
 ## Music, and an open question
 
     Files       assets/music/, fourteen titles as mp3 and webm

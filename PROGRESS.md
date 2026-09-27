@@ -55536,3 +55536,29 @@ plant, the module ABI or the build, and the marks are paint.
       row in the footer, GDS under the close's line, the club under the
       lap clock in the race act, and every mark linking to
       webfpv.org/board/partners#slug
+
+## 2026-09-27 | partners | Betaflight's mark beside the partners, in cream
+
+### What changed
+
+The owner: "add betaflight into the partners but not on the partners page
+just their logo through out page". So Betaflight joins the partners' strips
+and footer rows on the front door and the board, and nothing else: it is
+not in src/partners/roster.js, so it has no card on the partners page, no
+login, no counters and no painted wall in the maps.
+
+- assets/credits/betaflight-mono.svg, made by scripts/partners.js from the
+  credits' own betaflight.svg: both of its colours set to cream, like the
+  partners' one colour files, and held by the same check (current, cream
+  and nothing else, flat fill only). lint:partners is 45 checks now.
+- NOTICE says whose the mark is and that showing it is credit, not a claim
+  of endorsement. On the pages it stands under "Powered by", not under
+  "Official partners": the control loop is Betaflight, and no partnership
+  with the project has been recorded here. The owner can have the label
+  changed if there is one.
+
+### RUN LOG
+
+    npm run gen:partners        made assets/credits/betaflight-mono.svg
+    npm run lint:partners       45 passed, 0 failed
+    npm run verify              not run: an image and a script, no physics

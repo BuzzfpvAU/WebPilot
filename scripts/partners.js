@@ -21,6 +21,18 @@
  *                       cream and its alpha kept exactly, so the drone and
  *                       the lettering keep their shape and lose their blues.
  *
+ * And one mark that is not a partner's:
+ *
+ *   assets/credits/betaflight-mono.svg
+ *                       Betaflight's logo from the credits, its two colours
+ *                       (the yellow of the bird and BETA, the white of
+ *                       FLIGHT) both set to cream. The owner asked on
+ *                       2026-09-27 for Betaflight's mark to stand with the
+ *                       partners' on the front door and the board, under
+ *                       "Powered by", because the control loop is Betaflight.
+ *                       It is not in the roster: Betaflight has no card on
+ *                       the partners page, no login and no painted wall.
+ *
  * gds/mono.svg is NOT made here. It is the redraw's own one colour version,
  * recoloured cream once by hand, because the colour file carries a gradient,
  * a drop shadow and an outline stroke, and a rule that takes those off is a
@@ -235,6 +247,25 @@ function mantisMono(src) {
   return `<!-- Mantis FPV, one colour: their 2022 logo with the sticker outline taken off and every letter in the palette's cream. Made by scripts/partners.js from colour.svg in this folder; regenerate, do not edit. The mark is Mantis FPV's, used with permission (NOTICE). -->\n${svg}`;
 }
 
+/*
+ * Betaflight's mark in cream. The file draws with two classes in a style
+ * block, .st1 (yellow) and .st2 (white), and nothing else paints: both
+ * become cream, the Illustrator declaration and comment go, and the rest is
+ * the file as it is.
+ */
+function betaflightMono(src) {
+  const body = src
+    .replace(/<\?xml[^>]*\?>\s*/, '')
+    .replace(/<!--[\s\S]*?-->\s*/g, '');
+  if (!/\.st1\{fill:#FFBB00;\}/.test(body) || !/\.st2\{fill:#FFFFFF;\}/.test(body) || /fill="/.test(body)) {
+    throw new Error('assets/credits/betaflight.svg is not drawn the way this expects: two style classes, yellow and white, and no fill attributes');
+  }
+  const svg = body
+    .replace('.st1{fill:#FFBB00;}', `.st1{fill:${CREAM};}`)
+    .replace('.st2{fill:#FFFFFF;}', `.st2{fill:${CREAM};}`);
+  return `<!-- Betaflight's mark, one colour: the logo in betaflight.svg in this folder with both of its colours set to the palette's cream, for the partner strips on the front door and the board. Made by scripts/partners.js; regenerate, do not edit. The mark is the Betaflight project's (NOTICE). -->\n${svg}`;
+}
+
 /* ------------------------------------------------------------------ */
 /* The check                                                           */
 /* ------------------------------------------------------------------ */
@@ -352,6 +383,14 @@ function checkFiles(made) {
         'run npm run gen:partners');
     }
   }
+  /* Betaflight's mark is in no roster entry, so the one colour rule above
+   * never reaches it: it is held to the same rule here. */
+  for (const m of made.filter((x) => x.kind === 'svg' && x.rel.includes('credits/'))) {
+    const { colours, banned, stroked } = svgPaint(m.body);
+    check(`${m.rel} names cream and nothing else`,
+      colours.length === 1 && colours[0] === CREAM, `it names ${colours.join(', ') || 'no colour'}`);
+    check(`${m.rel} is flat fill only`, !banned.length && !stroked, [...banned, ...(stroked ? ['a stroke'] : [])].join(', '));
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -359,6 +398,11 @@ function checkFiles(made) {
 const made = [
   { kind: 'svg', rel: 'mantisfpv/mono.svg', body: mantisMono(readFileSync(at('mantisfpv/colour.svg'), 'utf8')) },
   { kind: 'png', rel: 'wcmrc/mono.png', img: creamPng(readPng(readFileSync(at('wcmrc/colour.png')), 'wcmrc/colour.png')) },
+  {
+    kind: 'svg',
+    rel: '../credits/betaflight-mono.svg',
+    body: betaflightMono(readFileSync(join(root, 'assets/credits/betaflight.svg'), 'utf8')),
+  },
 ];
 
 if (!CHECK_ONLY) {
