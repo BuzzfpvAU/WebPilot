@@ -14,8 +14,13 @@
  * THE FIX: A DEPLOY IS ITS OWN SET OF ADDRESSES. Render stamps every file of
  * a deploy with the deploy's time in Last-Modified, and the page itself is
  * never cached, so the page's own Last-Modified is the deploy. The few lines
- * at the top of each page ask for it with a HEAD no cache may answer, then
- * load this file with it as ?d=. This writes the page's import map with
+ * at the top of each page read it from document.lastModified and write this
+ * file into the head with it as ?d=, parser blocking, so the import map is
+ * in the document before anything else can start the module loader. (They
+ * asked with a HEAD request first, from 2026-09-25 to 09-27. The parser
+ * reached the end of the body in the meantime, where Cloudflare injects its
+ * Web Analytics beacon as a module script, and Firefox refuses an import map
+ * after the first module load: "three" was a bare specifier.) This writes the page's import map with
  * every module this site serves given that stamp: src/main.js is imported as
  * src/main.js?d=<stamp>, and so is everything it imports, statically or not,
  * because an import map is applied to every import there is. A browser and
@@ -28,7 +33,8 @@
  * no hash to regenerate on every edit, no build step the host does not run.
  *
  * WHEN THERE IS NO STAMP, which is a checkout (scripts/serve.js and the test
- * harness send no Last-Modified, and no-store besides) or a HEAD that failed,
+ * harness send no Last-Modified, and no-store besides, so the browser reports
+ * the current time and the pages take that as none),
  * the import map carries no versions and the page loads exactly as it did
  * before this file existed.
  *

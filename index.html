@@ -49,14 +49,23 @@
       THE SCRIPTS OF THE DEPLOY THIS PAGE CAME FROM, ALWAYS. See src/fresh.js.
 
       This page is never cached and every script is, for four hours, so this
-      asks for the page's own Last-Modified, which is the deploy's time, with
-      a HEAD no cache may answer, and loads src/fresh.js with it. That writes
-      the import map with the deploy on every module's address, preloads the
-      boot graph and imports src/boot.js. First in the head so the request
-      is in flight while the stylesheet below is parsed. It is also why this
-      page has no import map, no modulepreload and no module script of its
-      own: any of them would start the module loader before the addresses
-      were known.
+      reads the page's own Last-Modified, which is the deploy's time, and
+      loads src/fresh.js with it. That writes the import map with the deploy
+      on every module's address, preloads the boot graph and imports
+      src/boot.js. It is also why this page has no import map, no
+      modulepreload and no module script of its own: any of them would start
+      the module loader before the addresses were known.
+
+      document.write, so fresh.js is parser blocking and the import map is in
+      the document before the parser reaches the body. It used to be loaded
+      after a HEAD request, which does not block anything, so the parser
+      reached the end of the body first. Cloudflare's edge puts its Web
+      Analytics beacon there as a module script, and Firefox takes an import
+      map only before the first module load: the beacon was the first, the
+      page's map was refused, nothing mapped "three" and the page stopped at
+      "was a bare specifier" (reported 2026-09-27, Firefox 156; Chromium
+      accepts a late map, which is why nothing else saw it).
+      document.lastModified is the same header without the round trip.
 
       boot.js, not main.js. It imports nothing at module scope except the
       loading screen, so the screen is alive and reporting BEFORE the
@@ -65,19 +74,11 @@
     -->
     <script>
       (() => {
-        const load = (stamp) => {
-          const s = document.createElement('script');
-          s.src = `src/fresh.js${stamp ? `?d=${stamp}` : ''}`;
-          s.dataset.entry = 'src/boot.js';
-          s.dataset.preload = 'boot';
-          document.head.appendChild(s);
-        };
-        fetch(location.href, { method: 'HEAD', cache: 'no-store' })
-          .then((r) => {
-            const t = Date.parse(r.headers.get('last-modified') || '');
-            load(t > 0 ? Math.round(t / 1000).toString(36) : '');
-          })
-          .catch(() => load(''));
+        const t = Date.parse(document.lastModified);
+        /* With no Last-Modified, as on a checkout, the browser reports the
+         * current time: that is no stamp, and the page loads unversioned. */
+        const stamp = t > 0 && Math.abs(Date.now() - t) > 5000 ? Math.round(t / 1000).toString(36) : '';
+        document.write(`<script src="src/fresh.js${stamp ? `?d=${stamp}` : ''}" data-entry="src/boot.js" data-preload="boot"><\/script>`);
       })();
     </script>
     <meta name="description" content="Fly a five inch quad in a browser, on a real Betaflight control loop compiled to WebAssembly. Build a track, set a lap, put it on the public board." />
