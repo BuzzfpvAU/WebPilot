@@ -1109,7 +1109,9 @@
        * paused, so the fade is this transition and nothing runs per frame.
        * Visibility follows the opacity out, so a faded track takes no
        * pointer and no thumb; the card above it is not faded, because it
-       * is up only while the slider is.
+       * is up only while the slider is. On the pause screen the menu has
+       * its own Weight row, and this one waits under it: see NOT ON THE
+       * PAUSE SCREEN below.
        */
       .osd-air-row, .osd-air-cap {
         transition: opacity 0.25s ease, visibility 0s linear 0s;
@@ -1430,35 +1432,14 @@
         box-shadow: inset -1px -1px 0 0 rgba(255, 212, 92, 0.42);
       }
       /*
-       * AND ON THE PAUSE SCREEN, a control and not a ghost. The paused OSD
-       * is dimmed as a unit, and opacity under 1 made it a stacking context
-       * that kept the slider under the menu: drawn at 0.4 behind the list,
-       * where a thumb cannot reach it. On glass the dimming moves to the
-       * OSD's other children, so the slider is lifted into the command bar,
-       * between the key legend and Resume, over the bar and under the
-       * chips and dialogs. main.js sets touch-paused for a device with
-       * touch points and no gamepad, the thumb sticks' own test. Held
-       * sideways only: upright, the pause list is the width of the phone
-       * and the bar has no gap, so the slider stays where it was.
+       * NOT ON THE PAUSE SCREEN, where the Weight is a row of the menu (see
+       * weightItem in src/ui/ui.js). The paused OSD is dimmed as a unit, and
+       * its opacity makes it a stacking context under the menu: the slider
+       * was drawn at 0.4 behind a screen that takes every pointer and every
+       * key, shown and out of reach. So it is put away there, on every
+       * device, and the row is the one control on that screen.
        */
-      @media (orientation: landscape) {
-        .touch-paused .osd.dim { opacity: 1; }
-        .touch-paused .osd.dim > :not(.osd-sticks) { opacity: 0.4; }
-        .touch-paused .osd.dim .osd-sticks {
-          z-index: 7; bottom: 3px;
-          left: auto; right: calc(clamp(14px, 3vw, 34px) + 122px); transform: none;
-        }
-        /* On the bar's own ink, because the list scrolls under the bar and
-           a row's value read through the track. */
-        .touch-paused .osd.dim .osd-air {
-          padding: 2px 10px; border-radius: 4px;
-          background: rgba(8, 12, 9, 0.92);
-        }
-        /* The keyboard's ghost sticks ride in the same block on a touch
-           screen laptop flown from the keys; nothing moves them paused,
-           and they are not lifted into the bar with the slider. */
-        .touch-paused .osd.dim .osd-gimbal { display: none; }
-      }
+      .osd.dim .osd-air-row, .osd.dim .osd-air-cap { visibility: hidden; }
       /* Portrait is the hinted-away state, but it still has to be tidy:
          the plates go back to the single size, because two doubled plates
          are wider than the screen. The two lines ride just above the

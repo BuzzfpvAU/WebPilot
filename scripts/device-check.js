@@ -312,7 +312,8 @@ async function runResults(w, h) {
  *
  *   on the pads, with the launch prompt up and the Weight slider out;
  *   in the air, where the slider is gone;
- *   paused, where the slider is a control a thumb can reach.
+ *   paused, where the Weight is a menu row whose track a thumb can reach,
+ *   and the overlay's slider is not drawn through the menu.
  *
  * The cases are the widest lines and the tallest clock. Hibari Yard, the
  * shipped freestyle map, on the five inch, whose right corner carries the
@@ -372,14 +373,17 @@ const FLIGHT_PROBE = (stage) => `(() => {
   const bug = ui.bugChip;
   if (stage === 'paused') {
     if (ui.screen !== 'paused') { bad.push('the pause screen is not up'); }
-    if (!air || !shown(air)) {
-      bad.push('the Weight slider is not up on the pause screen');
+    /* The Weight is the menu's own row here, and the overlay's slider is
+     * put away under the dimmed OSD rather than shown out of reach. */
+    const row = ui.menuRows.find((r) => r.dataset.rowId && /weight/.test(r.dataset.rowId));
+    const track = row && row.querySelector('input[type=range]');
+    if (!track) {
+      bad.push('there is no Weight row with a track on the pause screen');
     } else {
-      for (let p = air; p && p !== document.body; p = p.parentElement) {
-        if (Number(getComputedStyle(p).opacity) < 1) { bad.push('the Weight slider is dimmed on the pause screen'); break; }
-      }
-      if (!touches(range)) { bad.push('the Weight slider cannot be touched on the pause screen'); }
+      row.scrollIntoView({ block: 'nearest' });
+      if (!touches(track)) { bad.push('the Weight row\\'s track cannot be touched on the pause screen'); }
     }
+    if (air && shown(air)) { bad.push('the overlay\\'s Weight slider shows through the pause menu'); }
     if (!shown(bug)) { bad.push('the bug chip is not on the pause screen'); }
     return JSON.stringify({ bad });
   }
@@ -484,10 +488,8 @@ async function runFlight(kind, w, h) {
     await page.until("getComputedStyle(document.querySelector('.osd-air-row')).visibility === 'hidden'", 10000).catch(() => {});
     out.air = JSON.parse(await page.evaluate(FLIGHT_PROBE('air'))).bad;
     await page.evaluate("(() => { window.__ui.act('pause'); window.__ui.show('paused'); return 1; })()");
-    await page.until("document.getElementById('ui').classList.contains('touch-paused')", 10000).catch(() => {});
-    /* Back in by a 0.25 s transition, which on a software rasteriser over
-     * the yard is well over a second of wall clock. */
-    await page.until("getComputedStyle(document.querySelector('.osd-air-row')).opacity === '1'", 10000).catch(() => {});
+    await page.until("window.__ui.screen === 'paused'", 10000).catch(() => {});
+    await page.sleep(600);
     out.paused = JSON.parse(await page.evaluate(FLIGHT_PROBE('paused'))).bad;
   } catch (e) {
     out.flow = [`the flow did not reach flight: ${e.message}`];

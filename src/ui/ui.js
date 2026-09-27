@@ -2973,6 +2973,41 @@ function ratesItem(s, midRun) {
  * offer. On Results and the pause menu only: those are the two places a
  * pilot has just been flying, which is when a feel report is worth
  * anything. */
+/*
+ * THE WEIGHT, AS A ROW ON THE PAUSE SCREEN. The owner, 2026-09-26: "finish
+ * the weight slider", usable where it is shown and not only visible there.
+ * The flight overlay's slider showed through the pause menu dimmed, under a
+ * screen that takes every pointer, and no key reached it, so the pause
+ * screen could show it and nobody could move it. It is a row now, in "Does
+ * it feel wrong?", because floaty or heavy is that question: the Rates and
+ * PIDs screens' own drag track with the number beside it. Drag lands on
+ * release, one arrow or one stick flick is one step of five, the number
+ * types. The same setting and the same save as the overlay's slider, which
+ * follows it (applySettings paints it), so neither can disagree with the
+ * other. Changing it voids a running lap, as the overlay's always has; see
+ * the weight in applySettings, src/main.js.
+ */
+function weightItem(s) {
+  const top = weightMaxFor(s.airframe);
+  const cur = clampWeight(s.weight, s.airframe);
+  const spec = {
+    cliMin: WEIGHT_MIN, cliMax: top, scale: 1, decimals: 0, unit: '%',
+  };
+  const set = (v) => { s.weight = clampWeight(v, s.airframe); };
+  const it = number(
+    'Weight',
+    `How heavy the quad feels. Right is heavier: it drops when you chop the throttle and stops hanging at the top of a jump. Left is lighter, and it floats. ${WEIGHT_STOCK} is the quad as it ships; changing it mid lap voids the lap, and a lap flown off ${WEIGHT_STOCK} stays off the public board.`,
+    spec,
+    cur,
+    set,
+  );
+  /* A step is five, the overlay's step: number() would step one, which
+   * clampWeight rounds straight back. */
+  it.adjust = (d) => set(cur + d * WEIGHT_STEP);
+  it.range = { min: WEIGHT_MIN, max: top, step: WEIGHT_STEP };
+  return it;
+}
+
 function feelItem() {
   return {
     label: 'Flight feel',
@@ -7105,6 +7140,7 @@ export class Ui {
           action: 'rates',
           note: 'How far the sticks go, and the throttle limit. Yours, not the tune\'s. Changing them here leaves the quad where it is and the clock running.',
         },
+        weightItem(s),
         feelItem(),
         { label: 'Elsewhere', section: true },
         {
@@ -8622,7 +8658,7 @@ export class Ui {
     range.className = 'row-range';
     range.min = String(it.range.min);
     range.max = String(it.range.max);
-    range.step = '1';
+    range.step = String(it.range.step || 1);
     range.value = String(it.num.cli);
     range.setAttribute('aria-label', it.label);
     range.addEventListener('pointerdown', (e) => {
@@ -12551,8 +12587,10 @@ export class Ui {
 
   /*
    * Off the screen, the card is put away rather than retired, so it is
-   * never drawn through the pause menu or a dialog over it. The slider
-   * itself comes back on the pause screen: see setAirSlider.
+   * never drawn through the pause menu or a dialog over it. On the pause
+   * screen the Weight is the menu's own row (weightItem), and the sheet
+   * puts this slider away under the dimmed OSD; is-aloft comes off so it
+   * is up again the moment the pilot resumes on the ground.
    */
   pauseAirSlider(screen) {
     const air = this.osdAir;

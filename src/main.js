@@ -8429,9 +8429,6 @@ export async function boot({ loading, bootStart, mapId }) {
       }
       touch.setVisible(touchOn);
       uiRoot.classList.toggle('touch-fly-on', touchOn);
-      /* Paused on glass: the Weight slider comes up over the pause screen
-       * as a control a thumb can reach. See .touch-paused in index.html. */
-      uiRoot.classList.toggle('touch-paused', ui.screen === 'paused' && !input.firstGamepad());
       touch.paint();
     }
     uiRoot.classList.toggle('turtle-on', crashflipOn || turtleRecover);
