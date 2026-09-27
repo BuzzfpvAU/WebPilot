@@ -317,6 +317,13 @@ until the board is taught. The town's board is unchanged.
 
 ## 9. The STF easter egg
 
+- **Finding it is off** (the owner, 2026-09-27): "remove the achievement for
+  finding stf and also the pill that appear on the maps stf, retain the in
+  map logo and retain the logic code as we will use it for paid sponsors".
+  The mark is still painted everywhere this section says, but the find
+  below, its callout, stamp, bonus and card pill, is behind one switch,
+  `MARK_FINDS` in `src/game/egg.js`, which is false. The code is all kept
+  for sponsors' marks.
 - **Every freestyle map carries it, always**: the town and every built map.
   The editor offers no way to remove it.
 - **Easy to see, from the pads** (decision 10, 2026-09-25). It was first

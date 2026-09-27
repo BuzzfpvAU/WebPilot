@@ -63,7 +63,7 @@ import { FlightRecorder, downloadText, flightLogName } from './share/flightlog.j
 import { PRACTICE_LAPS, Race, runComplete } from './game/race.js';
 import { TrickDetector } from './game/trickdetect.js';
 import { deriveObstacles, OB_BAR, OB_POLE } from './game/obstacles.js';
-import { seesMark } from './game/egg.js';
+import { MARK_FINDS, seesMark } from './game/egg.js';
 import { Counter, formatScore } from './game/score.js';
 import { NamedGapCounter } from './game/gaps.js';
 import { CloseCalls, CC_EVERY, CC_HARD_DV } from './game/closecall.js';
@@ -8261,8 +8261,9 @@ export async function boot({ loading, bootStart, mapId }) {
         trickDetector.near(view.colliders.gapAt(q.x, q.y, q.z, WALL_NEAR_M));
       }
       /* The STF mark, on a map that carries one, until this run finds it:
-       * see findEgg. */
-      if (view.egg && !eggFound && ui.screen === 'flight' && frames % EGG_EVERY === 0) {
+       * see findEgg. Not asked at all while finds are off (MARK_FINDS in
+       * src/game/egg.js): the mark is paint and nothing more. */
+      if (MARK_FINDS && view.egg && !eggFound && ui.screen === 'flight' && frames % EGG_EVERY === 0) {
         findEgg();
       }
       if (view.mode === 'freestyle') {
