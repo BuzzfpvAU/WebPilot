@@ -17,10 +17,10 @@
  * at the top of each page read it from document.lastModified and write this
  * file into the head with it as ?d=, parser blocking, so the import map is
  * in the document before anything else can start the module loader. (They
- * asked with a HEAD request first, from 2026-09-25 to 09-27. That left a
- * window after DOMContentLoaded in which an extension's module could load
- * first, and Firefox then refuses a late map: "three" was a bare
- * specifier.) This writes the page's import map with
+ * asked with a HEAD request first, from 2026-09-25 to 09-27. The parser
+ * reached the end of the body in the meantime, where Cloudflare injects its
+ * Web Analytics beacon as a module script, and Firefox refuses an import map
+ * after the first module load: "three" was a bare specifier.) This writes the page's import map with
  * every module this site serves given that stamp: src/main.js is imported as
  * src/main.js?d=<stamp>, and so is everything it imports, statically or not,
  * because an import map is applied to every import there is. A browser and

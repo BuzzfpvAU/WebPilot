@@ -55014,22 +55014,30 @@ two families the pack now embeds. No code changed.
 The owner, with a pilot's report from Firefox 156 on Windows, opening a
 board course (`/sim/?map=custom&share=trk-2c92f2ef&...`): "Could not start.
 The specifier "three" was a bare specifier, but was not remapped to
-anything."
+anything." Then: "does not work in a private window either", and "works in
+vivaldi (chromium)".
 
-### Root cause
+### Root cause, reproduced
+
+Firefox 156.0.1 (the pilot's version) was downloaded into the scratchpad and
+driven headless over WebDriver BiDi. Against webfpv.org it fails with the
+pilot's exact message. The page's scripts at that moment: the inline boot
+lines, fresh.js, the import map, and
+`<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/...">`.
+Cloudflare Web Analytics is switched on for the zone and the edge injects
+its beacon as a module script before `</body>`, only into responses that are
+compressed, which is why a plain curl of the page does not show it.
 
 src/fresh.js (2026-09-25) writes the page's only import map, and the pages
-loaded it after a HEAD request for their own Last-Modified. A script
-inserted from a fetch callback does not block the parser or
-DOMContentLoaded, so the page parsed, DOMContentLoaded fired and extension
-content scripts were injected while the HEAD and the fresh.js fetch were in
-flight. Firefox accepts one import map, and only before the first module
-load; any module loaded in that gap, an extension's being the usual one,
-makes the page's map arrive too late and be refused. boot.js was imported by
-full URL and ran; main.js's `import 'three'` then had nothing to map it.
-Chromium merges a late map since 133, which is why no check here saw it.
-Not reproduced in Firefox, which this container does not have; the gap is
-measured below.
+loaded it after a HEAD request for their own Last-Modified, which blocks
+nothing. So the parser reached the end of the body, and started the
+beacon's module load, before the map existed. Firefox takes an import map
+only before the first module load, so it refused the page's map; boot.js
+was imported by full URL and ran, and main.js's `import 'three'` had nothing
+to map it. Chromium merges a late map since 133, which is why Vivaldi,
+check:fresh and every other check here passed. The first hand-over guessed
+an extension; the private window ruled that out and the Firefox run found
+the beacon.
 
 ### Fix
 
@@ -55037,18 +55045,32 @@ The first lines of index.html, src/trackbuilder/index.html and
 src/share/orbit.html read the stamp from document.lastModified, the same
 header without the round trip, and document.write fresh.js into the head,
 parser blocking. The map is in the document before the parser reaches the
-body. With no Last-Modified, as on a checkout, the browser reports the
-current time, and a value within five seconds of now is taken as no stamp,
-which is what the HEAD path did when the header was missing. The stamp is
-the same base 36 seconds, so the addresses are unchanged. A module an
-extension injects at document_start would still come first, as it did with
-the static import maps before 2026-09-25.
+body, whatever the edge puts there. With no Last-Modified, as on a
+checkout, the browser reports the current time, and a value within five
+seconds of now is taken as no stamp, which is what the HEAD path did when
+the header was missing. The stamp is the same base 36 seconds, so the
+addresses are unchanged. The landing page's map is static in its head and
+the board has none, so neither is exposed.
+
+Turning Web Analytics off, or its automatic injection, would also have
+stopped this, and is the owner's dashboard, not code; the fix above holds
+whatever else the edge injects.
 
 ### RUN LOG
 
-    ordering, served with a 400 ms HEAD and fresh.js   import map in the
-                             document at DOMContentLoaded: true with this
-                             change, false with it stashed (the gap)
+    Firefox 156.0.1, headless, BiDi
+      webfpv.org/sim (main)  FAILS: "three" was a bare specifier, the beacon
+                             listed as a module script
+      checkout of main, served with the beacon tag injected before </body>
+                             sim and orbit FAIL the same way; builder did not
+                             print it in this run (timing), same loader
+      this branch, same server, beacon injected
+                             sim, builder, orbit: no bare specifier; the sim
+                             gets to three's WebGLRenderer, which fails only
+                             because headless Firefox here has no WebGL
+    Chromium, served with a 400 ms HEAD and fresh.js
+                             import map in the document at DOMContentLoaded:
+                             true with this change, false without
     check:fresh              18 passed, 0 failed
     lint:preload             up to date: boot 115, city 74, built 34; 223 served
     lint:boot                9 of 9

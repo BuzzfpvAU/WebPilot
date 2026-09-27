@@ -58,13 +58,14 @@
 
       document.write, so fresh.js is parser blocking and the import map is in
       the document before the parser reaches the body. It used to be loaded
-      after a HEAD request, which does not block anything: the page parsed,
-      DOMContentLoaded fired and extensions injected their scripts while the
-      HEAD was in flight, and in Firefox, which takes one import map and
-      only before the first module load, an extension's module in that gap
-      made the page's map arrive too late. Nothing mapped "three" and the
-      page stopped at "was a bare specifier" (reported 2026-09-27, Firefox
-      156). document.lastModified is the same header without the round trip.
+      after a HEAD request, which does not block anything, so the parser
+      reached the end of the body first. Cloudflare's edge puts its Web
+      Analytics beacon there as a module script, and Firefox takes an import
+      map only before the first module load: the beacon was the first, the
+      page's map was refused, nothing mapped "three" and the page stopped at
+      "was a bare specifier" (reported 2026-09-27, Firefox 156; Chromium
+      accepts a late map, which is why nothing else saw it).
+      document.lastModified is the same header without the round trip.
 
       boot.js, not main.js. It imports nothing at module scope except the
       loading screen, so the screen is alive and reporting BEFORE the
