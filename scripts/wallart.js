@@ -20,8 +20,9 @@
  *   ... --preview=FILE.jpg                      also the atlas on grey, to look at
  *
  * WHY A PICTURE AND NOT THE SVG. The stickers are vector and set their type
- * in three faces the pack embeds, subsetted: Zen Kaku Gothic New, Caveat
- * Brush and M PLUS Rounded 1c, under the SIL Open Font License 1.1. Drawn
+ * in the faces the pack embeds, subsetted: Zen Kaku Gothic New at two
+ * weights and Caveat Brush, under the SIL Open Font License 1.1, with the
+ * WEBFPV wordmarks in this project's own lettering set on the first. Drawn
  * into a WebGL texture at run time, each one would go SVG, Blob, Image,
  * canvas, and the pack's own PNG export, which takes that road, carries a
  * fallback for the browsers where it fails. Here the pieces are laid out as

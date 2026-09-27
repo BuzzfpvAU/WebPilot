@@ -26,7 +26,7 @@
 
 export const WALLART = {
   url: 'assets/wallart/atlas.webp',
-  rev: 'cc911c84d03b',
+  rev: 'a38d67f8b8bf',
   size: 2048,
   pieces: {
     bannerVisor: { x: 12, y: 1363, w: 1782, h: 327, printW: 4.4, printH: 0.807 },

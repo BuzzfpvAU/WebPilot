@@ -54967,3 +54967,44 @@ and the world golden.
     npm run check:fresh         18 passed, 0 failed
     npm run verify              not run: neither side changes physics, the
                                 plant, the ABI or the build
+
+## 2026-09-27 | art | The wall art wears the lettered wordmark
+
+### What changed
+
+The owner, 27 September 2026, after the front door and the board were
+lettered in this project's hand: "update the logo and font on the tracks and
+times page as well as the stickers", and, asked how far the stickers should
+go, "Logo on the stickers": every sticker that sets the WEBFPV wordmark in
+type redraws it as src/ui/lettering.js letters the menus' wordmark, and the
+room's wall art is regenerated from the new pack.
+
+The pack is the landing repository's stickers/index.html. Its new
+scripts/letter-stickers.js hands this repository's drawRuns a 2D context that
+writes SVG instead of pixels, so the stickers stay vector for print and every
+glyph lands where the menus' lettering would put it, set on the pack's own
+Zen Kaku Gothic New at 900. Nine stickers changed; five of the room's eleven
+pieces are made from them: the visor banner (bannerVisor), the bubble whoop,
+pilot and goggle posters, and the cut vinyl wordmark, which vinyl() recolours
+to hinomaru, the lettering's fill and stroke alike. Brush handwriting and
+small print are as they were. The pack no longer embeds M PLUS Rounded 1c,
+because the bubble whoop's wordmark was the only thing set in it.
+
+Regenerated with `node scripts/wallart.js --pack=` the landing checkout's
+pack, which is the file that ships there: assets/wallart/atlas.webp and the
+table's rev (cc911c84d03b to a38d67f8b8bf). No piece moved or changed size, so
+the table differs only in that line. NOTICE and the script's header name the
+two families the pack now embeds. No code changed.
+
+### RUN LOG
+
+    node scripts/wallart.js --pack=../landingpage-WebFPVSimulator-/stickers/index.html
+                                22 stickers read, three faces loaded (Zen
+                                Kaku Gothic New 900 and 700, Caveat Brush
+                                400), 11 pieces, 353 KB, rev a38d67f8b8bf
+    npm run lint:preload        up to date: boot 115, city 74, built 34, 223
+    the whoop room, served locally, ?map=custom&craft=whoop65, both long
+    walls photographed with __setCam: the lettered banner and posters hang
+    where they did, no console errors
+    npm run verify              not run: no physics, plant, ABI or build; the
+                                change is a picture and one line of a table
