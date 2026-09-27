@@ -1059,6 +1059,10 @@ const AIR_HINT_KEY = 'webfpv.airhint.v2';
  * to read two sentences in a hover, short enough that it is gone before the
  * pilot is looking at the ground it covers. */
 const AIR_HINT_AIR_MS = 8000;
+/* How long the flight chips stay up once the quad is in the air, or after
+ * the last pointer movement: see syncChipFade. Wall clock, because it is
+ * chrome, not flight. */
+const CHIPS_QUIET_MS = 3000;
 
 function airHintSeen() {
   try {
@@ -3695,12 +3699,30 @@ export class Ui {
     this.airHintAtMs = null;
     this.ptrX = null;
     this.ptrY = null;
+    /* The flight chips' fade: when this flight went into the air, when a
+     * pointer last moved, and whether the class is on. See syncChipFade. */
+    this.chipsAloftAt = null;
+    this.chipsWokeAt = -Infinity;
+    this.chipsQuiet = false;
     this.build();
     this.root.addEventListener('mousedown', (e) => {
       if (this.dropEl && !this.dropEl.contains(e.target) && !e.target.closest('.drop-btn')) {
         this.closeDrop();
       }
     });
+    /* A pointer moving or landing anywhere but on a thumb stick brings the
+     * chips back. A thumb flying a stick is not reaching for a chip, and on
+     * a phone the thumbs never leave the glass, so the stick zones do not
+     * count. Passive, and one comparison and at most one class write. */
+    const wakeChips = (e) => {
+      if (e.target && e.target.closest && e.target.closest('.touch-zone')) {
+        return;
+      }
+      this.chipsWokeAt = performance.now();
+      this.setChipsQuiet(false);
+    };
+    window.addEventListener('pointermove', wakeChips, { passive: true });
+    window.addEventListener('pointerdown', wakeChips, { passive: true });
     this.show('title');
     this.bindWikiHash();
   }
@@ -5209,6 +5231,48 @@ export class Ui {
       this.musicDock.classList.toggle('under-chip', Boolean(bug));
     }
     this.syncMusicDock();
+    if (this.screen !== 'flight') {
+      this.syncChipFade(false);
+    }
+  }
+
+  /*
+   * THE FLIGHT CHIPS FADE (POLISH-PLAN.md item 12; the owner, 2026-09-27:
+   * "yes fade the chips too"). A real feed carries the OSD and nothing
+   * else, so the music dock, Report bug and Pause go after about three
+   * seconds in the air, and come back when the quad is down again (landed,
+   * perched, set down, on its back), on the pause screen, and the moment a
+   * pointer moves or a finger lands anywhere but on a thumb stick.
+   *
+   * From the frame loop with the Weight slider's own aloft test, and it
+   * does nothing a frame but compare two times: the fade is the sheet's
+   * transition on one class on the root, written on a change only.
+   *
+   * FADED, NOT GONE. Only the opacity goes: every chip still takes its
+   * click and its tap where it stands, so a thumb that knows where Pause
+   * is still pauses, and Escape and F8 never depended on a chip. There is
+   * no pause button on a radio in flight to keep working; a radio pilot
+   * pauses on Escape, and gets the chips back by landing or pausing.
+   */
+  syncChipFade(aloft, nowMs = performance.now()) {
+    if (!aloft || this.screen !== 'flight') {
+      this.chipsAloftAt = null;
+      this.setChipsQuiet(false);
+      return;
+    }
+    if (this.chipsAloftAt == null) {
+      this.chipsAloftAt = nowMs;
+    }
+    const from = Math.max(this.chipsAloftAt, this.chipsWokeAt);
+    this.setChipsQuiet(nowMs - from >= CHIPS_QUIET_MS);
+  }
+
+  setChipsQuiet(on) {
+    if (this.chipsQuiet === on) {
+      return;
+    }
+    this.chipsQuiet = on;
+    this.root.classList.toggle('chips-quiet', on);
   }
 
   /*

@@ -8379,10 +8379,13 @@ export async function boot({ loading, bootStart, mapId }) {
             || Math.abs(ch.yaw) > PAD_FLYING_STICK),
         touch: touchFlying,
       });
+      /* The chips fade on the same test: see syncChipFade. */
+      ui.syncChipFade(aloft, nowWall);
       updateTargetLock();
     } else if (mode !== 'paused') {
       ui.setStickOverlay({ show: false, roll: 0, pitch: 0, yaw: 0, throttle: 0 });
       ui.setAirSlider(false);
+      ui.syncChipFade(false, nowWall);
       ui.setTargetLock(LOCK_OFF);
     }
     /*

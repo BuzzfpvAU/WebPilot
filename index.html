@@ -5156,6 +5156,28 @@
         background: rgba(16, 22, 17, 0.38);
       }
       .music-dock.is-muted { opacity: 0.5; }
+      /*
+       * THE CHIPS FADE IN FLIGHT (POLISH-PLAN.md item 12; the owner,
+       * 2026-09-27: "yes fade the chips too"). syncChipFade in
+       * src/ui/ui.js puts chips-quiet on the root after about three seconds
+       * in the air and takes it off on landing, on pause and on any pointer
+       * that is not a thumb on a stick, so the fade is these transitions
+       * and nothing runs per frame. Opacity only: a faded chip keeps its
+       * place and its pointer, and a tap where Pause stands still pauses.
+       * On a phone in flight the music dock and Report bug are already
+       * away (see THE PHONE OSD), so the one chip that fades there is the
+       * thumb sticks' Pause, beside the speed line. Two classes and three
+       * on the dock, to outrank the muted dock's half opacity.
+       */
+      .bug-chip.on-flight, .music-dock.on-flight, .touch-fly .touch-pause {
+        transition: opacity 0.25s ease;
+      }
+      .chips-quiet .bug-chip.on-flight,
+      .chips-quiet .music-dock.on-flight,
+      .chips-quiet .touch-fly .touch-pause {
+        opacity: 0;
+        transition: opacity 0.9s ease;
+      }
       .music-dock[hidden] { display: none; }
       .music-skip {
         appearance: none; border: 0; border-radius: 3px;

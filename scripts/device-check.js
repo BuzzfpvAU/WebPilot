@@ -331,7 +331,9 @@ async function runResults(w, h) {
  * thing meant to sit on the gate and is not counted), nothing of the OSD
  * lies on a thumb plate, each corner is one line in its own outer third
  * along the top, the banner hangs below the lap clock, the bug chip and
- * the music dock are away, and Pause is up and takes a touch at its middle.
+ * the music dock are away, and Pause is up and takes a touch at its middle:
+ * shown on the pads, faded after about three seconds in the air (item 12)
+ * and still taking the touch.
  */
 const FLIGHT_CASES = [
   ['yard', 844, 390],
@@ -438,6 +440,13 @@ const FLIGHT_PROBE = (stage) => `(() => {
     }
   }
   if (stage === 'air' && air && shown(air)) { bad.push('the Weight slider is up in the air'); }
+  /* The chips fade after about three seconds in the air (item 12), and
+   * Pause, faded, still takes the touch above. On the pads they are up. */
+  const quiet = document.getElementById('ui').classList.contains('chips-quiet');
+  if (stage === 'air' && !quiet) { bad.push('Pause has not faded after three seconds in the air'); }
+  if (stage === 'pads' && (quiet || (pause && Number(getComputedStyle(pause).opacity) < 1))) {
+    bad.push('Pause is faded on the pads');
+  }
   return JSON.stringify({ bad });
 })()`;
 
@@ -486,6 +495,7 @@ async function runFlight(kind, w, h) {
     await page.evaluate('window.__stick(0, 0, 0, 0.42), 1');
     /* The fade is 0.6 s late and 0.8 s long, then visibility follows. */
     await page.until("getComputedStyle(document.querySelector('.osd-air-row')).visibility === 'hidden'", 10000).catch(() => {});
+    await page.until("document.getElementById('ui').classList.contains('chips-quiet')", 10000).catch(() => {});
     out.air = JSON.parse(await page.evaluate(FLIGHT_PROBE('air'))).bad;
     await page.evaluate("(() => { window.__ui.act('pause'); window.__ui.show('paused'); return 1; })()");
     await page.until("window.__ui.screen === 'paused'", 10000).catch(() => {});
