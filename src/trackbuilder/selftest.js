@@ -1126,13 +1126,25 @@ function suiteWarnings() {
     closeWarns(twice('full', 0)).length >= 1);
   check('and 0.3 m apart is close on the field and not in a room',
     closeWarns(twice('full', 0.3)).length >= 1 && closeWarns(twice('micro', 0.3)).length === 0);
+  const loopDoc = createTrack();
+  const loopGate = place(loopDoc, 'gate', 10, 10);
+  const loopWay = place(loopDoc, 'waypoint', 20, 14);
+  const loopNext = place(loopDoc, 'gate', 40, 10);
+  for (const el of [loopGate, loopWay, loopGate, loopNext]) {
+    addToSequence(loopDoc, el.id, 0);
+  }
+  check('one gate flown twice in a row round a loop, 2022 AU Nationals\' 32-36, is not a warning: the race holds it until it is left',
+    closeWarns(loopDoc).length === 0, closeWarns(loopDoc).map((w) => w.message).join(' | '));
 
   /*
    * And the race's side of it, on the Orbit course as it is built: its two
    * flags score one square, passed one way and then the other. Rocking two
    * centimetres a frame in that square closed a lap every two frames, 32 ms;
-   * now each lap is twice stationLegMin of flying. A real there and back
-   * through it closes every lap it did.
+   * with stationLegMin each lap was twice it of flying, 784 ms; and since the
+   * same opening is held until the craft leaves its box (2022 AU Nationals,
+   * openingKey in race.js) it closes none at all, because the square the lap
+   * started in is never left. A real there and back through it closes every
+   * lap it did.
    */
   const orbitGates = [0, Math.PI].map((heading, i) => ({
     position: { x: 30, y: 0, z: -24 },
@@ -1160,10 +1172,9 @@ function suiteWarnings() {
     rock.update(rockPrev, c, rockMs, rockMs);
     rockPrev = c;
   }
-  const rockFloor = 16 * ((2 * stationLegMin('full')) / 0.02 - 1);
-  check('rocking in one square no longer closes a lap in two frames',
-    rock.laps.length > 0 && Math.min(...rock.laps) >= rockFloor,
-    `${rock.laps.map((ms) => `${ms} ms`).join(', ')} against ${rockFloor}`);
+  check('rocking in one square starts the clock and closes no lap at all: the square is held until it is left',
+    rock.lapStartMs != null && rock.laps.length === 0,
+    `laps ${rock.laps.map((ms) => `${ms} ms`).join(', ') || 'none'}, clock ${rock.lapStartMs == null ? 'never started' : 'started'}`);
   const thereBack = new Race(orbitGates);
   let tbMs = 0;
   let tbPrev = sqAt(-2);
@@ -1197,6 +1208,61 @@ function suiteWarnings() {
   check('one straight pass through two stations at one point still credits both',
     pair.next === 2 && pair.splits.length === 1 && Math.abs(pair.splits[0] - 50) < 1e-3,
     `next ${pair.next}, splits ${pair.splits.join(', ')}`);
+
+  /*
+   * THE SAME OPENING TWICE IN A ROW, 2022 AU Nationals' gate 32-36: through
+   * it, round a loop, through it again. One straight pass used to credit
+   * both, face then plane, and the lap skipped the loop (the owner,
+   * 2026-09-26). The same element and hole is held until the craft has left
+   * its box; two different elements on one spot, RaceGOW6 Track 1's pair,
+   * are still one pass.
+   */
+  const againGates = (second) => [0, 0, -20].map((z, i) => ({
+    position: { x: 0, y: 0, z },
+    heading: 0,
+    flyOrder: i,
+    elementId: i === 1 ? second : i === 0 ? 'el-a' : 'el-b',
+    apertureIndex: 0,
+    apertures: [{ centreY: 1, clearW: 1.75, clearH: 1.75 }],
+  }));
+  const flyPts = (race, pts, t0) => {
+    let ms = t0;
+    for (let i = 0; i + 1 < pts.length; i += 1) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const n = Math.max(1, Math.round(Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z) / 0.1));
+      for (let s = 1; s <= n; s += 1) {
+        const lerp = (u, v) => u + (v - u) * ((s - 1) / n);
+        const lerp2 = (u, v) => u + (v - u) * (s / n);
+        ms += 10;
+        race.update({ x: lerp(a.x, b.x), y: lerp(a.y, b.y), z: lerp(a.z, b.z) },
+          { x: lerp2(a.x, b.x), y: lerp2(a.y, b.y), z: lerp2(a.z, b.z) }, ms, ms);
+      }
+    }
+    return ms;
+  };
+  const through = [{ x: 0, y: 1, z: 2 }, { x: 0, y: 1, z: -2 }];
+  const round = [{ x: 0, y: 1, z: -2 }, { x: 3, y: 1, z: -2 }, { x: 3, y: 1, z: 2 }, { x: 0, y: 1, z: 2 }, { x: 0, y: 1, z: -2 }];
+  const again = new Race(againGates('el-a'));
+  let againMs = flyPts(again, through, 0);
+  check('the same opening twice in a row, crossed straight: credited once',
+    again.next === 1 && again.splits.length === 0, `next ${again.next}, splits ${again.splits.join(', ')}`);
+  const roundFrom = againMs;
+  againMs = flyPts(again, round, againMs);
+  check('and flown round and through it again: credited the second time',
+    again.next === 2 && again.splits.length === 1 && again.splits[0] > roundFrom,
+    `next ${again.next}, splits ${again.splits.join(', ')} after ${roundFrom} ms`);
+  const twoOnOne = new Race(againGates('el-c'));
+  flyPts(twoOnOne, through, 0);
+  check('two different gates on one spot, crossed straight: still both',
+    twoOnOne.next === 2 && twoOnOne.splits.length === 1, `next ${twoOnOne.next}, splits ${twoOnOne.splits.join(', ')}`);
+  const lone = new Race(againGates('el-a').slice(0, 1));
+  flyPts(lone, through, 0);
+  check('a one gate course: one straight pass starts the clock and closes no lap',
+    lone.lapStartMs != null && lone.laps.length === 0, `laps ${lone.laps.join(', ')}`);
+  flyPts(lone, round, 400);
+  check('and round and through again closes one',
+    lone.laps.length === 1 && lone.laps[0] > 300, `laps ${lone.laps.join(', ')}`);
 }
 
 function suiteHistory() {
