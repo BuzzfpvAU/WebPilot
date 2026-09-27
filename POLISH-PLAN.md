@@ -255,3 +255,19 @@ then manga menus".
 The bigger items, in the owner's order: the Freestyle room's map card (17),
 Stage F (18), the manga menus (19), then the rest (14 the phone OSD, 21 the
 town's budget in its render only steps, 22 to 24).
+
+## The owner's answers, 2026-09-26, later
+
+Given in the conversation, after the second wave: "Leave all the physics
+stuff alone, the crashing is fine for now, fix the au nats track, finish
+the weight slider, what is shimmer?"
+
+1. **Physics stays as it is.** Step 4 of CITY-PERF-PLAN.md (which removes
+   solids) is not done; the obstacle prop strike stays once a frame; the
+   thrust stays. Crash judgement per physics step, already approved and
+   verified, stands.
+2. **The crash grace after a skim stays** (the ground cooldown).
+3. **Fix the 2022 AU Nationals track**, where a gate sequenced twice in a
+   row is credited twice by one straight pass, so its loop can be skipped.
+4. **Finish the Weight slider**: usable where it is shown (landed and on
+   the pause screen), not only visible there.
