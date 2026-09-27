@@ -8220,6 +8220,12 @@ export async function boot({ loading, bootStart, mapId }) {
     if (frames > 2 && audioMs > worstAudioMs) {
       worstAudioMs = audioMs;
     }
+    /* The thumb sticks are flying: a device with touch points, in flight,
+     * with no gamepad connected. Read here, before the OSD, because the air
+     * slider's card behaves differently on glass. The overlay itself is
+     * shown and hidden on the same test further down, read again there
+     * because a run that ends in this frame has left flight by then. */
+    const touchFlying = Boolean(touch) && mode === 'flight' && ui.screen === 'flight' && !input.firstGamepad();
     if (mode === 'flight') {
       /*
        * Altitude is measured against the surface UNDER THE CRAFT, through the
@@ -8382,11 +8388,15 @@ export async function boot({ loading, bootStart, mapId }) {
           && (Math.abs(ch.roll) > PAD_FLYING_STICK
             || Math.abs(ch.pitch) > PAD_FLYING_STICK
             || Math.abs(ch.yaw) > PAD_FLYING_STICK),
+        touch: touchFlying,
       });
+      /* The chips fade on the same test: see syncChipFade. */
+      ui.syncChipFade(aloft, nowWall);
       updateTargetLock();
     } else if (mode !== 'paused') {
       ui.setStickOverlay({ show: false, roll: 0, pitch: 0, yaw: 0, throttle: 0 });
       ui.setAirSlider(false);
+      ui.syncChipFade(false, nowWall);
       ui.setTargetLock(LOCK_OFF);
     }
     /*

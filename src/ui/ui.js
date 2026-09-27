@@ -1059,6 +1059,10 @@ const AIR_HINT_KEY = 'webfpv.airhint.v2';
  * to read two sentences in a hover, short enough that it is gone before the
  * pilot is looking at the ground it covers. */
 const AIR_HINT_AIR_MS = 8000;
+/* How long the flight chips stay up once the quad is in the air, or after
+ * the last pointer movement: see syncChipFade. Wall clock, because it is
+ * chrome, not flight. */
+const CHIPS_QUIET_MS = 3000;
 
 function airHintSeen() {
   try {
@@ -2973,6 +2977,41 @@ function ratesItem(s, midRun) {
  * offer. On Results and the pause menu only: those are the two places a
  * pilot has just been flying, which is when a feel report is worth
  * anything. */
+/*
+ * THE WEIGHT, AS A ROW ON THE PAUSE SCREEN. The owner, 2026-09-26: "finish
+ * the weight slider", usable where it is shown and not only visible there.
+ * The flight overlay's slider showed through the pause menu dimmed, under a
+ * screen that takes every pointer, and no key reached it, so the pause
+ * screen could show it and nobody could move it. It is a row now, in "Does
+ * it feel wrong?", because floaty or heavy is that question: the Rates and
+ * PIDs screens' own drag track with the number beside it. Drag lands on
+ * release, one arrow or one stick flick is one step of five, the number
+ * types. The same setting and the same save as the overlay's slider, which
+ * follows it (applySettings paints it), so neither can disagree with the
+ * other. Changing it voids a running lap, as the overlay's always has; see
+ * the weight in applySettings, src/main.js.
+ */
+function weightItem(s) {
+  const top = weightMaxFor(s.airframe);
+  const cur = clampWeight(s.weight, s.airframe);
+  const spec = {
+    cliMin: WEIGHT_MIN, cliMax: top, scale: 1, decimals: 0, unit: '%',
+  };
+  const set = (v) => { s.weight = clampWeight(v, s.airframe); };
+  const it = number(
+    'Weight',
+    `How heavy the quad feels. Right is heavier: it drops when you chop the throttle and stops hanging at the top of a jump. Left is lighter, and it floats. ${WEIGHT_STOCK} is the quad as it ships; changing it mid lap voids the lap, and a lap flown off ${WEIGHT_STOCK} stays off the public board.`,
+    spec,
+    cur,
+    set,
+  );
+  /* A step is five, the overlay's step: number() would step one, which
+   * clampWeight rounds straight back. */
+  it.adjust = (d) => set(cur + d * WEIGHT_STEP);
+  it.range = { min: WEIGHT_MIN, max: top, step: WEIGHT_STEP };
+  return it;
+}
+
 function feelItem() {
   return {
     label: 'Flight feel',
@@ -3660,12 +3699,30 @@ export class Ui {
     this.airHintAtMs = null;
     this.ptrX = null;
     this.ptrY = null;
+    /* The flight chips' fade: when this flight went into the air, when a
+     * pointer last moved, and whether the class is on. See syncChipFade. */
+    this.chipsAloftAt = null;
+    this.chipsWokeAt = -Infinity;
+    this.chipsQuiet = false;
     this.build();
     this.root.addEventListener('mousedown', (e) => {
       if (this.dropEl && !this.dropEl.contains(e.target) && !e.target.closest('.drop-btn')) {
         this.closeDrop();
       }
     });
+    /* A pointer moving or landing anywhere but on a thumb stick brings the
+     * chips back. A thumb flying a stick is not reaching for a chip, and on
+     * a phone the thumbs never leave the glass, so the stick zones do not
+     * count. Passive, and one comparison and at most one class write. */
+    const wakeChips = (e) => {
+      if (e.target && e.target.closest && e.target.closest('.touch-zone')) {
+        return;
+      }
+      this.chipsWokeAt = performance.now();
+      this.setChipsQuiet(false);
+    };
+    window.addEventListener('pointermove', wakeChips, { passive: true });
+    window.addEventListener('pointerdown', wakeChips, { passive: true });
     this.show('title');
     this.bindWikiHash();
   }
@@ -3688,20 +3745,42 @@ export class Ui {
      * when you are ahead of it, amber when it is ahead of you, the same
      * reading as everything else on this overlay: mint is the good news. */
     this.osdGhost = el('div', 'osd-ghost is-off', '');
+    /* The label and the clock, and the last lap, the record and the ghost,
+     * each in a wrapper of its own. On a desk the wrappers are plain blocks
+     * and change nothing; on a phone the sheet lays each one out as a line,
+     * so the clock ends high enough for the banner to hang under it. See
+     * THE PHONE OSD in index.html. The bounce count rides that line too on
+     * a phone, a second node off on a desk, because it is a count about the
+     * run like the lap and the record, and in the pack's corner it pushed
+     * the line into the middle of a 740 px phone. */
     const top = el('div', 'osd-top');
-    top.append(this.osdClockLabel, this.osdTimer, this.osdGate, this.osdLast, this.osdBest, this.osdGhost);
+    const clock = el('div', 'osd-clock');
+    clock.append(this.osdClockLabel, this.osdTimer);
+    const records = el('div', 'osd-records');
+    this.osdHitsTouch = el('div', 'osd-best osd-hits-touch', '');
+    records.append(this.osdLast, this.osdBest, this.osdGhost, this.osdHitsTouch);
+    top.append(clock, this.osdGate, records);
     this.osdPack = el('div', 'osd-value', '');
     this.osdPackBar = el('div', 'bar-fill');
     const packBar = el('div', 'bar');
     packBar.append(this.osdPackBar);
     const packBlock = el('div', 'osd-corner osd-left');
-    packBlock.append(el('div', 'osd-label', 'Pack'), this.osdPack, packBar);
+    /* The mode a second time, in the pack's line, for the phone: its top
+     * left corner is the pack and the mode, and the top right is speed and
+     * height up to Pause. Off on a desk, where the mode is under the speed. */
+    this.osdFlightTouch = el('div', 'osd-sub osd-mode osd-mode-touch', '');
+    packBlock.append(el('div', 'osd-label', 'Pack'), this.osdPack, packBar, this.osdFlightTouch);
     this.osdHits = el('div', 'osd-sub osd-hits', '');
     packBlock.append(this.osdHits);
     this.osdSpeed = el('div', 'osd-value', '');
     this.osdFlight = el('div', 'osd-sub osd-mode', '');
     this.osdLaunch = el('div', 'osd-launch is-off', '');
+    /* The height as a number and two tails: the desk's "above the ground"
+     * and the phone's "up", which fits beside the speed on a small phone
+     * held sideways. The sheet shows one; only the number is written. */
     this.osdAlt = el('div', 'osd-sub', '');
+    this.osdAltNum = el('span', '', '');
+    this.osdAlt.append(this.osdAltNum, el('span', 'osd-alt-long', ' above the ground'), el('span', 'osd-alt-short', ' up'));
     this.osdThrBar = el('div', 'bar-fill warm');
     const thrBar = el('div', 'bar');
     thrBar.append(this.osdThrBar);
@@ -5152,6 +5231,48 @@ export class Ui {
       this.musicDock.classList.toggle('under-chip', Boolean(bug));
     }
     this.syncMusicDock();
+    if (this.screen !== 'flight') {
+      this.syncChipFade(false);
+    }
+  }
+
+  /*
+   * THE FLIGHT CHIPS FADE (POLISH-PLAN.md item 12; the owner, 2026-09-27:
+   * "yes fade the chips too"). A real feed carries the OSD and nothing
+   * else, so the music dock, Report bug and Pause go after about three
+   * seconds in the air, and come back when the quad is down again (landed,
+   * perched, set down, on its back), on the pause screen, and the moment a
+   * pointer moves or a finger lands anywhere but on a thumb stick.
+   *
+   * From the frame loop with the Weight slider's own aloft test, and it
+   * does nothing a frame but compare two times: the fade is the sheet's
+   * transition on one class on the root, written on a change only.
+   *
+   * FADED, NOT GONE. Only the opacity goes: every chip still takes its
+   * click and its tap where it stands, so a thumb that knows where Pause
+   * is still pauses, and Escape and F8 never depended on a chip. There is
+   * no pause button on a radio in flight to keep working; a radio pilot
+   * pauses on Escape, and gets the chips back by landing or pausing.
+   */
+  syncChipFade(aloft, nowMs = performance.now()) {
+    if (!aloft || this.screen !== 'flight') {
+      this.chipsAloftAt = null;
+      this.setChipsQuiet(false);
+      return;
+    }
+    if (this.chipsAloftAt == null) {
+      this.chipsAloftAt = nowMs;
+    }
+    const from = Math.max(this.chipsAloftAt, this.chipsWokeAt);
+    this.setChipsQuiet(nowMs - from >= CHIPS_QUIET_MS);
+  }
+
+  setChipsQuiet(on) {
+    if (this.chipsQuiet === on) {
+      return;
+    }
+    this.chipsQuiet = on;
+    this.root.classList.toggle('chips-quiet', on);
   }
 
   /*
@@ -7083,6 +7204,7 @@ export class Ui {
           action: 'rates',
           note: 'How far the sticks go, and the throttle limit. Yours, not the tune\'s. Changing them here leaves the quad where it is and the clock running.',
         },
+        weightItem(s),
         feelItem(),
         { label: 'Elsewhere', section: true },
         {
@@ -8600,7 +8722,7 @@ export class Ui {
     range.className = 'row-range';
     range.min = String(it.range.min);
     range.max = String(it.range.max);
-    range.step = '1';
+    range.step = String(it.range.step || 1);
     range.value = String(it.num.cli);
     range.setAttribute('aria-label', it.label);
     range.addEventListener('pointerdown', (e) => {
@@ -10546,7 +10668,8 @@ export class Ui {
      * pack are what the player paused to look at. */
     this.syncFrame();
     this.osd.style.display = screen === 'flight' || screen === 'paused' ? '' : 'none';
-    this.osd.className = screen === 'paused' ? 'osd dim' : 'osd';
+    /* A toggle, not a className: setOsd keeps is-free on the same node. */
+    this.osd.classList.toggle('dim', screen === 'paused');
     this.pauseAirSlider(screen);
     /* The score follows the OSD onto and off the screen, but only in
      * freestyle: a race has no score and an empty Score 0 over a lap timer
@@ -11558,6 +11681,13 @@ export class Ui {
 
   setOsd({ mode, lapMs, lastLapMs, gate, gateCount, gateCue, volts, packFrac, altitude, speedKph, throttle, flightMode, bounces, launchState, launchPitch, ghostGapMs, ghostFinal, runState, runRemainMs, runTimed, runScored }) {
     const freestyle = mode === 'freestyle';
+    /* A freestyle clock has no gate line and no records under it, so on a
+     * phone the banner can hang higher: see THE PHONE OSD in index.html.
+     * Written on a change only. */
+    if (this.osdFree !== freestyle) {
+      this.osdFree = freestyle;
+      this.osd.classList.toggle('is-free', freestyle);
+    }
     /* Before the first gate there is no lap to time, so the clock reads
      * zero and dims rather than showing a row of dashes. */
     const running = lapMs != null && Number.isFinite(lapMs);
@@ -11630,11 +11760,13 @@ export class Ui {
     Ui.klass(this.osdSpeed, speedKph == null ? 'osd-value is-off' : 'osd-value');
     Ui.text(this.osdSpeed, speedKph == null ? '' : `${speedKph.toFixed(0)} km/h`);
     if (this.osdFlight) {
-      Ui.text(this.osdFlight, flightMode === 'turtle'
+      const modeText = flightMode === 'turtle'
         ? 'Turtle'
         : (launchState === 1 || launchState === 2
           ? 'Launch'
-          : (flightMode === 'angle' ? 'Angle' : 'Acro')));
+          : (flightMode === 'angle' ? 'Angle' : 'Acro'));
+      Ui.text(this.osdFlight, modeText);
+      Ui.text(this.osdFlightTouch, modeText);
     }
     if (this.osdLaunch) {
       const on = launchState > 0;
@@ -11651,7 +11783,7 @@ export class Ui {
         Ui.text(this.osdLaunch, deg > 2 ? `LAUNCH ${deg}` : 'LAUNCH');
       }
     }
-    Ui.text(this.osdAlt, `${altitude.toFixed(1)} m above the ground`);
+    Ui.text(this.osdAltNum, `${altitude.toFixed(1)} m`);
     Ui.bar(this.osdThrBar, throttle);
     if (this.osdHits) {
       /*
@@ -11671,6 +11803,7 @@ export class Ui {
         this.osdHits.textContent = bounces === 1 ? '1 bounce' : `${bounces} bounces`;
         this.osdHits.className = 'osd-sub osd-hits';
       }
+      Ui.text(this.osdHitsTouch, this.osdHits.textContent);
     }
   }
 
@@ -12446,8 +12579,17 @@ export class Ui {
    * carries is-aloft while the quad flies and the sheet does the fade, so
    * nothing here runs per frame beyond the cached class write. It stays up
    * while its card is, because the card is pointing at it.
+   *
+   * ON GLASS THE CARD WAITS FOR THE GROUND. `touch` is the thumb sticks
+   * flying. There the slider sits between the plates and fades the moment
+   * the quad is in the air, card or no card (POLISH-PLAN.md item 14: no
+   * Weight slider in flight on touch), and a card held up in the air was a
+   * panel over the middle of a phone's picture for eight seconds with both
+   * thumbs busy. So it is raised on the first time the quad is down again
+   * after some air, sitting still with the slider under it and a thumb
+   * free, and it retires, remembered, on the next takeoff.
    */
-  setAirSlider(show, ready = true, { airMs = 0, padFlying = false } = {}) {
+  setAirSlider(show, ready = true, { airMs = 0, padFlying = false, touch = false } = {}) {
     const air = this.osdAir;
     if (!air) {
       return;
@@ -12467,7 +12609,10 @@ export class Ui {
      */
     const dialog = Boolean(this.nameDialog && !this.nameDialog.hidden);
     if (!air.hint.hidden) {
-      if (!ready || padFlying || airMs - this.airHintAtMs >= AIR_HINT_AIR_MS) {
+      const done = touch
+        ? ready
+        : (!ready || padFlying || airMs - this.airHintAtMs >= AIR_HINT_AIR_MS);
+      if (done) {
         this.dismissAirHint();
       } else if (dialog) {
         /* Never drawn under a modal. Put away, not retired: it comes back
@@ -12492,7 +12637,8 @@ export class Ui {
      * collision is a layout problem and it is solved in the sheet, where the
      * card flips below the slider on a short screen.
      */
-    if (!this.airHintDone && air.hint.hidden && ready && !padFlying && !dialog && !airHintSeen()) {
+    const raise = touch ? (!ready && airMs > 0) : (ready && !padFlying);
+    if (!this.airHintDone && air.hint.hidden && raise && !dialog && !airHintSeen()) {
       air.hint.hidden = false;
       /* The first raise starts its eight seconds. A raise after a pause
        * keeps the stamp, so the pause does not buy the card more air. */
@@ -12505,8 +12651,10 @@ export class Ui {
 
   /*
    * Off the screen, the card is put away rather than retired, so it is
-   * never drawn through the pause menu or a dialog over it. The slider
-   * itself comes back on the pause screen: see setAirSlider.
+   * never drawn through the pause menu or a dialog over it. On the pause
+   * screen the Weight is the menu's own row (weightItem), and the sheet
+   * puts this slider away under the dimmed OSD; is-aloft comes off so it
+   * is up again the moment the pilot resumes on the ground.
    */
   pauseAirSlider(screen) {
     const air = this.osdAir;

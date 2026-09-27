@@ -230,6 +230,10 @@
       .osd-left { left: 22px; }
       .osd-right { right: 22px; text-align: right; }
       .osd-mode { letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber); }
+      /* The phone's copy of the mode, in the pack's line, its bounce count,
+         under the clock, and its short height: all off here and on under
+         .touch-fly-on. */
+      .osd-mode-touch, .osd-alt-short, .osd-hits-touch { display: none; }
       .osd-launch {
         position: absolute; left: 50%; top: 16%;
         transform: translate(-50%, 0);
@@ -1105,7 +1109,9 @@
        * paused, so the fade is this transition and nothing runs per frame.
        * Visibility follows the opacity out, so a faded track takes no
        * pointer and no thumb; the card above it is not faded, because it
-       * is up only while the slider is.
+       * is up only while the slider is. On the pause screen the menu has
+       * its own Weight row, and this one waits under it: see NOT ON THE
+       * PAUSE SCREEN below.
        */
       .osd-air-row, .osd-air-cap {
         transition: opacity 0.25s ease, visibility 0s linear 0s;
@@ -1272,12 +1278,16 @@
         box-shadow: inset 0 0 0 1px rgba(232, 168, 184, 0.55);
       }
       .touch-nub { width: 24px; height: 24px; }
-      /* Under the bug chip, same right edge: the two chips a pilot needs in
-         flight on glass, stacked where the right thumb flicks up to. The
-         two-class selector is load-bearing: .bug-chip sets top 16px LATER
-         in this sheet, and a bare .touch-pause lost to it and stacked the
-         two chips on the same pixels. */
-      .touch-fly .touch-pause { top: 52px; }
+      /* The top right corner itself, where the right thumb flicks up to.
+         It sat under the bug chip; the bug chip waits on the pause screen
+         in flight on glass now (see THE PHONE OSD below), so Pause is the
+         one chip up there and the speed line runs up to it. The two-class
+         selector is load-bearing: .bug-chip sets top 16px LATER in this
+         sheet, and a bare .touch-pause lost to it and stacked the two chips
+         on the same pixels. */
+      .touch-fly .touch-pause {
+        top: 8px; right: max(12px, env(safe-area-inset-right));
+      }
       /* The rotate hint, only while the sticks are up and the phone is
          tall. It does not block anything: the sticks still work, the hint
          just says why everything is cramped. */
@@ -1296,46 +1306,159 @@
       }
       .turtle-on .touch-rotate { display: none !important; }
       /*
-       * While the thumb sticks are up, the OSD corners STACK in the centre
-       * column: the doubled plates own both lower corners outright, and
-       * two side-by-side corner blocks no longer fit between them on a
-       * common phone width (an 800 px landscape leaves 264 px of gap).
-       * Stacked and centred they need one column 170 px wide, which every
-       * phone this runs on has. The timer drops a size for the same
-       * reason.
+       * THE PHONE OSD, IN THE TWO TOP CORNERS (POLISH-PLAN.md item 14).
+       *
+       * While the thumb sticks were up, the corners STACKED in one centre
+       * column: pack, speed, height, throttle and the Weight slider up to
+       * about 270 px of a 390 px screen, over the gate, with the launch
+       * banner drawn on the lap clock. The doubled plates own both lower
+       * corners, and on a phone the middle of the picture is all the
+       * picture there is. So each corner is one line along the top edge,
+       * where a real OSD keeps its numbers, and the middle third of the
+       * picture carries nothing at all:
+       *
+       *   the left, the pack: its volts, its charge bar and the flight mode;
+       *   the right, speed and height, running up to Pause, which has the
+       *   corner itself.
+       *
+       * The bounce count, when there is one, goes under the clock with the
+       * last lap and the record: in the pack's line "2 bounces" took it
+       * past the first third of a 740 px phone.
+       *
+       * Two things go on glass. The THROTTLE bar, because the left plate's
+       * nub already draws the throttle channel, sticky, where the thumb is;
+       * and the PACK label, because "25.2 volts" beside a charge bar says
+       * what it is. The height reads "12.3 m up": "above the ground" is the
+       * desk's wording and does not fit beside the speed on a 740 px phone.
+       * The mode is a second node in the pack block, shown only here, so
+       * the desk's layout is untouched.
+       *
+       * The bug chip and the music dock wait on the pause screen, where
+       * both already are, and have their places back there: a chip over the
+       * left corner of the picture is a chip over the pack. Pause stays up,
+       * because it is how a thumb gets out of a flight.
        */
+      .touch-fly-on .music-dock,
+      .touch-fly-on .bug-chip.on-flight { display: none; }
       .touch-fly-on .osd-corner {
-        bottom: 8px; width: 170px; font-size: 13px;
-        text-align: center;
+        top: 13px; bottom: auto; width: auto; transform: none;
+        display: flex; align-items: center; gap: 8px;
+        white-space: nowrap; font-size: 12px;
       }
-      .touch-fly-on .osd-left { left: 50%; transform: translateX(-50%); bottom: 116px; }
-      .touch-fly-on .osd-right { right: auto; left: 50%; transform: translateX(-50%); }
-      .touch-fly-on .osd-timer { font-size: 30px; }
-      .touch-fly-on .osd-value { font-size: 16px; }
+      .touch-fly-on .osd-left { left: max(14px, env(safe-area-inset-left)); text-align: left; }
+      /* Clear of Pause: its 12 px from the edge, its 70 px, and a gap. */
+      .touch-fly-on .osd-right {
+        left: auto; right: calc(max(12px, env(safe-area-inset-right)) + 82px);
+        text-align: right;
+      }
+      .touch-fly-on .osd-corner .osd-label,
+      .touch-fly-on .osd-right .bar,
+      .touch-fly-on .osd-right .osd-mode { display: none; }
+      .touch-fly-on .osd-left .osd-mode-touch { display: block; }
+      .touch-fly-on .osd-value { font-size: 15px; }
+      .touch-fly-on .osd-corner .osd-sub { margin: 0; }
+      .touch-fly-on .osd-left .osd-hits { display: none; }
+      .touch-fly-on .osd-left .bar { flex: none; width: 36px; margin-top: 0; }
+      .touch-fly-on .osd-alt-long { display: none; }
+      .touch-fly-on .osd-alt-short { display: inline; }
       /*
-       * The air slider goes ABOVE the stacked corners rather than into them.
-       * Bottom 8px is the flight block and 116px is the pack block, and the
-       * pack block is about 70px of type and bar, so the centre column is
-       * spoken for up to roughly 186px. 196px clears it, and the doubled
-       * thumb plates own the two corners rather than the middle, so the
-       * width is there. Hidden on a portrait phone, where .touch-rotate is
-       * already saying the screen is the wrong way round and the plates
-       * shrink to reach across it.
+       * THE LAP CLOCK, TIGHTER, and the banner UNDER it. The label rides
+       * beside the clock, and the last lap, the record and the ghost share
+       * one line, so the block ends near 68 px instead of 128. The banner
+       * then hangs from 74 px, never over the clock, at a size read off the
+       * height rather than the width: 4.4vw was 30 px type on a phone held
+       * sideways, three lines over the clock and the gate. Two lines of it
+       * end above the first third of the height on every phone this was
+       * pictured on (740 by 360 is the tightest, 114 px against 120), and
+       * it is let out wide so a long second line stays one line: the
+       * freestyle prompt's "No clock and no gates. Gaps and close calls
+       * count as you fly them." wrapped to a third at 64vw and reached
+       * 139 px of 390. It hangs well below both corners' line, so the
+       * width costs nothing up there. width: max-content because a box at
+       * left 50% may only shrink to the half of the window to its right,
+       * which wrapped "Throttle up to take off" at 195 px on an upright
+       * phone.
+       *
+       * The launch control call (.osd-launch) is not drawn here: the banner
+       * says the same words, LAUNCH and GO, in this same place, and two of
+       * them would land on each other.
        */
-      .touch-fly-on .osd-sticks { bottom: 196px; }
+      .touch-fly-on { --banner-size: clamp(15px, 4.6vh, 19px); }
+      .touch-fly-on .osd-top { top: 6px; }
+      .touch-fly-on .osd-clock {
+        display: flex; align-items: baseline; justify-content: center; gap: 6px;
+      }
+      .touch-fly-on .osd-clock .osd-label { margin: 0; }
+      .touch-fly-on .osd-timer { font-size: 28px; }
+      .touch-fly-on .osd-gate { font-size: 13px; margin-top: 2px; white-space: nowrap; }
+      .touch-fly-on .osd-records {
+        display: flex; justify-content: center; gap: 10px; white-space: nowrap;
+      }
+      .touch-fly-on .osd-records > * { font-size: 12px; margin-top: 2px; }
+      .touch-fly-on .osd-records > :empty { display: none; }
+      .touch-fly-on .osd-records .osd-hits-touch:not(:empty) { display: block; }
+      .touch-fly-on .banner {
+        top: 74px; transform: translateX(-50%);
+        width: max-content; max-width: min(88vw, 42em);
+        line-height: 1.2;
+      }
+      .touch-fly-on .banner.panel { padding: 8px 14px; }
+      /* A freestyle clock has no gate line and no record under it, only a
+         bounce count once there is one, so the banner hangs from 58 px, and
+         the yard's prompt, three lines on a 740 px phone however wide it is
+         let out, still ends above the first third (118 px of 120). A little
+         narrower, to pass inside SCORE on the left. */
+      .touch-fly-on .osd.is-free ~ .banner { top: 58px; max-width: min(80vw, 42em); }
+      .touch-fly-on .osd-launch { display: none; }
+      /*
+       * THE WEIGHT SLIDER, landed only, at the bottom between the plates.
+       * It fades in the air (is-aloft, the owner's answer of 2026-09-26),
+       * and on glass its first flight card waits for the first landing
+       * rather than holding it up in the air: see setAirSlider. On the
+       * ground it sits in the gap between the two plates, where the hands
+       * already are, clear of both plates and in the bottom third; the
+       * track has z-index 1 over the catchment, and a thumb landing beside
+       * it still falls through to the zone. The card hangs ABOVE it here
+       * (the short screen rule flips it below, off the glass), wide and
+       * short, for the one read it gets.
+       */
+      .touch-fly-on .osd-sticks { bottom: 6px; }
+      .touch-fly-on .osd-air-hint {
+        top: auto; bottom: calc(100% + 10px);
+        max-width: min(64vw, 480px);
+      }
+      .touch-fly-on .osd-air-hint::after {
+        top: auto; bottom: -5px;
+        box-shadow: inset -1px -1px 0 0 rgba(255, 212, 92, 0.42);
+      }
+      /*
+       * NOT ON THE PAUSE SCREEN, where the Weight is a row of the menu (see
+       * weightItem in src/ui/ui.js). The paused OSD is dimmed as a unit, and
+       * its opacity makes it a stacking context under the menu: the slider
+       * was drawn at 0.4 behind a screen that takes every pointer and every
+       * key, shown and out of reach. So it is put away there, on every
+       * device, and the row is the one control on that screen.
+       */
+      .osd.dim .osd-air-row, .osd.dim .osd-air-cap { visibility: hidden; }
       /* Portrait is the hinted-away state, but it still has to be tidy:
          the plates go back to the single size, because two doubled plates
-         are wider than the screen, and the corners go back to a split pair
-         riding above them. */
+         are wider than the screen. The two lines ride just above the
+         plates, one in each corner, because the top of an upright phone
+         has the clock, Pause and the score between them and no room for a
+         line either side; they stay out of the middle third of the height.
+         The slider stays off in flight, as it always was upright, and the
+         turn-sideways hint goes up out of the middle to the top third. */
       @media (orientation: portrait) {
         .touch-plate {
           width: clamp(112px, 30vmin, 168px);
           height: clamp(112px, 30vmin, 168px);
         }
         .touch-fly-on .osd-sticks { display: none; }
-        .touch-fly-on .osd-corner { bottom: 186px; }
-        .touch-fly-on .osd-left { left: calc(50% - 164px); transform: none; text-align: left; }
-        .touch-fly-on .osd-right { left: auto; right: calc(50% - 164px); transform: none; text-align: right; }
+        .touch-fly-on .osd-corner {
+          top: auto; bottom: calc(clamp(112px, 30vmin, 168px) + 44px);
+        }
+        .touch-fly-on .osd-right { right: max(14px, env(safe-area-inset-right)); }
+        .touch-rotate { top: 24%; }
       }
       /* Eleven pause rows do not fit a phone held sideways. The modal list
          scrolls rather than running off the glass; thumbs already know how. */
@@ -5033,6 +5156,28 @@
         background: rgba(16, 22, 17, 0.38);
       }
       .music-dock.is-muted { opacity: 0.5; }
+      /*
+       * THE CHIPS FADE IN FLIGHT (POLISH-PLAN.md item 12; the owner,
+       * 2026-09-27: "yes fade the chips too"). syncChipFade in
+       * src/ui/ui.js puts chips-quiet on the root after about three seconds
+       * in the air and takes it off on landing, on pause and on any pointer
+       * that is not a thumb on a stick, so the fade is these transitions
+       * and nothing runs per frame. Opacity only: a faded chip keeps its
+       * place and its pointer, and a tap where Pause stands still pauses.
+       * On a phone in flight the music dock and Report bug are already
+       * away (see THE PHONE OSD), so the one chip that fades there is the
+       * thumb sticks' Pause, beside the speed line. Two classes and three
+       * on the dock, to outrank the muted dock's half opacity.
+       */
+      .bug-chip.on-flight, .music-dock.on-flight, .touch-fly .touch-pause {
+        transition: opacity 0.25s ease;
+      }
+      .chips-quiet .bug-chip.on-flight,
+      .chips-quiet .music-dock.on-flight,
+      .chips-quiet .touch-fly .touch-pause {
+        opacity: 0;
+        transition: opacity 0.9s ease;
+      }
       .music-dock[hidden] { display: none; }
       .music-skip {
         appearance: none; border: 0; border-radius: 3px;
