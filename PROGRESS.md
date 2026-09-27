@@ -55008,3 +55008,48 @@ two families the pack now embeds. No code changed.
     where they did, no console errors
     npm run verify              not run: no physics, plant, ABI or build; the
                                 change is a picture and one line of a table
+
+## 2026-09-27 | shell, builder, deploy | The import map is written before the body, not after a HEAD
+
+The owner, with a pilot's report from Firefox 156 on Windows, opening a
+board course (`/sim/?map=custom&share=trk-2c92f2ef&...`): "Could not start.
+The specifier "three" was a bare specifier, but was not remapped to
+anything."
+
+### Root cause
+
+src/fresh.js (2026-09-25) writes the page's only import map, and the pages
+loaded it after a HEAD request for their own Last-Modified. A script
+inserted from a fetch callback does not block the parser or
+DOMContentLoaded, so the page parsed, DOMContentLoaded fired and extension
+content scripts were injected while the HEAD and the fresh.js fetch were in
+flight. Firefox accepts one import map, and only before the first module
+load; any module loaded in that gap, an extension's being the usual one,
+makes the page's map arrive too late and be refused. boot.js was imported by
+full URL and ran; main.js's `import 'three'` then had nothing to map it.
+Chromium merges a late map since 133, which is why no check here saw it.
+Not reproduced in Firefox, which this container does not have; the gap is
+measured below.
+
+### Fix
+
+The first lines of index.html, src/trackbuilder/index.html and
+src/share/orbit.html read the stamp from document.lastModified, the same
+header without the round trip, and document.write fresh.js into the head,
+parser blocking. The map is in the document before the parser reaches the
+body. With no Last-Modified, as on a checkout, the browser reports the
+current time, and a value within five seconds of now is taken as no stamp,
+which is what the HEAD path did when the header was missing. The stamp is
+the same base 36 seconds, so the addresses are unchanged. A module an
+extension injects at document_start would still come first, as it did with
+the static import maps before 2026-09-25.
+
+### RUN LOG
+
+    ordering, served with a 400 ms HEAD and fresh.js   import map in the
+                             document at DOMContentLoaded: true with this
+                             change, false with it stashed (the gap)
+    check:fresh              18 passed, 0 failed
+    lint:preload             up to date: boot 115, city 74, built 34; 223 served
+    lint:boot                9 of 9
+    npm run verify           not run: no physics, plant, ABI or build change
