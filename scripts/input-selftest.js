@@ -1288,6 +1288,148 @@ section('what the flight measured: a feel report\'s stick path is the flight\'s,
     kept !== null && kept.source === 'a radio' && im.flightReport() === null, JSON.stringify(kept));
 }
 
+section('a standard gamepad flies its sticks in the pilot\'s mode, not the radio guess: bug-aeb29de7, bug-6c81072b, bug-585786cd');
+{
+  /* The Standard Gamepad layout: 0 left right, 1 left down, 2 right right,
+   * 3 right down. A DualSense in Chrome, nothing saved. */
+  const std = (axes = [0, 0, 0, 0]) => ({ ...makePad(axes, 17, 'DualSense Wireless Controller (STANDARD GAMEPAD)'), mapping: 'standard' });
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  {
+    const pad = std();
+    const rig = new Rig(pad);
+    const im = rig.im;
+    rig.step();
+    check('nothing touched: throttle 0, every other channel 0',
+      im.channels.throttle === 0 && im.channels.roll === 0 && im.channels.pitch === 0 && im.channels.yaw === 0,
+      JSON.stringify(im.channels));
+    rig.ax(1, -1); rig.step();
+    check('Mode 2, left stick fully up: full throttle, nothing else', near(im.channels.throttle, 1) && im.channels.pitch === 0,
+      JSON.stringify(im.channels));
+    rig.ax(1, 0.6); rig.step();
+    check('left stick below centre is idle, not negative', im.channels.throttle === 0, JSON.stringify(im.channels));
+    rig.ax(1, 0); rig.ax(0, 1); rig.step();
+    check('left stick right is yaw right', near(im.channels.yaw, 1) && im.channels.roll === 0, JSON.stringify(im.channels));
+    rig.ax(0, 0); rig.ax(2, 1); rig.step();
+    check('right stick right is roll right', near(im.channels.roll, 1) && im.channels.yaw === 0, JSON.stringify(im.channels));
+    rig.ax(2, 0); rig.ax(3, 1); rig.step();
+    check('right stick pulled back is pitch up', near(im.channels.pitch, 1) && im.channels.throttle === 0, JSON.stringify(im.channels));
+    rig.ax(3, 0);
+    check('the standard layout is usable without the wizard, and not called calibrated',
+      im.mapUsable() === true && im.padSummary().calibrated === false);
+    const rep = im.mapReport();
+    check('a ticket says it is the standard layout, in which mode',
+      rep.map === 'standard' && rep.layout === 'standard' && rep.mode === 2 && rep.axes.throttle === 1 && rep.axes.yaw === 0,
+      JSON.stringify(rep));
+    im.setStickMode(1);
+    rig.ax(3, -1); rig.step();
+    check('Mode 1, right stick fully up: full throttle', near(im.channels.throttle, 1) && im.channels.pitch === 0,
+      JSON.stringify(im.channels));
+    rig.ax(3, 0); rig.ax(1, 1); rig.step();
+    check('Mode 1, left stick pulled back: pitch up', near(im.channels.pitch, 1) && im.channels.throttle === 0,
+      JSON.stringify(im.channels));
+    rig.ax(1, 0); rig.ax(2, 1); rig.step();
+    check('Mode 1, right stick right is still roll', near(im.channels.roll, 1), JSON.stringify(im.channels));
+    rig.ax(2, 0);
+  }
+  {
+    /* A throttle resting at the bottom of axis 3 and a yaw nobody touches
+     * are what the radio verdicts are looking for. On a pad they mean a
+     * thumb, and there is no guess about the order to be wrong. */
+    const pad = std([0, 0, 0, -1]);
+    const rig = new Rig(pad);
+    rig.run(6000);
+    const sum = rig.im.padSummary();
+    check('the radio guess\'s verdicts stay quiet on a standard pad',
+      sum.guessYawParked === false && sum.guessNoYaw === false, JSON.stringify(sum));
+  }
+  {
+    /* What the two DualSense reports carried: the AETR guess, saved from
+     * Check sticks and called calibrated. */
+    const storage = memoryStorage();
+    storage.setItem('webfpv_stick_map_v1', JSON.stringify({
+      roll: { axis: 0, center: 0, full: 1 },
+      pitch: { axis: 1, center: 0, full: -1 },
+      yaw: { axis: 3, center: 0, full: 1 },
+      throttle: { axis: 2, low: -1, high: 1 },
+      reverse: { roll: false, pitch: true, yaw: false, throttle: false },
+    }));
+    const pad = std();
+    const rig = new Rig(pad, storage);
+    rig.ax(1, -1); rig.step();
+    check('a saved AETR guess on a standard pad is set aside: left stick up is throttle',
+      near(rig.im.channels.throttle, 1) && rig.im.mapReport().map === 'standard', JSON.stringify(rig.im.channels));
+    check('and storage is left as it was, for the radio it may have been right for',
+      JSON.parse(storage.getItem('webfpv_stick_map_v1')).throttle.axis === 2);
+    const radio = makePad([0, 0, -1, 0], 4, 'AETR radio');
+    const rrig = new Rig(radio, storage);
+    rrig.ax(2, 1); rrig.step();
+    check('the same saved map on a radio still flies it', near(rrig.im.channels.throttle, 1)
+      && rrig.im.mapReport().map === 'calibrated', JSON.stringify(rrig.im.channels));
+  }
+  {
+    /* A pad the wizard has been through keeps exactly what the wizard
+     * learned, whichever sticks the pilot chose. */
+    const storage = memoryStorage();
+    storage.setItem('webfpv_stick_map_v1', JSON.stringify({
+      roll: { axis: 2, center: 0.004, pos: 1, neg: -1 },
+      pitch: { axis: 3, center: 0.004, pos: 1, neg: -1 },
+      yaw: { axis: 0, center: 0.004, pos: 1, neg: -1 },
+      throttle: { axis: 1, low: 0.004, high: 1, sprung: true },
+    }));
+    const pad = std();
+    const rig = new Rig(pad, storage);
+    rig.ax(1, 1); rig.step();
+    check('a wizard map on a standard pad is the pilot\'s: left stick DOWN was their throttle',
+      rig.im.channels.throttle > 0.99 && rig.im.mapReport().map === 'calibrated', JSON.stringify(rig.im.channels));
+  }
+  {
+    /* bug-aeb29de7's other half: M on the check step redrew the gimbals to
+     * agree with the wrong sticks. On a draft that is the standard layout,
+     * the mode moves the channels too. */
+    const pad = std();
+    const rig = new Rig(pad);
+    const im = rig.im;
+    rig.step();
+    check('Check sticks opens on the standard layout', im.startCalibrationCheck()
+      && im.calibration.draft.throttle.axis === 1 && im.calibration.draft.yaw.axis === 0);
+    im.reverseChannel('roll');
+    im.setStickMode(1);
+    const d = im.calibration.draft;
+    check('M moves the channels with the drawing: Mode 1 throttle on the right stick, pitch on the left',
+      d.throttle.axis === 3 && d.pitch.axis === 1 && d.roll.axis === 2 && d.yaw.axis === 0, JSON.stringify(d));
+    check('and a reversal the pilot made rides across', d.reverse.roll === true);
+    check('saving it makes it the pilot\'s own', im.acceptCalibration() && im.map.stored === true
+      && im.map.throttle.axis === 3 && im.mapReport().map === 'calibrated');
+    im.setStickMode(2);
+    rig.step();
+    check('which the mode no longer moves: it is theirs now', im.map.throttle.axis === 3);
+  }
+}
+
+section('a radio whose four axes include one that never moves: bug-338cd29b');
+{
+  /* The TX15's report: four axes, throttle parked, axis 3 reading 0. */
+  const pad = makePad([0, 0, -1, 0], 4, 'OpenTX TX15 Joystick');
+  const rig = new Rig(pad);
+  rig.im.startCalibration();
+  check('the centre step passes', rig.waitStep('sweep'));
+  for (const [i, lo, hi] of [[0, -1, 1], [1, -1, 1], [2, -1, 1]]) {
+    rig.ax(i, lo); rig.run(64); rig.ax(i, hi); rig.run(64); rig.ax(i, i === 2 ? -1 : 0); rig.run(64);
+  }
+  const hint = rig.view().hint;
+  check('three sticks swept and the fourth axis dead: the hint names axis 3 and where to fix it',
+    /Axis 3 has not moved/.test(hint) && /USB joystick/.test(hint), hint);
+  const wide = makePad([0, 0, -1, 0, 0, 0], 4, 'Six axis radio');
+  const wrig = new Rig(wide);
+  wrig.im.startCalibration();
+  wrig.waitStep('sweep');
+  for (const [i, lo, hi] of [[0, -1, 1], [1, -1, 1], [2, -1, 1]]) {
+    wrig.ax(i, lo); wrig.run(64); wrig.ax(i, hi); wrig.run(64); wrig.ax(i, i === 2 ? -1 : 0); wrig.run(64);
+  }
+  check('a radio with axes to spare keeps the plain count, since a still slider is normal',
+    /Full travel on 3 of 4/.test(wrig.view().hint), wrig.view().hint);
+}
+
 console.log(failed ? `\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);
 for (const f of fails) {
   console.log(`  FAIL ${f}`);

@@ -6865,8 +6865,9 @@ export class Ui {
          *
          * Four options fit inline as segments, which is the whole reason
          * modes 3 and 4 are offered: they are a row in a table rather than
-         * a code path, and the strip has room. The note says plainly that a
-         * radio does not need this, because a radio pilot who changes it
+         * a code path, and the strip has room. A standard gamepad flies it
+         * too until calibrated: see standardGuessMap in input.js. The note
+         * says plainly that a radio does not need this, because a radio pilot who changes it
          * expecting their transmitter to follow would be confused by a
          * setting that only redraws the screen for them.
          */
@@ -6875,9 +6876,10 @@ export class Ui {
           'Which stick is throttle and which is yaw, the way your radio is set up.'
           + ' Mode 2 is throttle on the left, which is what this page has always been.'
           + ' Mode 1 puts throttle on the right and pitch on the left.'
-          + ' This flies the THUMB STICKS and the KEYBOARD, which have no mode of their'
-          + ' own. A radio already applies its own mode before this page sees a stick,'
-          + ' so for a radio this only names the sticks drawn on screen.',
+          + ' This flies the THUMB STICKS, the KEYBOARD and a GAMEPAD that has not been'
+          + ' through Calibrate sticks, none of which has a mode of its own. A radio'
+          + ' already applies its own mode before this page sees a stick, so for a radio'
+          + ' this only names the sticks drawn on screen.',
           STICK_MODES,
           s.stickMode,
           (n) => `Mode ${n}`,

@@ -89,6 +89,81 @@ const DEFAULT_MAP = {
   throttle: { axis: 2, low: -1, high: 1 },
 };
 
+/*
+ * A GAMEPAD IS NOT A RADIO, AND THE AETR GUESS PUT ITS THROTTLE SIDEWAYS.
+ *
+ * DEFAULT_MAP is the order a transmitter in joystick mode reports. A pad the
+ * browser recognises reports `mapping === 'standard'`, and the Standard
+ * Gamepad layout is fixed by the Gamepad spec: axis 0 left stick right,
+ * 1 left stick down, 2 right stick right, 3 right stick down. Read through
+ * AETR that is roll and pitch on the LEFT stick, throttle on the right
+ * stick's horizontal and yaw on its vertical. Three tickets from the 25th
+ * and 26th are that one fact:
+ *
+ *   bug-aeb29de7  DualSense Edge: "Throttle/Yaw should be on left stick, but
+ *                 it's on the right stick. If you hit (M) then the Left stick
+ *                 is correct on the left BUT now controls pitch/roll."
+ *   bug-6c81072b  DualSense: "the right stick has vertical pitch and
+ *                 horizontal roll (or visa versa)... let it be customizeable"
+ *   bug-585786cd  DJI RC 2, a STANDARD GAMEPAD to Chrome: "It is impossible
+ *                 to have the throttle on my right vertical stick"
+ *
+ * A pad has no stick mode of its own, unlike a radio, so the pilot's mode
+ * setting is the only thing that can say which stick is the throttle, and
+ * it now does. The throttle is the sprung spec the wizard already writes for
+ * a gamepad (see noteThrottleSpring): zero at rest, full at the top, idle
+ * below centre.
+ */
+function standardGuessMap(mode) {
+  const sticks = stickChannels(mode);
+  const map = cloneMap({ ...DEFAULT_MAP, stored: false });
+  const place = (axis, ch) => {
+    if (ch === 'throttle') {
+      /* Up is -1 on the Standard Gamepad's vertical axes. */
+      map.throttle = { axis, low: 0, high: -1, sprung: true };
+      return;
+    }
+    /* Right is +1 for roll and yaw, and pulled back is +1 for pitch, which
+     * is the raw direction on both of the standard layout's axes. */
+    map[ch] = { axis, center: 0, pos: 1, neg: -1 };
+  };
+  place(0, sticks.left.horiz);
+  place(1, sticks.left.vert);
+  place(2, sticks.right.horiz);
+  place(3, sticks.right.vert);
+  map.guess = 'standard';
+  return map;
+}
+
+/*
+ * A SAVED MAP THAT IS STILL THE AETR GUESS, untouched.
+ *
+ * Check sticks opens the check step with whatever is flying as its draft,
+ * and Save writes it. On a gamepad before standardGuessMap that was the AETR
+ * guess, saved as the pilot's own and called calibrated from then on. Both
+ * DualSense reports above carry exactly that map. The wizard never writes
+ * one: it measures rest, so its centred channels carry pos and neg and its
+ * throttle carries the measured ends. On a standard pad, a map like this is
+ * the guess, and it is set aside in memory. Storage is left alone, because
+ * on a radio the same map is right.
+ */
+function isAetrGuess(map) {
+  if (!map) {
+    return false;
+  }
+  for (const ch of ['roll', 'pitch', 'yaw']) {
+    const m = map[ch];
+    const d = DEFAULT_MAP[ch];
+    if (!m || m.axis !== d.axis || m.center !== d.center || m.full !== d.full
+      || m.pos != null || m.neg != null) {
+      return false;
+    }
+  }
+  const t = map.throttle;
+  return Boolean(t && t.axis === DEFAULT_MAP.throttle.axis && t.low === DEFAULT_MAP.throttle.low
+    && t.high === DEFAULT_MAP.throttle.high && !t.sprung);
+}
+
 export const CAL_STEPS = ['center', 'sweep', 'throttle', 'roll', 'pitch', 'yaw', 'confirm'];
 
 /*
@@ -770,6 +845,26 @@ function calHint(c, travelled, need, gp, idleThrottle = 0, moving = null) {
     return 'Waiting until the reading is steady.';
   }
   if (c.step === 'sweep') {
+    /*
+     * A RADIO WITH EXACTLY FOUR AXES, ONE OF WHICH HAS NEVER MOVED AT ALL.
+     *
+     * bug-338cd29b, an OpenTX TX15 on an Android phone: "Doesn't recognize
+     * yaw". The report's four axes read roll, pitch and a parked throttle,
+     * and axis 3 read exactly 0. Every axis there is must be one of the
+     * four sticks, so a still one is a stick the radio is not sending, and
+     * no amount of stick moving on this screen will finish the step. Say
+     * which, and where the fix is. Only for a radio with no spare axis,
+     * because on one with switches and sliders a still axis is normal.
+     */
+    if (travelled === need - 1 && c.min && c.max && c.min.length === need) {
+      for (let i = 0; i < need; i += 1) {
+        if (c.max[i] - c.min[i] < 0.02) {
+          return `Axis ${i} has not moved at all. If you have moved every stick,`
+            + ' your radio is not sending that one: in its USB joystick settings,'
+            + ' give each of the four sticks a channel, then reconnect.';
+        }
+      }
+    }
     return travelled < need
       ? `Keep going. Full travel on ${travelled} of ${need} axes so far.`
       : 'Back to rest to continue.';
@@ -1029,7 +1124,12 @@ export class InputManager {
     this.harnessChannels = null;
     this.kbHoldMs = { roll: 0, pitch: 0, yaw: 0, w: 0, s: 0 };
     this.kbHoldDir = { roll: 0, pitch: 0, yaw: 0 };
-    this.map = this.loadMap();
+    /* ownMap is what the pilot saved, or the AETR default when they have
+     * not. map is what flies, and differs only for a standard gamepad. See
+     * syncGuess. */
+    this.ownMap = this.loadMap();
+    this.map = this.ownMap;
+    this.mapKey = 'own';
     this.padChoice = loadPadChoice();
     this.padPick = null;
     this.padPickQueued = null;
@@ -1070,9 +1170,9 @@ export class InputManager {
     this.holdFired = false;
     this.holdAt = 0;
     this.onKey = null; /* main.js hooks non stick keys here; (code, repeat) */
-    /* Which stick carries which channel, for the keyboard and for every
-     * gimbal this shell draws. A radio's mode lives in the radio. See
-     * stickmode.js. */
+    /* Which stick carries which channel, for the keyboard, an uncalibrated
+     * standard gamepad and every gimbal this shell draws. A radio's mode
+     * lives in the radio. See stickmode.js and standardGuessMap. */
     this.stickMode = DEFAULT_STICK_MODE;
     this.keyAxes = keyAxes(this.stickMode);
     this.throttleKeys = throttleKeys(this.stickMode);
@@ -1291,7 +1391,7 @@ export class InputManager {
    * than either answer.
    */
   noteThrottleParked(gp) {
-    if (this.mapSeenParked || this.map.stored) {
+    if (this.mapSeenParked || this.map.stored || this.map.guess === 'standard') {
       return;
     }
     const spec = this.map.throttle;
@@ -1351,7 +1451,9 @@ export class InputManager {
    * wrong thing to offer them.
    */
   noteGuessOrder(gp) {
-    if (this.map.stored || this.guessYawAlive) {
+    /* The standard layout is not a guess about the order: the spec fixes
+     * it. Nothing here or in the two beside it has anything to find. */
+    if (this.map.stored || this.map.guess === 'standard' || this.guessYawAlive) {
       return;
     }
     const n = Math.min(gp.axes.length, 8);
@@ -1445,7 +1547,7 @@ export class InputManager {
    * stall rested through it as far as anything can tell.
    */
   noteYawParked(gp, nowWall) {
-    if (this.map.stored || this.guessYawParked) {
+    if (this.map.stored || this.map.guess === 'standard' || this.guessYawParked) {
       return;
     }
     const spec = this.map.yaw;
@@ -1577,7 +1679,42 @@ export class InputManager {
    * what decides whether the menus let the sticks move left and right, and
    * whether the front page says anything at all. */
   mapUsable() {
-    return Boolean(this.map.stored || this.mapSeenParked);
+    return Boolean(this.map.stored || this.mapSeenParked || this.map.guess === 'standard');
+  }
+
+  /*
+   * WHICH MAP FLIES THIS PAD. The pilot's own, unless the pad is a standard
+   * gamepad and there is no own map or the own map is the saved AETR guess,
+   * in which case the standard layout in the pilot's stick mode. See
+   * standardGuessMap and isAetrGuess. Rebuilt only when the answer changes,
+   * so the map object a poll reads is stable between changes.
+   */
+  guessKey(gp) {
+    const own = this.ownMap;
+    const standard = Boolean(gp && gp.mapping === 'standard');
+    const mine = own.stored && !(standard && isAetrGuess(own));
+    return mine || !standard ? 'own' : `standard${this.stickMode}`;
+  }
+
+  /* The map a given pad would fly, without making it the one that flies.
+   * The pad picker previews every plugged-in pad through this. */
+  mapFor(gp) {
+    const key = this.guessKey(gp);
+    if (key === this.mapKey) {
+      return this.map;
+    }
+    return key === 'own' ? this.ownMap : standardGuessMap(this.stickMode);
+  }
+
+  syncGuess(gp) {
+    const key = this.guessKey(gp);
+    if (key === this.mapKey) {
+      return;
+    }
+    this.map = this.mapFor(gp);
+    this.mapKey = key;
+    /* Different axes, so the step measured on the old ones is not these. */
+    this.forgetAxisResolution();
   }
 
   /*
@@ -1599,11 +1736,17 @@ export class InputManager {
     if (!gp) {
       return null;
     }
+    this.syncGuess(gp);
     const m = this.map || {};
     const at = (ch) => (m[ch] && Number.isInteger(m[ch].axis) ? m[ch].axis : null);
     return {
       pad: shortPadName(gp.id),
-      map: m.stored ? 'calibrated' : 'guess',
+      /* 'standard' is the Standard Gamepad layout in the pilot's mode, and
+       * `layout` and `mode` say why: three tickets carried a gamepad flying
+       * the radio guess and nothing in them said it was a gamepad. */
+      map: m.stored ? 'calibrated' : (m.guess === 'standard' ? 'standard' : 'guess'),
+      layout: gp.mapping || 'none',
+      mode: this.stickMode,
       axes: { roll: at('roll'), pitch: at('pitch'), yaw: at('yaw'), throttle: at('throttle') },
       live: Array.from(gp.axes).slice(0, 16).map((v) => Math.round(v * 100) / 100),
       usable: this.mapUsable(),
@@ -1873,7 +2016,7 @@ export class InputManager {
          * lit card still come from the raw axes above, because they answer
          * "which device is this" and no mapping should get in the way.
          */
-        sticks: this.readGamepad(gp),
+        sticks: this.readGamepad(gp, this.mapFor(gp)),
       });
     }
     const chosen = cards.find((c) => c.chosen) || null;
@@ -2248,6 +2391,7 @@ export class InputManager {
     if (!gp) {
       return false;
     }
+    this.syncGuess(gp);
     const axes = snapshotAxes(gp);
     this.calibration = {
       step: 'confirm',
@@ -2261,6 +2405,9 @@ export class InputManager {
       steps: ['confirm'],
       /* So the screen can say which of the two things it is. */
       checkOnly: true,
+      /* The draft is the standard layout rather than anything the pilot
+       * saved, so the stick mode moves it. See setStickMode. */
+      fromGuess: this.map.guess === 'standard',
       draft: cloneMap(this.map),
     };
     return true;
@@ -2374,6 +2521,8 @@ export class InputManager {
      * buttons never assigned one and carries null, which is the same as
      * before this existed. */
     this.map = cloneMap({ ...c.draft, stored: true });
+    this.ownMap = this.map;
+    this.mapKey = 'own';
     /* New axes to watch, so the old axes' step is not this map's, and the
      * flight flown on the old map is not a flight on this one. */
     this.forgetAxisResolution();
@@ -2946,9 +3095,10 @@ export class InputManager {
   }
 
   /*
-   * THE PILOT'S STICK MODE, which reaches the keyboard and the thumb sticks
-   * and nothing else. A radio has already applied its own before the browser
-   * sees an axis, and the wizard learns whatever comes out of it.
+   * THE PILOT'S STICK MODE, which reaches the keyboard, the thumb sticks and
+   * an uncalibrated standard gamepad. A radio has already applied its own
+   * before the browser sees an axis, and the wizard learns whatever comes
+   * out of it.
    *
    * The spring centred channels are ZEROED on a change, and they have to be.
    * The keyboard integrates per channel: hold the arrow that was pitch,
@@ -2972,6 +3122,19 @@ export class InputManager {
     }
     if (this.touchSource && typeof this.touchSource.setStickMode === 'function') {
       this.touchSource.setStickMode(m);
+    }
+    /*
+     * A standard gamepad's guess follows the mode on the next poll, through
+     * syncGuess. The check step's draft is a copy and has to be told, or M
+     * there would do what bug-aeb29de7 describes: redraw the gimbals to
+     * agree with the wrong sticks and leave the channels where they were.
+     * The pilot's reversals ride across.
+     */
+    const c = this.calibration;
+    if (c && c.checkOnly && c.fromGuess) {
+      const draft = cloneMap(standardGuessMap(m));
+      draft.reverse = cloneReverse(c.draft.reverse);
+      c.draft = draft;
     }
     return m;
   }
@@ -2997,6 +3160,7 @@ export class InputManager {
     this.windowFlying = this.windowFlying && this.flying;
 
     const gp = this.firstGamepad();
+    this.syncGuess(gp);
     this.notePadRoster();
     /* The Gamepad object's own timestamp is the only honest statement of when
      * the browser last refreshed it. Counting its changes is how we find out

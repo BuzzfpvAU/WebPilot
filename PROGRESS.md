@@ -55008,3 +55008,104 @@ two families the pack now embeds. No code changed.
     where they did, no console errors
     npm run verify              not run: no physics, plant, ABI or build; the
                                 change is a picture and one line of a table
+
+## 2026-09-27 | input, board | A standard gamepad flies its own sticks in the pilot's mode, and the controller tickets on the board
+
+### What the board said
+
+The owner asked for the bug board's tickets and every controller issue on it
+addressed. `GET /api/bugs?limit=500`: 200 tickets, 25 open and 2 in
+progress. Most of the open ones are Flight feel survey replies, not
+controller faults. The controller ones:
+
+    bug-aeb29de7  JS, DualSense Edge: "Mode 2 isn't mode 2. Throttle/Yaw
+                  should be on left stick, but it's on the right stick. If
+                  you hit (M) then the Left stick is correct on the left BUT
+                  now controls pitch/roll."
+    bug-6c81072b  DualSense: "the right stick has vertical pitch and
+                  horizontal roll (or visa versa)... let it be customizeable"
+    bug-585786cd  DJI RC 2, which Chrome names STANDARD GAMEPAD: "impossible
+                  to have the throttle on my right vertical stick"
+    bug-338cd29b  OpenTX TX15 on an Android phone: "Doesn't recognize yaw"
+    bug-c9423f3e  Radiomaster Pocket in Firefox, in progress since the 24th,
+                  its fix live since 7d3f181 and waiting on the reporter
+
+Not controller faults, left alone: bug-d188ebf4 ("stuck in the
+stratosphere", flying up forever), bug-a51bc0ff (a menu that goes to the
+wrong screen, keyboard on an iPhone), and the Flight feel replies.
+
+### The fault, which is one fact
+
+Nothing in src/input ever read `gamepad.mapping`. A pad the browser
+recognises reports `'standard'`, and the Standard Gamepad layout is fixed by
+the spec: 0 left right, 1 left down, 2 right right, 3 right down. The AETR
+guess read through that layout is roll and pitch on the LEFT stick, throttle
+on the right stick's horizontal, yaw on its vertical. bug-aeb29de7 is that
+sentence word for word, and its M half is the check step: M cycles the stick
+mode, which on a pad only REDREW the gimbals, so the drawing came to agree
+with the wrong sticks and Save kept them.
+
+Both DualSense reports carry `map: 'calibrated'` with exactly the AETR guess.
+The wizard cannot write that map (it measures rest, so its channels carry
+pos and neg). Check sticks can: it opens with whatever is flying as the draft
+and Save stores it as the pilot's own. So the guess was being saved and
+called calibrated.
+
+### What changed
+
+- `standardGuessMap(mode)`: a standard pad with nothing of its own saved
+  flies the standard sticks in the pilot's stick mode. Throttle is the
+  sprung spec the wizard writes for a gamepad (zero at rest, full at the
+  top, idle below centre). The mode setting now reaches a pad, which is what
+  the DJI RC 2 pilot needed: Mode 1 puts the throttle on the right vertical.
+- `isAetrGuess`: a SAVED map that is still the untouched AETR guess is set
+  aside on a standard pad, in memory only. Storage is left alone because on
+  a radio the same map is right. The two DualSense pilots get correct sticks
+  on their next visit without doing anything.
+- The check step's M on a standard pad's guess moves the channels with the
+  drawing, and carries the pilot's reversals across. After Save the map is
+  theirs and the mode no longer moves it.
+- The three radio verdicts (throttle parked, no yaw, yaw parked) stay quiet
+  on the standard layout, which is not a guess about order. `mapUsable` is
+  true for it, so no red "not calibrated" row, and menu navigation uses the
+  mapped right stick the way a calibrated pad already did.
+- The pad picker previews each pad through the map that pad would fly
+  (`mapFor`), so a pad beside a radio is not drawn through the radio's map.
+- `mapReport` says `layout` (the browser's mapping) and `mode`, and `map`
+  can read `'standard'`. Three tickets carried a gamepad flying the radio
+  guess and nothing in them said it was a gamepad.
+- bug-338cd29b: on a radio with exactly four axes, the full range step
+  names an axis that has never moved once the other three are done, and says
+  the radio is not sending it. The report's four axes read roll, pitch, a
+  parked throttle and a flat 0. No code here can make a radio send a channel
+  it does not; this at least says so, where the pilot is stuck. Whether the
+  cause is the radio's USB joystick setup or Android exposing fewer axes is
+  not known; the 8 axis cap lead from 21 September is still open and was not
+  touched, because this report shows four axes, not nine.
+- Settings' Stick mode note and stickmode.js say a pad follows the mode now.
+
+### Not done, written down
+
+- No board writes. The fixes are not live until this reaches main and
+  deploys, and the practice since the 21st is to close a ticket only once
+  its fix is on webfpv.org/sim. Suggested resolutions are in the turn's
+  reply to the owner. bug-c9423f3e can be closed as fixed now: its fix has
+  been live since 7d3f181 and the reporter has not come back in three days.
+- A gamepad that is standard in one browser and not in another (Firefox on
+  Linux reports some pads with an empty mapping) still gets the AETR guess
+  there, and the wizard.
+
+### RUN LOG
+
+    node scripts/input-selftest.js   all 224 passed (200 before, 24 new:
+                                     the standard sticks in modes 2 and 1,
+                                     the saved guess set aside on a pad and
+                                     kept on a radio, a wizard map kept, the
+                                     check step's M, the verdicts quiet, the
+                                     TX15 hint and a six axis radio without it)
+    npm run lint:input               all 160 passed, 177 s. Its rig is a six axis
+                                     radio with an empty mapping, so this says the
+                                     radio path in the page is unchanged and says
+                                     nothing about a standard pad in the page; the
+                                     Node checks above are the only ones that see it
+    npm run verify                   not run: no physics, plant, ABI or build

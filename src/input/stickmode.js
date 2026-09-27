@@ -18,6 +18,12 @@
  * drawing of two sticks that disagrees with the sticks in your hands is
  * worse than no drawing.
  *
+ * A GAMEPAD IS THE THIRD INPUT WITH NO MODE OF ITS OWN. Until it has been
+ * through the wizard, a pad the browser reports as the Standard Gamepad
+ * layout flies the standard sticks in this mode: see standardGuessMap in
+ * input.js, and bug-aeb29de7, "Mode 2 isn't mode 2", for what it flew
+ * before.
+ *
  * The four modes are two independent swaps, which is why this is a table of
  * two booleans rather than four cases:
  *
