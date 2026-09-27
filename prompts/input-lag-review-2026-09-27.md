@@ -374,6 +374,160 @@ by editing the lint.
   the controller waits out a 200 ms hitch window for it.
 - Decide F6 with the owner.
 
+## Phase 3, the drastic ones, added on the owner's ask
+
+Opus's work took the queue out of the pipeline. What is left at 60 Hz is
+quantisation, and each item here removes one term of it. The chain on the
+owner's laptop, roughly: Chrome's gamepad sampling 0 to 16 ms, the page's
+poll up to 2, the wait for the frame that consumes the sample 0 to 16.7,
+the frame shown one vsync after it is drawn 16.7, the panel 5 to 30. Items
+are in the order to take them. 1 is a fix to make; 2 is a fix gated on a
+number from the owner's laptop; 3 is a question for the owner and not a
+change to make; 4 is an experiment on real hardware only; 5 is for the
+owner. The rules at the top of this file hold for all of them, and 2 and 3
+are input path work, so the verify-flight-model skill applies to them.
+
+### P3.1. Render the predicted pose, not the current one (about a frame)
+
+What. A frame shows the state at its own vsync time and is seen a vsync
+later, so the picture lags the simulation by one frame, always. The sim
+writes everything a one frame prediction needs into the state block
+(`src/native/sim_abi.h`: velocity in doubles 4 to 6, world frame; body
+angular rate in 11 to 13, body frame). At the render boundary, extrapolate
+the drawn pose forward to the presentation time: position plus velocity
+times dt, orientation rotated by the body rate times dt (quaternion times
+the exponential of half the rate vector, in the body frame, then converted
+once in `src/render/frame.js` as everything is). VR runtimes do exactly
+this. The error over one frame is invisible: a 3000 degree per second
+squared flick is 0.4 degrees off, three g is four millimetres.
+
+Why it is safe. Render only. The physics, the trace, the replay files and
+every determinism check are untouched, because nothing here feeds back.
+
+Fix.
+- The horizon is the time from this frame's timestamp to when it will be
+  seen: one display period, from F2's estimate (start at 16.7 ms), plus
+  the frame's own age when the callback runs late. Cap it at 25 ms so a
+  hitch does not throw the picture ahead.
+- Where the shell blends `statePrev` and `stateCurr` for the draw
+  (`src/main.js`, the interpolation the CLAUDE.md rule describes), add the
+  extrapolation after the blend, before the sim to three conversion.
+- Off when landed, perched, in the turtle flip, during the crash reset,
+  and when the plant's ground clearance is less than the extrapolated
+  descent (`__ground().above` is the shell's own reading): the picture
+  must never show the quad below the ground the sim says it is on. Off in
+  replays and the replay step capture (`tests/replay-test.js` checks the
+  buffer holds still across a capture), on the title, and for the harness
+  draw off path. A Settings row under Screen, on by default, so a pilot
+  who dislikes it can turn it off and a report can say whether it was on.
+- The chase cars, the ghost and the cars keep their own poses: their
+  relative error over a frame is a few millimetres and extrapolating them
+  too doubles the code for nothing.
+- The manga layer's impact frame and the lens shake read `stateCurr` and
+  are not touched.
+
+Prove it. A unit run: a synthetic state with constant velocity and rate,
+drawn twice a frame apart, moves by exactly velocity times the horizon and
+rotates by exactly the rate times the horizon. `npm run replay:test` (the
+capture holds still), `npm run lint:attract`, `npm run verify` with every
+value unchanged (no physics moved), and the shots of a lap with the row on
+and off, which should be indistinguishable in a still. What proves the
+latency is the owner: Input to screen does not measure this (it measures
+the browser's own pipeline), so the test is the sticks. Fly it.
+
+### P3.2. Read the radio over WebHID, not the Gamepad API (up to 16 ms)
+
+What. Chrome samples gamepads on its own 16 ms timer whatever the page's
+poll rate, so a stick move can sit 16 ms before the page can see it,
+eight on average. WebHID delivers the radio's own USB reports as events at
+the radio's rate, and a Radiomaster or any EdgeTX radio enumerates as a
+plain HID joystick. Chrome and Edge only; the WebHID blocklist protects
+keyboards, mice and FIDO keys, not joysticks.
+
+Gate. Do this only if the owner's next report says `stick.flight.padHzMax`
+is near 60 with the radio: that is the number that says Chrome's timer is
+the bottleneck. Near 250 or above, skip it.
+
+Fix.
+- A second radio source in `src/input/input.js`, named the way the sources
+  are named ("a radio over USB"), beside the Gamepad one, never replacing
+  it: the Gamepad API stays the default and the fallback.
+- Settings, Sticks: a row with a button, because `navigator.hid.
+  requestDevice` needs a click; filter on usage page 1, usages 4 and 5
+  (joystick, gamepad). On later boots `navigator.hid.getDevices()` reopens
+  a granted device with no prompt.
+- Parse the report descriptor from `device.collections` (each input
+  report's items carry usage, bit size, logical min and max) rather than
+  hard coding EdgeTX's layout; `inputreport` events give a DataView. Axes
+  become channels through the same calibration flow the Gamepad path uses,
+  and the calibration is per source, since the HID axis order is not the
+  Gamepad API's.
+- Each report is one sample on the existing timestamped queue, so the
+  physics and the RC grid see nothing new. `padHz` counts reports.
+- Linux needs a udev rule for hidraw access; show the one line in the row's
+  note when `requestDevice` returns nothing. Say plainly in the note which
+  browsers can.
+
+Prove it. `npm run input:selftest` with a captured EdgeTX report descriptor
+and a few captured reports as fixtures; `npm run lint:input`; the
+verify-flight-model procedure, with the trace unchanged (the source only
+makes samples); the owner's `padHzMax` before and after.
+
+### P3.3. The radio link's own quantisation in the plant (a few ms, the owner's)
+
+What. The shell resamples sticks onto a 250 Hz RC grid (`RC_HZ` in
+`src/main.js`), two milliseconds on average; 500 would halve it. And
+Betaflight's RC smoothing is compiled in and live in the catalog
+(`rc_smoothing_mode`, `rc_smoothing_auto_factor_rpy`, `rc_smoothing_
+setpoint_cutoff` and the rest), adding its filter delay exactly as a real
+quad does.
+
+Not a change to make. Both alter what the controller sees, so both move
+the trace: `RC_HZ` sets the RC frame interval feedforward and smoothing
+read, and the smoothing settings are the tune. That is a physics visible
+change under CLAUDE.md, and the feel accuracy they buy is the project's
+whole goal. Put it to the owner as a question: does a few milliseconds
+justify a link the real quad does not have? The smoothing settings the
+owner can already try alone, in the FC configurator screen, and say
+whether the feel is worth it. If the owner says yes to 500 Hz, it goes
+through the verify-flight-model procedure with the new hash recorded as a
+deliberate change.
+
+### P3.4. A render loop without vsync (uncertain, real hardware only)
+
+What. With the canvas desynchronized, driving the draw from a timer instead
+of requestAnimationFrame could present a frame as soon as the GPU finishes
+it, like a game with vsync off: about 8 ms average less, with tearing.
+Whether Chrome actually presents an off rAF frame before the next vsync is
+not known and cannot be tested in a container.
+
+Fix, as an experiment. Behind a URL flag (`?loop=timer`), never on by
+default: a `setTimeout` loop at the display period minus the GPU's
+measured time, drawing the same frame body. The contract holds as it does
+today: the accumulator takes the loop's capped dt, physics never reads
+frame time. Measure with Input to screen on the owner's laptop, flag on
+against off, twenty presses each. If the number does not move, Chrome
+presents at vsync regardless and the code comes out again. Do not merge it
+without the number.
+
+### P3.5. Hardware, which beats all of the above (for the owner)
+
+A 120 or 144 Hz display halves two terms of the chain at once, the wait
+for the consuming frame and the vsync after the draw, about 12 to 16 ms
+together. An external gaming monitor removes most of a laptop panel's own
+20 to 30 ms. A wired radio on a port with no hub matters less. None of
+this is code; it belongs in the wiki's page on latency if one is written,
+and in the Input to screen note ("at 60 Hz a frame is 17 ms of this").
+
+### Not worth doing for latency
+
+Physics in a worker: it isolates the sim from menu and GC jank, which is
+Stage 2's reason for it, and removes nothing from the chain. Polling the
+sticks faster than 2 ms: the browser's own sampling is the floor. A
+throwaway forward simulation to predict the dynamics as well as the pose:
+it needs a state snapshot added to the module ABI for a gain P3.1 already
+has to within a few millimetres.
+
 ## What this review could not see
 
 Real frame rates, photon latency, whether Linux or Windows Chrome honours

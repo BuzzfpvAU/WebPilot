@@ -56691,3 +56691,14 @@ the session's scratchpad (`review-probes.mjs`), on fd0bba1:
                  graphics low, demoted true, floorOverMs 0; then Low's own
                  factor walked to 0.55 by 20 s
     npm run verify   not run: nothing changed
+
+Added the same day, on the owner's ask ("are there any other things we can
+do, perhaps more drastic"): a Phase 3 in the plan with five more levers,
+each with what it removes from the chain and who decides it. Rendering the
+pose predicted to the presentation time (render only, about a frame);
+reading the radio over WebHID instead of Chrome's 16 ms gamepad timer,
+gated on the report's `padHzMax`; the 250 Hz RC grid and Betaflight's RC
+smoothing, which are the owner's question and not a change to make; a
+render loop without vsync as a real hardware experiment; and the display
+itself. With a note on what is not worth doing for latency: a physics
+worker, faster polling, a throwaway forward simulation.
