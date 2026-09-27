@@ -1711,9 +1711,9 @@ export function carDraw(el, parts, K) {
  * TREES, the town's three: the cherry (buildSakura), the green broadleaf
  * of its groves (buildGrove) as the street tree, and the cedar of its
  * plantations (buildCedar) as the pine. Same proportions, same tones by
- * height, same faceted blobs and seven sided whorls; laid out with this
- * module's own sine and square root, so the solids are the same bits in
- * every engine.
+ * height, same icosahedral blobs, shaded round as the town's now are
+ * (K.leaf), and seven sided whorls; laid out with this module's own sine
+ * and square root, so the solids are the same bits in every engine.
  *
  * Every blob holds a solid sphere of the drawn icosahedron's inradius
  * (0.7947 of its smaller radius, taken as 0.78), and every whorl the
@@ -1985,7 +1985,7 @@ export function treeDraw(el, parts, K) {
     K.cyl(wood, l.a, l.b, l.r, l.seg, l.rTop);
   }
   for (const b of t.blobs) {
-    K.blob(tones[b.tone], b.c, b.r, b.ry, b.spin);
+    K.leaf(tones[b.tone], b.c, b.r, b.ry, b.spin);
   }
   if (t.cones.length) {
     const T = K.THREE;

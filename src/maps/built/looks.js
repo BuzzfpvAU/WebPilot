@@ -56,7 +56,9 @@ import { sceneOf } from '../../trackbuilder/model.js';
  *                      (fogFor in ./index.js), which are sized to the plot.
  *   sky                the dome's three stops, how many painted steps it
  *                      is quantised to, and the two cloud layers' colours
- *                      and opacities, over buildSky's own.
+ *                      and opacities, over buildSky's own; cloudInk, where
+ *                      a time has it, the width in texels of an ink line
+ *                      round each cloud's lit layer (paintSky).
  *   hills              the painted ridges, far and near.
  *   ink, grade         the post pipeline's ink colour and anime grade.
  *   flats              what the kit multiplies every unlit material that is
@@ -146,22 +148,33 @@ export const TIMES = {
   },
 
   /*
-   * OVERCAST: flat. The sun a weak, pale, diffuse patch overhead with its
-   * shadow filtered soft, so things still stand on the ground but nothing
-   * casts an edge; the light is mostly the sky's, through the hemisphere,
-   * so the cel ramp's bands all but close up. A low grey violet sky and a
-   * fog of the same grey pulled in closer, clouds heavy and nearly opaque,
-   * the grade's saturation taken below neutral and its warmth out.
+   * OVERCAST: soft, not flat. The sun a weak, pale, diffuse patch overhead
+   * with its shadow filtered soft, so things still stand on the ground but
+   * nothing casts an edge; the light is mostly the sky's, through the
+   * hemisphere. A low grey violet sky and a fog of the same grey pulled in
+   * closer, the grade's saturation taken below neutral and its warmth out.
+   *
+   * The clouds are the anime overcast: heavy, pale masses a step LIGHTER
+   * than the sky they hang in, with a shaded underside and an ink line
+   * round them (cloudInk, see paintSky). Drawn darker than the sky, as they
+   * first were, they read as smudges on the lens. And the sun has a touch
+   * more of the light than it had (1.05 from 0.6), the hemisphere a touch
+   * less (2.3 from 2.55), so what faces up stands a little further from
+   * what faces sideways instead of closing to one flat lavender. Measured
+   * on Hibari Yard from the same camera, the plot comes out 3 percent
+   * brighter and a wall's two faces 5 levels further apart in 255, so
+   * `flats` still holds.
    */
   overcast: {
-    sun: { color: 0xe9e6f2, intensity: 0.6, at: [-30, 85, 40], soft: 6 },
+    sun: { color: 0xe9e6f2, intensity: 1.05, at: [-30, 85, 40], soft: 6 },
     fill: { color: 0xc4c9e0, intensity: 0.45, at: [40, 60, -30] },
     bounce: { color: 0xc6bed0, intensity: 0.22, at: [10, -18, 40] },
-    hemi: { sky: 0xe6e4f2, ground: 0xa7a0b3, intensity: 2.55 },
+    hemi: { sky: 0xe6e4f2, ground: 0xa7a0b3, intensity: 2.3 },
     fog: { color: 0xc9c6d6, near: 0.8, far: 0.86 },
     sky: {
       top: 0xb2afc7, mid: 0xc2bfd3, haze: 0xcecbd9, bands: 26,
-      cloud: 0xaaa7be, cloudOpacity: 0.55, cloudShade: 0x918ea8, cloudShadeOpacity: 0.45,
+      cloud: 0xdedce8, cloudOpacity: 0.94, cloudShade: 0x9d99b3, cloudShadeOpacity: 0.62,
+      cloudInk: 3,
     },
     hills: { far: 0xc6c3d6, near: 0xb8b5cb },
     ink: 0x3d3953,
@@ -324,6 +337,67 @@ export function paintSky(sky, T) {
     lit.material.opacity = T.sky.cloudOpacity;
     shade.material.color.set(T.sky.cloudShade);
     shade.material.opacity = T.sky.cloudShadeOpacity;
+    inkClouds(lit.material, T);
+  }
+}
+
+/*
+ * THE CLOUDS' INK LINE, for a time that asks for one (sky.cloudInk).
+ *
+ * Every puff's lit plane shares one material and one texture, the vendored
+ * cloudTex: white puffs on clear, the bottom trimmed flat. A time with ink
+ * draws that plane from a copy with a line round the whole outline: the
+ * plain shape stamped at `width` texels in sixteen directions and filled
+ * with the line's colour, then the plain shape laid over it. The plane's
+ * colour multiplies the texel, so the line's texel is the ink divided by
+ * the cloud, channel by channel, in the linear values the texture is read
+ * in (cloudTex is not sRGB), and the line comes out in the time's own ink.
+ * One copy per cloud, ink and width, kept; a time without ink puts the
+ * plain texture back, so the builder's preview can go round the times and
+ * golden draws what it always drew. Browser only: the table above stays
+ * plain data for Node.
+ */
+const INKED_CLOUDS = new Map();
+const PLAIN_CLOUDS = new WeakMap();
+function inkClouds(mat, T) {
+  if (!PLAIN_CLOUDS.has(mat)) {
+    PLAIN_CLOUDS.set(mat, mat.map);
+  }
+  const plain = PLAIN_CLOUDS.get(mat);
+  const width = T.sky.cloudInk;
+  let want = plain;
+  if (width && plain && plain.image && typeof document !== 'undefined') {
+    const ink = mat.color.clone().set(T.ink);
+    const key = `${mat.color.getHexString()}|${ink.getHexString()}|${width}`;
+    want = INKED_CLOUDS.get(key);
+    if (!want) {
+      const src = plain.image;
+      const cv = document.createElement('canvas');
+      cv.width = src.width;
+      cv.height = src.height;
+      const g = cv.getContext('2d');
+      for (let k = 0; k < 16; k += 1) {
+        const a = (k / 16) * 2 * Math.PI;
+        g.drawImage(src, width * Math.cos(a), width * Math.sin(a));
+      }
+      const byte = (c) => Math.round(255 * Math.min(1, c));
+      g.globalCompositeOperation = 'source-in';
+      g.fillStyle = `rgb(${byte(ink.r / mat.color.r)}, ${byte(ink.g / mat.color.g)}, ${byte(ink.b / mat.color.b)})`;
+      g.fillRect(0, 0, cv.width, cv.height);
+      g.globalCompositeOperation = 'source-over';
+      g.drawImage(src, 0, 0);
+      want = new plain.constructor(cv);
+      want.colorSpace = plain.colorSpace;
+      want.anisotropy = plain.anisotropy;
+      want.wrapS = plain.wrapS;
+      want.wrapT = plain.wrapT;
+      want.needsUpdate = true;
+      INKED_CLOUDS.set(key, want);
+    }
+  }
+  if (mat.map !== want) {
+    mat.map = want;
+    mat.needsUpdate = true;
   }
 }
 

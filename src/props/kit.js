@@ -494,7 +494,33 @@ const UNIT = {
   box: new THREE.BoxGeometry(1, 1, 1),
   ball: new THREE.IcosahedronGeometry(1, 1),
   blob: new THREE.IcosahedronGeometry(1, 0),
+  leaf: roundBlob(),
 };
+
+/*
+ * A canopy blob: the same icosahedron, with its normals taken from the
+ * sphere it stands for rather than from its faces. At detail 0 three.js
+ * gives every vertex its face's normal, so the cel ramp quantised each of
+ * the twenty facets on its own and a tree's canopy was a mosaic of lit and
+ * shaded triangles. Every vertex of the unit icosahedron is on the unit
+ * sphere, so its normal is its own direction, as the town's planet has it
+ * (src/maps/city/vendored/world/planet.js) and the town's own canopies now
+ * do (buildSakura and buildGrove, PATCH-world-trees.diff). The ramp gives
+ * each blob two or three clean bands; the outline keeps its facets, and
+ * bake() carries the normals through the blob's squash with the inverse
+ * transpose. Rubble and a sandbag keep the faceted blob.
+ */
+function roundBlob() {
+  const g = new THREE.IcosahedronGeometry(1, 0);
+  const p = g.attributes.position;
+  const n = g.attributes.normal;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i += 1) {
+    v.set(p.getX(i), p.getY(i), p.getZ(i)).normalize();
+    n.setXYZ(i, v.x, v.y, v.z);
+  }
+  return g;
+}
 const CYL = new Map();
 function unitCyl(seg) {
   let g = CYL.get(seg);
@@ -711,6 +737,14 @@ export class PropKit {
     _s.set(r, ry, r);
     _q.setFromEuler(new THREE.Euler(spin[0], spin[1], spin[2]));
     this.add(mat, UNIT.blob, new THREE.Matrix4().compose(_v, _q, _s));
+  }
+
+  /* A blob of a tree's canopy, shaded round: see roundBlob. */
+  leaf(mat, c, r, ry, spin) {
+    _v.set(c[0], c[1], c[2]);
+    _s.set(r, ry, r);
+    _q.setFromEuler(new THREE.Euler(spin[0], spin[1], spin[2]));
+    this.add(mat, UNIT.leaf, new THREE.Matrix4().compose(_v, _q, _s));
   }
 
   cone(mat, base, r, h, seg = 10) {
