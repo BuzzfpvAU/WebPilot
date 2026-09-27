@@ -68,6 +68,7 @@ import { GAP_MIN } from '../props/parts.js';
 import { startBlockDims, startBlockHeight, startBlockLaneOffset } from '../art/startblock.js';
 import { padsLayout } from '../props/course.js';
 import { placeDocument, topUnder, groundUnder, SUPPORT_TIE } from '../maps/built/place.js';
+import { addSolids } from '../props/solids.js';
 import { roadOf, nearestOn } from '../maps/built/road.js';
 import { trafficOf, DRIFT, roadKeepOut } from '../maps/built/traffic.js';
 import {
@@ -5427,6 +5428,69 @@ function suiteRecoverSpot() {
     restSpotAt(town, roofAt, rest, 15, 0, B.top + 1, out) && out.surface === B.top
     && !restSpotAt(town, roofAt, rest, 15, 0, B.top - 1, out));
   setCraftAirframe(airframeById('5inch').dims);
+
+  /*
+   * ROOM TO TAKE OFF. The owner, 2026-09-27: "if i crash under the base of a
+   * crane on a map i clip through the base of the crane, and get re
+   * positioned under the crane base stopping me from taking off again". The
+   * crane mast's bottom frame bar is a capsule 0.25 m up, 0.06 m round, and
+   * a parked five inch's hull fits under it with 0.014 m to spare, so a
+   * spot under it was clear at rest and was taken.
+   */
+  const fiveR = airframeById('5inch').dims.vHalfDown;
+  const canRise = (c, p) => c.hit(p.x, p.y, p.z, p.x, p.y + 2 * CRAFT_WORLD_R, p.z,
+    craftVerticalHalf(0), 0, 0, 0, 1, craftVerticalOffset()) < 0;
+  const bar = new Colliders();
+  bar.add('pole', -3, 0.25, 0, 3, 0.25, 0, 0.06);
+  bar.build();
+  check('a low bar\'s underside is clear at rest, which is how a craft was put there',
+    clearAt(bar, 0, fiveR, 0));
+  check('but under it is not somewhere to take off from, and a crash there is set down beside it',
+    !restSpotAt(bar, flat, fiveR, 0, 0, 1, out)
+    && findRestSpot(bar, flat, fiveR, 0, 0.1, 0, null, out) && canRise(bar, out) && Math.abs(out.z) > 0.06, spot());
+  const table = new Colliders();
+  table.addBox('wall', -1, 0.7, -1, 1, 0.75, 1);
+  table.build();
+  check('a table top 0.7 m up is room enough: under it is still a place to be set down',
+    findRestSpot(table, flat, fiveR, 0, 0.3, 0, null, out) && out.x === 0 && out.z === 0, spot());
+
+  /* The crane itself, on Hibari Yard: a crash anywhere round its foot, low
+   * or a metre up, having flown in from further out, is set down where the
+   * craft can climb. Searched the way the shell's setDownNearby does:
+   * round the crash, then round the last open air. */
+  const yardPlaced = placeDocument(normalize(starterMap()).doc);
+  const yardSolids = new Colliders();
+  addSolids(yardSolids, yardPlaced.solids);
+  yardSolids.build();
+  const crane = yardPlaced.items.find((it) => it.el.type === 'crane');
+  const yardAt = (x, z, fromY) => {
+    const h = groundUnder(yardPlaced.tops, x, z, fromY);
+    const t = yardSolids.topAt(x, z, fromY, 0.3);
+    return t > h ? t : h;
+  };
+  let asked = 0;
+  let setDown = 0;
+  let trappedAt = '';
+  for (let dx = -3.5; crane && dx <= 3.5; dx += 0.5) {
+    for (let dz = -3.5; dz <= 3.5; dz += 0.5) {
+      for (const cy of [0.1, 1.0]) {
+        asked += 1;
+        const d = Math.hypot(dx, dz) || 1;
+        const from = { x: crane.x + dx / d * (d + 2.5), y: 1.5, z: crane.z + dz / d * (d + 2.5) };
+        if (!findRestSpot(yardSolids, yardAt, fiveR, crane.x + dx, cy, crane.z + dz, from, out)
+          && !findRestSpot(yardSolids, yardAt, fiveR, from.x, from.y, from.z, from, out)) {
+          continue;
+        }
+        setDown += 1;
+        if (!canRise(yardSolids, out) && !trappedAt) {
+          trappedAt = `crash ${dx}, ${cy}, ${dz} from the crane, set down at ${spot()} under something`;
+        }
+      }
+    }
+  }
+  check('Hibari Yard\'s crane: every crash round its foot is set down, and where the craft can take off',
+    Boolean(crane) && !trappedAt && setDown === asked,
+    trappedAt || `${setDown} of ${asked} set down, all with room over them`);
 
   /*
    * A CRASH ON A ROAD IS SET DOWN ON THE VERGE, the owner's decision of

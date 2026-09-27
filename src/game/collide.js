@@ -3326,6 +3326,15 @@ export const THRASH_TRAVEL = 0.60;
  *     6.233 m for fifteen metres of it; a landing meets the box first, and
  *     a recovery that refused the overlap sent the craft back to the start
  *     line from most of that roof;
+ *   there is room over it to take off: the parked hull, lifted straight up
+ *     by TAKEOFF_ROOM, meets nothing. Clear at rest is not the same thing.
+ *     The owner, 2026-09-27: "if i crash under the base of a crane on a map
+ *     i clip through the base of the crane, and get re positioned under the
+ *     crane base stopping me from taking off again". Measured on Hibari
+ *     Yard: the mast's lowest frame bar runs round its foot 0.19 m up, a
+ *     parked five inch's hull stops 0.014 m under it, and a crash at the
+ *     foot of the mast was set down there, clear of everything and unable
+ *     to rise, 216 times in 2523 crash points around it;
  *   and it is on the pilot's side of everything: the straight line from
  *     `from`, the last place the craft's centre was in the open, to the
  *     parked craft goes through no solid. See segmentCrossesAny. `from` may
@@ -3361,6 +3370,14 @@ const FLAT_TOL = 0.5;
  * are float32 and the hull is float64, and exactly touching reads as clear
  * today, measured, but a rounding the other way would refuse a whole roof. */
 const SEAT_CLEAR = 0.001;
+/* How far the parked hull must be able to rise before it meets anything, in
+ * swept radii: a whole swept diameter, which is room to lift off the surface
+ * and lean the craft into a direction without an arm touching what is over
+ * it. It is a length about the aircraft for the reason the turtle's halo is,
+ * and both airframes are 0.1735 m swept in the world, so it is 0.347 m for
+ * either. Under a bench, a car or a lattice's bottom bar is refused; under a
+ * table, a deck or a room's ceiling is not. */
+const TAKEOFF_ROOM_SPAN = 2;
 
 /* Can a craft be set down on the surface under (px, pz), seen from fromY?
  * Writes the parked centre and the surface to `out` when it can. */
@@ -3379,7 +3396,8 @@ export function restSpotAt(colliders, surfaceAt, restHeight, px, pz, fromY, out)
   }
   let seat = s;
   if (colliders) {
-    const hull = (y) => colliders.hit(px, y, pz, px, y, pz, craftVerticalHalf(0), 0, 0, 0, 1, craftVerticalOffset());
+    /* The level hull at y, or swept from y up by `rise`. */
+    const hull = (y, rise = 0) => colliders.hit(px, y, pz, px, y + rise, pz, craftVerticalHalf(0), 0, 0, 0, 1, craftVerticalOffset());
     let kind = hull(seat + restHeight);
     if (kind >= 0 && colliders.hitMoving < 0 && colliders.hitIndex >= 0 && colliders.fbox[colliders.hitIndex] === 1
       && colliders.hitNy > 0.5 && colliders.hitPen === 0 && colliders.hitOverlap > 0
@@ -3388,6 +3406,9 @@ export function restSpotAt(colliders, surfaceAt, restHeight, px, pz, fromY, out)
       kind = hull(seat + restHeight);
     }
     if (kind >= 0) {
+      return false;
+    }
+    if (hull(seat + restHeight, r * TAKEOFF_ROOM_SPAN) >= 0) {
       return false;
     }
   }

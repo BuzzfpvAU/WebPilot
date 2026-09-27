@@ -54702,3 +54702,105 @@ On the merged tree:
                                 plant, ABI or build; the merge brings main's
                                 crash judgement per step, which main's own
                                 entries record as verified and approved
+
+## 2026-09-27 | recovery | A crash is never set down where the craft cannot take off
+
+### The report
+
+The owner, 27 September 2026: "if i crash under the base of a crane on a map
+i clip through the base of the crane, and get re positioned under the crane
+base stopping me from taking off again".
+
+### What was wrong
+
+Two things, measured on Hibari Yard's crane with the shell's own set down
+search (`findRestSpot` in `src/game/collide.js`) run headless over 2523 crash
+points round the crane's foot, 0.25 m apart out to 3.5 m, at 0.1, 0.4 and
+1.0 m up:
+
+- **The trap.** `restSpotAt` took a spot when the parked hull was clear of
+  every solid AT REST. The mast's bottom frame bar is a capsule 0.25 m up and
+  0.06 m round, so its underside is 0.19 m up, and a parked five inch's hull
+  stops 0.014 m under it. Clear at rest, so a crash at the foot of the mast
+  was set down under the bar, 216 times in the 2523, and the craft could not
+  rise. A pilot powering into the bar from below is not a crash (the
+  underside rule), so nothing moved it on.
+- **The ghost.** The crane's foot, a concrete pad 5.8 m square and 0.15 m
+  tall and a yellow base frame on it 2.9 m square to 0.25 m, is drawn only.
+  `craneDraw` says why: a crane turns freely, a turned box is inflated, so
+  nothing at its foot can be a solid block. That leaves the bar standing
+  over a 0.19 m slot the drawing fills with steel. A craft skids through the
+  pad and under the bar into the mast, which is the "clip through", and is
+  set down inside the drawing: with the trap fixed and nothing else, 1875 of
+  the 2523 set downs still had the hull inside the drawn pad or frame.
+
+### What changed
+
+`restSpotAt` has a third rule: the parked hull, swept straight up by two
+swept radii (`TAKEOFF_ROOM_SPAN`, 0.347 m on either airframe, both being
+0.1735 m swept in the world), meets nothing. Room to lift off and lean the
+craft into a direction. Under a bench, a car or a lattice's bottom bar is
+refused; under a table, a deck or a room's ceiling is not. It is the shell's
+recovery, not physics: the module, the plant and the world are untouched.
+
+Over the same 2523 crash points: 0 set down with anything within a metre
+over them, where it was 216 with the bar 0.014 m over the hull, and all 2523
+still set down, none sent to the line.
+
+`src/trackbuilder/selftest.js` suiteRecoverSpot has four new checks: a low
+bar's underside is clear at rest (which is how a craft got there), a crash
+under it is set down beside it with room to rise, a table 0.7 m up is still
+somewhere to be set down, and every crash round Hibari Yard's crane foot
+(450 points, the shell's two step search) is set down with room over it.
+With the new rule backed out, the second and fourth fail, the fourth naming
+a crash a metre from the mast set down under the frame bar.
+
+### Not changed yet: the crane's foot, put to the owner
+
+The ghost needs the foot to be solid, which changes every crane's solids and
+moves two runs in `tests/goldens/world.json`, and that golden is only
+rewritten when the owner approves the change meant to move them. Drafted and
+measured, not committed, waiting on the owner's answer:
+
+- 20 capsules per crane, `draw: false`, kind wall. Sixteen are a metre round,
+  lying along x and SUNK into the ground, each centred a metre under the
+  drawn top it reaches, so what shows is a low arch that turns with the crane
+  and is never outside the drawing: 11 for the pad, 5 for the base frame, 3 cm
+  of dip between neighbours. Four are a kerb, 0.075 m round, along the pad's
+  edges, because an arch comes down to nothing at its edge. Sampled every
+  centimetre in plan, no point of the solid stands above the drawing, and
+  along the mast's faces the solid stands at least 0.1995 m, over the bar's
+  0.19 m underside, so the slot is shut.
+- With it, of the 2523 set downs none has the hull inside the mast or on the
+  frame, and 2334 are fully clear of the drawn pad; the other 189 overhang
+  its edge by under 5 cm.
+- `check:world-golden`: two runs move. "along a scaffold board's underside"
+  is the same flight (559 contact steps, the same board) and only the
+  board's shape index moves, 1313 to 1333, because the crane comes before it
+  in the document. "a crane mast chord at 5 m/s" is a real change from step
+  3697: the craft that bounced off the chord falls onto the foot and not
+  through it, end speed 3.621 to 1.924 m/s.
+- `check:props` all passed and `check:clip` 942 passed with it in.
+
+### What went wrong
+
+- The clone was shallow, and `git merge-base HEAD origin/main` came back
+  empty, which CLAUDE.md says to stop on. `git fetch --unshallow` then
+  printed `forced update` for `main`. Both were the shallow clone: unshallowed,
+  9ed8b9c, the old tip, is an ancestor of 6210e59, and the branch is `main`.
+- The foot's first draft measured the base frame's width at the ground, not
+  at the pad's top where its drawing starts, which would have left the slot
+  3 cm under the bar. Caught by sampling the solid against the drawing before
+  any check ran.
+- The first run of the new checks did not load: `found` was already declared
+  in the suite, by the kerb check.
+
+### RUN LOG
+
+    npm run check:clip          946 passed, 0 failed (942 before, 4 new)
+      with the new rule backed out: 944 passed, 2 failed, the two above
+    npm run check:world-golden  all passed (the shell's search is not in the
+                                module; the foot, not committed, moves two)
+    npm run check:props         all passed, with the foot in
+    npm run verify              not run: no physics, plant, ABI or build
+    node scripts/shots.js       not run: asked of the owner, with flying it
