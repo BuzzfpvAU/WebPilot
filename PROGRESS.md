@@ -52550,3 +52550,49 @@ vertices each time.
     npm run lint:preload        up to date: boot 114, city 74, built 34, 222
     npm run check:fresh         18 passed, 0 failed
     npm run verify              not run: no physics, plant, ABI or build
+
+## 2026-09-27 | maps | The showpiece keeps the starter as it was, 56 elements
+
+### What changed
+
+`src/maps/built/showpiece.js`: the showpiece takes the starter's first 56
+elements, el-1 to el-56, rather than all of `starterMap()`. Nothing else.
+
+### Why
+
+Main's starter gained a 57th element on 26 September, the blue coupe, as
+el-57, and the showpiece writes its own rows from el-57. A trial merge of
+this branch into main (6a2cfb1 then 9ce6d61, in a scratch worktree, main
+and this branch untouched) put two el-57s in the showpiece: normalize
+renamed the drift course to el-77, both tandem cars then named the coupe as
+their road and sat parked, and check:props and check:roads each failed 2.
+
+The owner's answer, 27 September 2026, asked between renumbering the
+showpiece from el-58 and this: "freeze it at 56". The showpiece is a
+published document, on the board under trk-1b4a7d7a and baked into the
+front door, and renumbering would have changed it under both.
+
+### Checked
+
+On this branch, where the starter still has 56 elements, the normalized
+showpiece is byte for byte what it was. On a trial merge of this commit into
+main at 9ce6d61, in a scratch worktree, where the starter has 57: the
+showpiece normalizes with no repairs and is byte for byte the document
+published on the board, and the checks below pass, the tandem still 450.171
+ms apart and main's coupe holding its own gap behind the yard loop's drift
+car.
+
+### Not pushed
+
+The owner asked for nothing to be pushed to this repository on 27
+September 2026. This commit is on the local branch only.
+
+### RUN LOG
+
+    trial merge into main 9ce6d61, scratch worktree:
+      npm run check:props       all passed
+      npm run check:roads       all passed (15.2 s)
+      npm run check:clip        936 passed, 0 failed
+      npm run lint:preload      up to date: boot 115, city 74, built 34, 223
+    npm run verify              not run: a map document's element list, no
+                                physics, plant, ABI or build

@@ -8,10 +8,15 @@
  * it and change it. Like the starter it is a plain track document in the
  * builder's schema (schema.md, mode 'freestyle'), built here as data.
  *
- * THE STARTER IS UNDER IT, UNCHANGED. Every element of starterMap() is
- * here with its own id, so the bando falls down the same way, the
- * containers are the same colours and the yard loop's traffic drives the
- * same laps. What changes is the plot, 94 m deeper to the north to hold the
+ * THE STARTER IS UNDER IT, AS IT WAS. Its first 56 elements, el-1 to
+ * el-56, which were the whole of it when this map was made, are here with
+ * their own ids, so the bando falls down the same way, the containers are
+ * the same colours and the yard loop's traffic drives the same laps. What
+ * the starter grows by after that is NOT taken: the owner's call, on 27
+ * September 2026, when the starter gained a blue coupe as el-57 and it
+ * collided with this map's first row. This map is a published document, on
+ * the board under its fixed id and baked into the front door, and it does
+ * not change under anybody because the starter did. See FIRST. What changes is the plot, 94 m deeper to the north to hold the
  * course, which moves every world coordinate of the yard and is why this
  * is a second document rather than the starter grown: scripts/lib/
  * worldruns.js flies the starter for the world golden, and a starter
@@ -124,11 +129,14 @@ const WALL_OFF = HALF + 1.5 + 0.3 + 1.25;
 
 /*
  * The new elements, as [type, x, y, yaw, dims, extra], in the starter's
- * form. Their ids follow the starter's last, el-56, so the first row is
- * el-57. Written down rather than counted: a starter that grew would
- * otherwise renumber these and repaint the tandem, and as it is, its new
- * element would take el-57 too, normalize would rename the duplicate, and
- * the checks that want no repairs would say so.
+ * form. Their ids follow the starter's last as it was, el-56, so the first
+ * row is el-57. Written down rather than counted, and the starter is cut
+ * to the elements before it: a starter that grows moves nothing here. Its
+ * new elements are left out rather than renumbering these and repainting
+ * the tandem, which is what counting would do, or taking el-57 a second
+ * time, which is what the starter's blue coupe did before the cut: the
+ * tandem named the coupe as its road and sat parked, and the checks that
+ * want no repairs failed.
  */
 const FIRST = 57;
 function rows() {
@@ -223,6 +231,6 @@ export function showpieceMap() {
     createdUtc: '2026-09-26T00:00:00Z',
     modifiedUtc: '2026-09-26T00:00:00Z',
     field: { ...doc.field, depth: DEPTH },
-    elements: [...doc.elements, ...added],
+    elements: [...doc.elements.slice(0, FIRST - 1), ...added],
   };
 }
