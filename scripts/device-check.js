@@ -50,6 +50,7 @@
 
 import { openPage } from '../tests/lib/page.js';
 import { SETTINGS_KEY } from '../src/ui/ui.js';
+import { presetsForClass } from '../src/trackbuilder/presets.js';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -302,6 +303,200 @@ async function runResults(w, h) {
   }
 }
 
+/*
+ * THE FLIGHT OSD, ON A PHONE HELD SIDEWAYS (POLISH-PLAN.md item 14). With
+ * the thumb sticks up the OSD used to stack pack, speed, height, throttle
+ * and the Weight slider in one centre column, up to about 270 px of a 390 px
+ * screen, and the launch banner landed on the lap clock. Flown three
+ * times on each case:
+ *
+ *   on the pads, with the launch prompt up and the Weight slider out;
+ *   in the air, where the slider is gone;
+ *   paused, where the slider is a control a thumb can reach.
+ *
+ * The cases are the widest lines and the tallest clock. Hibari Yard, the
+ * shipped freestyle map, on the five inch, whose right corner carries the
+ * speed as well as the height and whose launch prompt has the longest
+ * second line; at the survey's phone and at the narrowest one pictured.
+ * And a race, through the Race room and the launch card, on the first
+ * shipped track, which is a whoop track, so on the whoop as input-check
+ * flies it: the lap clock with its gate line under it is the tallest the
+ * clock gets before the banner has to hang below it, on the shortest
+ * phone pictured.
+ *
+ * Asserted every time in flight: nothing drawn by the OSD or the banner
+ * reaches into the centre third of the picture (the middle third of the
+ * width AND of the height, the gate's cell; the target mark is the one
+ * thing meant to sit on the gate and is not counted), nothing of the OSD
+ * lies on a thumb plate, each corner is one line in its own outer third
+ * along the top, the banner hangs below the lap clock, the bug chip and
+ * the music dock are away, and Pause is up and takes a touch at its middle.
+ */
+const FLIGHT_CASES = [
+  ['yard', 844, 390],
+  ['yard', 740, 360],
+  ['race', 740, 360],
+];
+
+const FLIGHT_TRACK = {
+  ...presetsForClass('micro')[0],
+  id: 'trk-d3v1ce14',
+  name: 'Phone OSD check track',
+  modifiedUtc: '2026-09-26T00:00:00.000Z',
+};
+
+const FLIGHT_PROBE = (stage) => `(() => {
+  const stage = ${JSON.stringify(stage)};
+  const ui = window.__ui;
+  const W = innerWidth;
+  const H = innerHeight;
+  const bad = [];
+  const shown = (n) => {
+    for (let p = n; p && p !== document.body; p = p.parentElement) {
+      const cs = getComputedStyle(p);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) { return false; }
+    }
+    const r = n.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+  const meets = (a, b) => a.right > b.left + 0.5 && a.left < b.right - 0.5 && a.bottom > b.top + 0.5 && a.top < b.bottom - 0.5;
+  const name = (n) => (String(n.className || n.tagName) + ' ' + (n.textContent || '').trim().slice(0, 18)).trim();
+  const touches = (n) => {
+    const r = n.getBoundingClientRect();
+    const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return Boolean(e && (e === n || n.contains(e)));
+  };
+  const q = (s) => document.querySelector(s);
+  const air = q('.osd-air-row');
+  const range = q('.osd-air-range');
+  const bug = ui.bugChip;
+  if (stage === 'paused') {
+    if (ui.screen !== 'paused') { bad.push('the pause screen is not up'); }
+    if (!air || !shown(air)) {
+      bad.push('the Weight slider is not up on the pause screen');
+    } else {
+      for (let p = air; p && p !== document.body; p = p.parentElement) {
+        if (Number(getComputedStyle(p).opacity) < 1) { bad.push('the Weight slider is dimmed on the pause screen'); break; }
+      }
+      if (!touches(range)) { bad.push('the Weight slider cannot be touched on the pause screen'); }
+    }
+    if (!shown(bug)) { bad.push('the bug chip is not on the pause screen'); }
+    return JSON.stringify({ bad });
+  }
+  if (!document.getElementById('ui').classList.contains('touch-fly-on')) {
+    bad.push('the thumb sticks are not up');
+    return JSON.stringify({ bad });
+  }
+  const cell = { left: W / 3, right: (2 * W) / 3, top: H / 3, bottom: (2 * H) / 3 };
+  const plates = [...document.querySelectorAll('.touch-gimbal')].map((n) => n.getBoundingClientRect());
+  const bannerUp = ui.banner.style.opacity === '1' && ui.banner.textContent.trim() !== '';
+  /* What is drawn: a leaf, or a node with text of its own, the reading the
+   * lettering's centre() takes, plus the bars and the slider's track. */
+  const drawn = [...document.querySelectorAll('.osd *')].filter((n) => {
+    if (n.closest('.lock')) { return false; }
+    const own = [...n.childNodes].some((c) => c.nodeType === 3 && c.textContent.trim());
+    if (n.childElementCount && !own && !n.matches('.bar, input')) { return false; }
+    return shown(n);
+  });
+  if (bannerUp) { drawn.push(ui.banner); }
+  for (const n of drawn) {
+    const r = n.getBoundingClientRect();
+    if (meets(r, cell)) { bad.push(name(n) + ' is in the centre third, at ' + Math.round(r.left) + ',' + Math.round(r.top)); }
+    if (n !== ui.banner && plates.some((p) => meets(r, p))) { bad.push(name(n) + ' is on a thumb plate'); }
+  }
+  const pause = q('.touch-pause');
+  const pr = pause && shown(pause) ? pause.getBoundingClientRect() : null;
+  if (!pr) {
+    bad.push('Pause is not up');
+  } else if (!touches(pause)) {
+    bad.push('Pause does not take a touch at its middle');
+  }
+  if (shown(bug)) { bad.push('the bug chip is up in flight'); }
+  if (ui.musicDock && shown(ui.musicDock)) { bad.push('the music dock is up in flight'); }
+  for (const [sel, side] of [['.osd-left', 'left'], ['.osd-right', 'right']]) {
+    const n = q(sel);
+    const r = n.getBoundingClientRect();
+    if (r.height > 26) { bad.push('the ' + side + ' corner is ' + Math.round(r.height) + ' px tall, not one line'); }
+    if (r.top > H / 8) { bad.push('the ' + side + ' corner is not along the top, at ' + Math.round(r.top)); }
+    if (side === 'left' ? r.right > cell.left : r.left < cell.right) { bad.push('the ' + side + ' corner reaches into the middle third of the width'); }
+    if (pr && meets(r, pr)) { bad.push('the ' + side + ' corner is under Pause'); }
+  }
+  const clock = q('.osd-top').getBoundingClientRect();
+  if (bannerUp && ui.banner.getBoundingClientRect().top < clock.bottom - 0.5) {
+    bad.push('the banner is over the lap clock');
+  }
+  if (stage === 'pads') {
+    if (!bannerUp) { bad.push('the launch prompt is not up on the pads'); }
+    if (!air || !shown(air)) {
+      bad.push('the Weight slider is not up on the ground');
+    } else if (!touches(range)) {
+      bad.push('the Weight slider cannot be touched on the ground');
+    }
+  }
+  if (stage === 'air' && air && shown(air)) { bad.push('the Weight slider is up in the air'); }
+  return JSON.stringify({ bad });
+})()`;
+
+async function runFlight(kind, w, h) {
+  const race = kind === 'race';
+  const page = await openPage({
+    root,
+    width: w,
+    height: h,
+    touch: 1,
+    seed: [`try {
+      const k = ${JSON.stringify(SETTINGS_KEY)};
+      const s = JSON.parse(localStorage.getItem(k) || '{}');
+      s.graphics = 'low';
+      s.graphicsAuto = false;
+      s.airframe = ${JSON.stringify(race ? 'whoop65' : '5inch')};
+      ${race ? '' : "s.map = 'built';"}
+      localStorage.setItem(k, JSON.stringify(s));
+      ${race ? `localStorage.setItem('webfpv.trackbuilder.library.v1', ${JSON.stringify(JSON.stringify({ [FLIGHT_TRACK.id]: FLIGHT_TRACK }))});` : ''}
+      /* The Weight card is its own once in a browser's life, and not the
+       * layout this measures. */
+      localStorage.setItem('webfpv.airhint.v2', '1');
+    } catch (e) { /* Storage refused. The flight then fails to start, and says so. */ }`],
+  });
+  const out = {};
+  try {
+    await page.until('window.__shellReady === true', 90000);
+    await page.until('!!window.__ui', 10000);
+    if (race) {
+      await page.evaluate(`(() => { const ui = window.__ui; ui.firstRun = false; ui.craftGate = false; ui.mode = 'race';
+        ui.show('courses'); ui.act('local:${FLIGHT_TRACK.id}'); return 1; })()`);
+      await page.until("(() => { const m = window.__map(); return m.id === 'custom' && m.ready && m.mode !== 'freestyle' && m.gates > 0; })()", 90000);
+      await page.evaluate("window.__ui.act('fly'), 1");
+      await page.until("window.__ui.screen === 'launch'", 20000);
+      await page.tap('Enter');
+    } else {
+      await page.until("(() => { const m = window.__map(); return m.id === 'built' && m.ready; })()", 120000);
+      await page.evaluate(`(() => { const ui = window.__ui; ui.firstRun = false; ui.craftGate = false; ui.mode = 'freestyle';
+        ui.show('title'); ui.act('fly'); return 1; })()`);
+    }
+    await page.until("window.__ui.screen === 'flight' && window.__craftState().mode === 'flight' && document.getElementById('ui').classList.contains('touch-fly-on')", 60000);
+    await page.sleep(1500);
+    out.pads = JSON.parse(await page.evaluate(FLIGHT_PROBE('pads'))).bad;
+    await page.evaluate('window.__stick(0, 0, 0, 0.62), 1');
+    await page.sleep(2500);
+    await page.evaluate('window.__stick(0, 0, 0, 0.42), 1');
+    /* The fade is 0.6 s late and 0.8 s long, then visibility follows. */
+    await page.until("getComputedStyle(document.querySelector('.osd-air-row')).visibility === 'hidden'", 10000).catch(() => {});
+    out.air = JSON.parse(await page.evaluate(FLIGHT_PROBE('air'))).bad;
+    await page.evaluate("(() => { window.__ui.act('pause'); window.__ui.show('paused'); return 1; })()");
+    await page.until("document.getElementById('ui').classList.contains('touch-paused')", 10000).catch(() => {});
+    /* Back in by a 0.25 s transition, which on a software rasteriser over
+     * the yard is well over a second of wall clock. */
+    await page.until("getComputedStyle(document.querySelector('.osd-air-row')).opacity === '1'", 10000).catch(() => {});
+    out.paused = JSON.parse(await page.evaluate(FLIGHT_PROBE('paused'))).bad;
+  } catch (e) {
+    out.flow = [`the flow did not reach flight: ${e.message}`];
+  } finally {
+    await page.close();
+  }
+  return out;
+}
+
 async function runBuilder(label, mode, w, h) {
   const page = await openPage({ root, width: w, height: h, url: `/src/trackbuilder/index.html?mode=${mode}` });
   try {
@@ -351,6 +546,17 @@ async function main() {
     }
   }
 
+  console.log('\nthe flight OSD, on a phone held sideways with the thumb sticks up\n');
+  for (const [kind, w, h] of FLIGHT_CASES) {
+    const r = await runFlight(kind, w, h);
+    const where = `flight ${kind} ${w}x${h}`;
+    const all = Object.entries(r).flatMap(([stage, list]) => list.map((p) => `${stage}: ${p}`));
+    console.log(`  ${where.padEnd(34)} ${all.length ? `${all.length} problem(s)` : 'centre third, plates and clock clear on the pads, in the air and paused'}`);
+    for (const problem of all) {
+      failures.push(`${where} ${problem}`);
+    }
+  }
+
   if (failures.length) {
     console.log(`\nFAIL, ${failures.length} problem(s):`);
     for (const f of failures) {
@@ -358,7 +564,7 @@ async function main() {
     }
     return 1;
   }
-  console.log('\nPASS, every row and every note is reachable on every device, every builder bar control on a laptop, and the results page clear of its menu');
+  console.log('\nPASS, every row and every note is reachable on every device, every builder bar control on a laptop, the results page clear of its menu, and the flight OSD on a phone clear of the centre third');
   return 0;
 }
 

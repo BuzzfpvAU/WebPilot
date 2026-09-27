@@ -8165,6 +8165,12 @@ export async function boot({ loading, bootStart, mapId }) {
     if (frames > 2 && audioMs > worstAudioMs) {
       worstAudioMs = audioMs;
     }
+    /* The thumb sticks are flying: a device with touch points, in flight,
+     * with no gamepad connected. Read here, before the OSD, because the air
+     * slider's card behaves differently on glass. The overlay itself is
+     * shown and hidden on the same test further down, read again there
+     * because a run that ends in this frame has left flight by then. */
+    const touchFlying = Boolean(touch) && mode === 'flight' && ui.screen === 'flight' && !input.firstGamepad();
     if (mode === 'flight') {
       /*
        * Altitude is measured against the surface UNDER THE CRAFT, through the
@@ -8327,6 +8333,7 @@ export async function boot({ loading, bootStart, mapId }) {
           && (Math.abs(ch.roll) > PAD_FLYING_STICK
             || Math.abs(ch.pitch) > PAD_FLYING_STICK
             || Math.abs(ch.yaw) > PAD_FLYING_STICK),
+        touch: touchFlying,
       });
       updateTargetLock();
     } else if (mode !== 'paused') {
@@ -8378,6 +8385,9 @@ export async function boot({ loading, bootStart, mapId }) {
       }
       touch.setVisible(touchOn);
       uiRoot.classList.toggle('touch-fly-on', touchOn);
+      /* Paused on glass: the Weight slider comes up over the pause screen
+       * as a control a thumb can reach. See .touch-paused in index.html. */
+      uiRoot.classList.toggle('touch-paused', ui.screen === 'paused' && !input.firstGamepad());
       touch.paint();
     }
     uiRoot.classList.toggle('turtle-on', crashflipOn || turtleRecover);

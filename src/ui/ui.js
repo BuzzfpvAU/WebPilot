@@ -3688,20 +3688,42 @@ export class Ui {
      * when you are ahead of it, amber when it is ahead of you, the same
      * reading as everything else on this overlay: mint is the good news. */
     this.osdGhost = el('div', 'osd-ghost is-off', '');
+    /* The label and the clock, and the last lap, the record and the ghost,
+     * each in a wrapper of its own. On a desk the wrappers are plain blocks
+     * and change nothing; on a phone the sheet lays each one out as a line,
+     * so the clock ends high enough for the banner to hang under it. See
+     * THE PHONE OSD in index.html. The bounce count rides that line too on
+     * a phone, a second node off on a desk, because it is a count about the
+     * run like the lap and the record, and in the pack's corner it pushed
+     * the line into the middle of a 740 px phone. */
     const top = el('div', 'osd-top');
-    top.append(this.osdClockLabel, this.osdTimer, this.osdGate, this.osdLast, this.osdBest, this.osdGhost);
+    const clock = el('div', 'osd-clock');
+    clock.append(this.osdClockLabel, this.osdTimer);
+    const records = el('div', 'osd-records');
+    this.osdHitsTouch = el('div', 'osd-best osd-hits-touch', '');
+    records.append(this.osdLast, this.osdBest, this.osdGhost, this.osdHitsTouch);
+    top.append(clock, this.osdGate, records);
     this.osdPack = el('div', 'osd-value', '');
     this.osdPackBar = el('div', 'bar-fill');
     const packBar = el('div', 'bar');
     packBar.append(this.osdPackBar);
     const packBlock = el('div', 'osd-corner osd-left');
-    packBlock.append(el('div', 'osd-label', 'Pack'), this.osdPack, packBar);
+    /* The mode a second time, in the pack's line, for the phone: its top
+     * left corner is the pack and the mode, and the top right is speed and
+     * height up to Pause. Off on a desk, where the mode is under the speed. */
+    this.osdFlightTouch = el('div', 'osd-sub osd-mode osd-mode-touch', '');
+    packBlock.append(el('div', 'osd-label', 'Pack'), this.osdPack, packBar, this.osdFlightTouch);
     this.osdHits = el('div', 'osd-sub osd-hits', '');
     packBlock.append(this.osdHits);
     this.osdSpeed = el('div', 'osd-value', '');
     this.osdFlight = el('div', 'osd-sub osd-mode', '');
     this.osdLaunch = el('div', 'osd-launch is-off', '');
+    /* The height as a number and two tails: the desk's "above the ground"
+     * and the phone's "up", which fits beside the speed on a small phone
+     * held sideways. The sheet shows one; only the number is written. */
     this.osdAlt = el('div', 'osd-sub', '');
+    this.osdAltNum = el('span', '', '');
+    this.osdAlt.append(this.osdAltNum, el('span', 'osd-alt-long', ' above the ground'), el('span', 'osd-alt-short', ' up'));
     this.osdThrBar = el('div', 'bar-fill warm');
     const thrBar = el('div', 'bar');
     thrBar.append(this.osdThrBar);
@@ -10546,7 +10568,8 @@ export class Ui {
      * pack are what the player paused to look at. */
     this.syncFrame();
     this.osd.style.display = screen === 'flight' || screen === 'paused' ? '' : 'none';
-    this.osd.className = screen === 'paused' ? 'osd dim' : 'osd';
+    /* A toggle, not a className: setOsd keeps is-free on the same node. */
+    this.osd.classList.toggle('dim', screen === 'paused');
     this.pauseAirSlider(screen);
     /* The score follows the OSD onto and off the screen, but only in
      * freestyle: a race has no score and an empty Score 0 over a lap timer
@@ -11558,6 +11581,13 @@ export class Ui {
 
   setOsd({ mode, lapMs, lastLapMs, gate, gateCount, gateCue, volts, packFrac, altitude, speedKph, throttle, flightMode, bounces, launchState, launchPitch, ghostGapMs, ghostFinal, runState, runRemainMs, runTimed, runScored }) {
     const freestyle = mode === 'freestyle';
+    /* A freestyle clock has no gate line and no records under it, so on a
+     * phone the banner can hang higher: see THE PHONE OSD in index.html.
+     * Written on a change only. */
+    if (this.osdFree !== freestyle) {
+      this.osdFree = freestyle;
+      this.osd.classList.toggle('is-free', freestyle);
+    }
     /* Before the first gate there is no lap to time, so the clock reads
      * zero and dims rather than showing a row of dashes. */
     const running = lapMs != null && Number.isFinite(lapMs);
@@ -11630,11 +11660,13 @@ export class Ui {
     Ui.klass(this.osdSpeed, speedKph == null ? 'osd-value is-off' : 'osd-value');
     Ui.text(this.osdSpeed, speedKph == null ? '' : `${speedKph.toFixed(0)} km/h`);
     if (this.osdFlight) {
-      Ui.text(this.osdFlight, flightMode === 'turtle'
+      const modeText = flightMode === 'turtle'
         ? 'Turtle'
         : (launchState === 1 || launchState === 2
           ? 'Launch'
-          : (flightMode === 'angle' ? 'Angle' : 'Acro')));
+          : (flightMode === 'angle' ? 'Angle' : 'Acro'));
+      Ui.text(this.osdFlight, modeText);
+      Ui.text(this.osdFlightTouch, modeText);
     }
     if (this.osdLaunch) {
       const on = launchState > 0;
@@ -11651,7 +11683,7 @@ export class Ui {
         Ui.text(this.osdLaunch, deg > 2 ? `LAUNCH ${deg}` : 'LAUNCH');
       }
     }
-    Ui.text(this.osdAlt, `${altitude.toFixed(1)} m above the ground`);
+    Ui.text(this.osdAltNum, `${altitude.toFixed(1)} m`);
     Ui.bar(this.osdThrBar, throttle);
     if (this.osdHits) {
       /*
@@ -11671,6 +11703,7 @@ export class Ui {
         this.osdHits.textContent = bounces === 1 ? '1 bounce' : `${bounces} bounces`;
         this.osdHits.className = 'osd-sub osd-hits';
       }
+      Ui.text(this.osdHitsTouch, this.osdHits.textContent);
     }
   }
 
@@ -12446,8 +12479,17 @@ export class Ui {
    * carries is-aloft while the quad flies and the sheet does the fade, so
    * nothing here runs per frame beyond the cached class write. It stays up
    * while its card is, because the card is pointing at it.
+   *
+   * ON GLASS THE CARD WAITS FOR THE GROUND. `touch` is the thumb sticks
+   * flying. There the slider sits between the plates and fades the moment
+   * the quad is in the air, card or no card (POLISH-PLAN.md item 14: no
+   * Weight slider in flight on touch), and a card held up in the air was a
+   * panel over the middle of a phone's picture for eight seconds with both
+   * thumbs busy. So it is raised on the first time the quad is down again
+   * after some air, sitting still with the slider under it and a thumb
+   * free, and it retires, remembered, on the next takeoff.
    */
-  setAirSlider(show, ready = true, { airMs = 0, padFlying = false } = {}) {
+  setAirSlider(show, ready = true, { airMs = 0, padFlying = false, touch = false } = {}) {
     const air = this.osdAir;
     if (!air) {
       return;
@@ -12467,7 +12509,10 @@ export class Ui {
      */
     const dialog = Boolean(this.nameDialog && !this.nameDialog.hidden);
     if (!air.hint.hidden) {
-      if (!ready || padFlying || airMs - this.airHintAtMs >= AIR_HINT_AIR_MS) {
+      const done = touch
+        ? ready
+        : (!ready || padFlying || airMs - this.airHintAtMs >= AIR_HINT_AIR_MS);
+      if (done) {
         this.dismissAirHint();
       } else if (dialog) {
         /* Never drawn under a modal. Put away, not retired: it comes back
@@ -12492,7 +12537,8 @@ export class Ui {
      * collision is a layout problem and it is solved in the sheet, where the
      * card flips below the slider on a short screen.
      */
-    if (!this.airHintDone && air.hint.hidden && ready && !padFlying && !dialog && !airHintSeen()) {
+    const raise = touch ? (!ready && airMs > 0) : (ready && !padFlying);
+    if (!this.airHintDone && air.hint.hidden && raise && !dialog && !airHintSeen()) {
       air.hint.hidden = false;
       /* The first raise starts its eight seconds. A raise after a pause
        * keeps the stamp, so the pause does not buy the card more air. */
