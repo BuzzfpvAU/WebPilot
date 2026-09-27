@@ -55706,3 +55706,21 @@ corrections in its `docs/wiki-betaflight-2026-09.md`.
     npm run verify              not run: the catalog decides what the
                                 settings screen greys and what its notes
                                 say, not what flies
+
+## 2026-09-27 | Betaflight | Off the board's credits roll too
+
+### What changed and why
+
+The owner asked for Betaflight's logo to come off the board's credits roll
+as well. That roll is the board's copy of this simulator's credits, kept as
+a fallback for when the simulator cannot be reached (the board's Credits
+links open this simulator's #credits). The board's card now shows
+Betaflight's name, linked, and the licence line, with no logo, and the board
+no longer ships the file. These credits, in the game, keep the logo. NOTICE
+says so.
+
+### RUN LOG
+
+    documentation only here: NOTICE and this entry
+    board: npm test all passed; the roll looked at at 1440 and 430
+    npm run verify              not run: no code changed here
