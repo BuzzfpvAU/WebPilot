@@ -2923,10 +2923,10 @@ const CARD_PRESS_NOTE = 'Choose it to see what you can do with it, or double cli
  * The tune, as named choices.
  *
  * A tune is P, I, D, feedforward and filtering. One ships, and it is what a
- * freshly flashed quad flies; the other name on this row, when it is there,
- * is the pilot's own saved dump. Neither carries rates, which is why moving
- * between them changes how the quad settles and not how far the sticks go.
- * See configs/registry.js.
+ * freshly flashed quad flies but for four settings its file argues for; the
+ * other name on this row, when it is there, is the pilot's own saved dump.
+ * Neither carries rates, which is why moving between them changes how the
+ * quad settles and not how far the sticks go. See configs/registry.js.
  */
 /*
  * Changing what the quad flies re-inits the module, and re-initing puts the
@@ -4653,7 +4653,7 @@ export class Ui {
     pids.append(el(
       'p',
       'rates-lede',
-      'How hard the flight controller works. The sliders are Betaflight\'s own, applied by the firmware itself, and they adjust the tune you have loaded: 100 is that tune\'s stock, the master multiplier scales everything at once. Each tune keeps its own adjustment. Rates live on their own screen and are untouched by anything here.',
+      'How hard the flight controller works. The sliders are Betaflight\'s own, applied by the firmware itself, and they adjust the tune you have loaded from where it ships them; the master multiplier scales everything at once. Each tune keeps its own adjustment. Rates live on their own screen and are untouched by anything here.',
     ));
     this.pidsPanel = mountPidsPanel();
     const pidsBlock = wrapMenu();
@@ -7878,7 +7878,9 @@ export class Ui {
        * Two ways in, the same two Configurator offers. The sliders are the
        * firmware's simplified_* keys plus a real `simplified_tuning apply`,
        * so the arithmetic from slider to PID is compiled Betaflight and
-       * nothing else, and 100 always means "this tune's own scale". The
+       * nothing else. 100 is Betaflight's factory scale, which is not
+       * always where a tune ships a slider: the shipped default carries
+       * feedforward at 125, and a saved dump can carry anything. The
        * expert table writes the PIDs themselves with the sliders off,
        * which is Configurator's expert mode. Everything is keyed by the
        * tune on the row above: adjust your own dump and stock stays stock.

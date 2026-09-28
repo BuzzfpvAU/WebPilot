@@ -65,11 +65,14 @@ function el(tag, cls, text) {
 
 /* One sentence a screen reader can read instead of the picture. The stock
  * reference is formatted from STOCK_PIDS, the same table the notches are
- * drawn from, so the spoken numbers cannot drift from the drawn ones. */
+ * drawn from, so the spoken numbers cannot drift from the drawn ones. It
+ * says 4.5.1, as the caption does, because the shipped default's
+ * feedforward sits a quarter above that notch and "stock" alone would read
+ * as the tune the pilot has loaded. */
 function describe(pids) {
   const line = (a) => `P ${a.p}, I ${a.i}, D ${a.d}, D max ${a.dmax}, feedforward ${a.f}`;
   const parts = PID_AXES.map((axis) => `${AXIS_LABEL[axis]} ${line(pids[axis])}`);
-  return `PID values the module is flying. ${parts.join('. ')}. Stock roll is ${line(STOCK_PIDS.roll)}.`;
+  return `PID values the module is flying. ${parts.join('. ')}. Stock 4.5.1 roll is ${line(STOCK_PIDS.roll)}.`;
 }
 
 export function mountPidsPanel() {
