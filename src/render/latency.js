@@ -21,9 +21,28 @@
  * reads as its slow events. The median of the last 64 reported presses is the
  * number shown; the 90th percentile rides along for the report.
  *
- * The refresh rate is from the frame intervals the page already has: the
- * quarter percentile of the last 120, which is the display's period whenever
- * the page is keeping up with it at all.
+ * THE DISPLAY'S PERIOD, which Auto and the GPU guard measure a frame against
+ * (autoscale.js, gpugate.js). Both used to measure against 60 Hz, so a Steam
+ * Deck in its 40 Hz mode, which quality.js names as Low's target, or any
+ * browser holding frames at 30 or 50 Hz, read as late from the first second
+ * with the GPU idle, and Auto paced it to the floor and could never climb
+ * back (review finding F2, 2026-09-27). So the period is learned from the
+ * frames, with one care: a GPU saturated on a 60 Hz display also makes
+ * steady 33 ms frames, and that is exactly the case Auto exists for, so it
+ * must not be learned as a 30 Hz display. A frame's interval is taken as
+ * the display's only when nothing else could have paced it: the page's own
+ * callback under half the interval (or half a 60 Hz frame, on a faster
+ * display), and, when the world was drawn, the GPU
+ * guard's average under half the current target (or no fences to ask,
+ * which is ambiguity accepted). The period is the tenth percentile of the
+ * last 120 such intervals, snapped to a rate panels actually run at when
+ * within five percent of one, and it starts at sixty. The same number is
+ * the refresh rate Settings shows, which used to be the quarter percentile
+ * of every interval and read 30 Hz on a saturated 60 Hz screen.
+ *
+ * The TARGET a frame is measured against is the display's period or 60 Hz,
+ * whichever is slower: a slower display lowers the bar, a faster one does
+ * not raise it, because the aim is sixty, steadily.
  *
  * This file is part of WebFPVSimulator.
  *
@@ -43,6 +62,12 @@
 
 const PRESSES = 64;
 const FRAMES = 120;
+const SIXTY_MS = 1000 / 60;
+/* The rates a learned period is snapped to, when within 5 percent of one:
+ * what panels, handhelds and throttling browsers actually run at. */
+const RATES = [30, 40, 48, 50, 60, 72, 75, 90, 100, 120, 144, 165, 240];
+/* Trusted frames between estimates, and before the first. */
+const LEARN_EVERY = 30;
 /* The events that are a person pressing something, which is the question.
  * Moves and hovers are not asked about. */
 const PRESS_EVENTS = new Set(['keydown', 'pointerdown', 'mousedown', 'click']);
@@ -55,6 +80,10 @@ export function createLatencyMeter() {
   let pressN = 0;
   let frameAt = 0;
   let frameN = 0;
+  let sinceLearn = 0;
+  /* The display's period as learned, and whether it has been. */
+  let displayMs = SIXTY_MS;
+  let learned = false;
   let supported = false;
 
   try {
@@ -79,9 +108,28 @@ export function createLatencyMeter() {
     supported = false;
   }
 
-  /* Every frame, from the frame loop: allocation free. */
-  function noteFrame(dtMs) {
-    if (!(dtMs > 0) || dtMs > 100) {
+  /* The frame Auto and the guard measure against: see THE TARGET above. */
+  function targetMs() {
+    return displayMs > SIXTY_MS ? displayMs : SIXTY_MS;
+  }
+
+  /*
+   * Every frame, from the frame loop: allocation free. `blockMs` is the
+   * frame callback's own length, `gate` the GPU guard's state and `drew`
+   * whether anything was drawn that the GPU could have been pacing. Only a
+   * frame nothing else could have paced is kept: see THE DISPLAY'S PERIOD.
+   */
+  function noteFrame(dtMs, blockMs = 0, gate = null, drew = false) {
+    if (!(dtMs >= 4) || dtMs > 100) {
+      return;
+    }
+    /* Half the interval, or half a 60 Hz frame on a faster display: at
+     * 144 Hz a healthy 5 ms callback is most of the interval, and only a
+     * display slower than sixty moves the target anyway. */
+    if (blockMs > 0.5 * (dtMs > SIXTY_MS ? dtMs : SIXTY_MS)) {
+      return;
+    }
+    if (drew && gate && gate.on && !(gate.samples >= 10 && gate.gpuMs < targetMs() * 0.5)) {
       return;
     }
     frames[frameAt] = dtMs;
@@ -89,24 +137,50 @@ export function createLatencyMeter() {
     if (frameN < FRAMES) {
       frameN += 1;
     }
+    sinceLearn += 1;
+    if (frameN >= LEARN_EVERY && sinceLearn >= LEARN_EVERY) {
+      sinceLearn = 0;
+      learn();
+    }
   }
 
+  /* The tenth percentile of the kept intervals, snapped to the nearest
+   * real rate within five percent. */
+  function learn() {
+    const p = quantile(frames, frameN, 0.1);
+    let best = p;
+    let bestErr = 0.05;
+    for (let i = 0; i < RATES.length; i += 1) {
+      const period = 1000 / RATES[i];
+      const err = Math.abs(p - period) / period;
+      if (err <= bestErr) {
+        bestErr = err;
+        best = period;
+      }
+    }
+    displayMs = best;
+    learned = true;
+  }
+
+  /* An insertion sort into the scratch copy: at most 120 values, and no
+   * subarray view to sort, because learn() runs inside the frame loop and
+   * the frame loop allocates nothing (P8). */
   function quantile(src, n, q) {
     for (let i = 0; i < n; i += 1) {
-      scratch[i] = src[i];
+      const v = src[i];
+      let j = i - 1;
+      while (j >= 0 && scratch[j] > v) {
+        scratch[j + 1] = scratch[j];
+        j -= 1;
+      }
+      scratch[j + 1] = v;
     }
-    const view = scratch.subarray(0, n);
-    view.sort();
-    return view[Math.min(n - 1, Math.floor(q * n))];
+    return scratch[Math.min(n - 1, Math.floor(q * n))];
   }
 
-  /* The display's refresh in Hz, or 0 before there are frames to read. */
+  /* The display's refresh in Hz as learned, or 0 before it has been. */
   function refreshHz() {
-    if (frameN < 30) {
-      return 0;
-    }
-    const period = quantile(frames, frameN, 0.25);
-    return period > 0 ? Math.round(1000 / period) : 0;
+    return learned ? Math.round(1000 / displayMs) : 0;
   }
 
   /* The readout: key to screen in ms, median and 90th percentile, and how
@@ -122,5 +196,5 @@ export function createLatencyMeter() {
     };
   }
 
-  return { supported, noteFrame, refreshHz, report };
+  return { supported, noteFrame, refreshHz, targetMs, report };
 }

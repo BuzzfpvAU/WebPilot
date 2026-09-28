@@ -56812,3 +56812,87 @@ On the working tree over 24bba52, one check at a time, 00:05 to 00:12 UTC.
     npm run lint:shell           PASS
     npm run lint:input           all 160 passed, 198 s
     npm run verify               not run: F1 and F7 carry it in the plan
+
+## 2026-09-28 | render | Auto and the GPU guard measure against the display they are on (review F2)
+
+### Why
+
+Phase 1, item 3 of the review plan. Auto called a frame late at 18.5 ms and
+the guard called the GPU saturated at 85 percent of 1000 / 60, whatever the
+display. quality.js names the Steam Deck in its 40 Hz mode as Low's target
+machine, and browsers hold frames at 30 or 50 Hz for battery or an
+occluded window. On all of those the frame interval is 20 to 33 ms with
+the GPU idle, so Auto paced the machine to the floor, moved the preset
+down, and could never climb back, because headroom needed frames under
+17.5 ms. And Settings' refresh rate was the quarter percentile of every
+interval, which read 30 Hz on a saturated 60 Hz screen.
+
+### What changed
+
+- `src/render/latency.js` learns the display's period. A frame's interval
+  is kept only when nothing else could have paced it: the page's callback
+  under half the interval (or half a 60 Hz frame on a faster display), and
+  with the world live, the guard's average under half the target. The
+  period is the tenth percentile of the last 120 kept, snapped to a real
+  rate within five percent, from 60 Hz until learned. `targetMs()` is that
+  period or 60 Hz, whichever is slower; `refreshHz()` is the learned rate,
+  0 until it is learned. Its quantile no longer sorts a subarray view, an
+  allocation, since it now runs in the frame loop (P8).
+- `src/render/autoscale.js`: every frame interval rule is its 60 Hz number
+  as a fraction of the target (18.5, 17.5 and 14.5 ms, and the F5 rule's 7
+  and 9 ms), and the GPU's share is of the target frame.
+- `src/render/gpugate.js`: saturation is 85 percent of the target frame.
+- `src/main.js` passes the target to both, and hands the display estimate
+  each frame's interval, callback length, the guard's state and whether a
+  world was live (a draw held back by the guard or the cap still waits on
+  a busy GPU's compositing, so a live world counts whether or not it drew;
+  the Settings studio's craft counts too).
+- `scripts/autoscale-selftest.js`: a whole machine per case (the display
+  estimate, the guard's state, Auto), 14 cases. Written before the fix and
+  run against the old modules: five failed there. The 40 Hz Deck and the
+  30 Hz browser were paced to 0.55; the saturated 60 Hz screen read 30 Hz;
+  the target stayed 16.67 ms; and an 18 ms GPU with a fence pending was
+  held on a 40 Hz display.
+
+What went wrong: the first cut of the trust rule rejected a healthy 5 ms
+callback at 144 Hz (half of 6.9 ms is under it); only slower displays move
+the target, so the bar is now half a 60 Hz frame at most. And two gate
+cases I wrote first sat on the 85 percent line because the fence reading
+carries up to a poll interval of slop and the queue; they proved nothing
+either way, so the case is now an exact average with one pending fence,
+asked at both targets on fresh gates.
+
+Seen on the title probe and recorded: under SwiftShader at 1280 by 720 a
+drawn frame takes over 250 ms of GPU, so F3's freeze bound drops every
+fence and the guard now stays out of the way in this container (2 samples
+in 45 s); Auto decides from the frame interval alone there and still
+steps down (0.9 at 15 s, 0.7 at 40 s). A real GPU's frames are far under
+250 ms.
+
+lint:input failed once on this tree, "and the input layer and the button
+agree with the setting", a race in the check (it read a label the frame
+loop paints in the same task as the key that changes it), fixed on its own
+in 98a5fc0, and the check run twice more below.
+
+### RUN LOG
+
+On the working tree over 7748332, one check at a time, 00:12 to 00:37 UTC.
+
+    npm run autoscale:selftest   against the pre F2 modules: 5 failed, 31
+                                 passed; against these: all 36 passed
+    title probe (scratch)        from Medium with Auto: 1, 0.9 at 15 s,
+                                 0.8 at 25 s, 0.7 at 40 s; the guard 2
+                                 samples in 45 s (see above); hz 0 (not
+                                 learned with the world live and the GPU
+                                 unknown, so the target stayed sixty); no
+                                 page errors
+    npm run input:selftest       all 225 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         56 of 56 checks clean
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           1 failed, 159 passed (the race above);
+                                 after 98a5fc0, all 160 passed twice (193 s
+                                 and 194 s)
+    npm run verify               not run: F1 and F7 carry it in the plan

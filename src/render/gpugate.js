@@ -54,8 +54,12 @@
 
 /* The guard engages when the GPU's average share of a frame passes this. */
 export const GATE_SATURATED = 0.85;
-/* A frame's worth of work, at the rate this page holds: 60 Hz. A faster
- * display does not raise the bar; the aim is sixty, steadily. */
+/* A frame's worth of work, at the rate this page holds: 60 Hz, or the
+ * display's own period when that is slower, which main.js passes (targetMs in
+ * latency.js). A faster display does not raise the bar; the aim is sixty,
+ * steadily. A slower one lowers it: measured against sixty, a GPU keeping a
+ * 40 Hz display comfortably fed at 18 ms a frame read as saturated, and the
+ * guard held half its draws (review F2, reproduced in the selftest). */
 export const GATE_FRAME_MS = 1000 / 60;
 /*
  * A fence older than this when it is first seen signalled was not timing the
@@ -149,15 +153,17 @@ export function createGpuGate(gl) {
   /*
    * Should this frame's draw wait? True only when the GPU is saturated on
    * average AND the previous frame is still on it AND the last draw was not
-   * already skipped. `enabled` is the caller's switch (Low latency view).
+   * already skipped. `enabled` is the caller's switch (Low latency view),
+   * `targetMs` the frame to measure saturation against (see GATE_FRAME_MS).
    */
-  function shouldSkip(now, enabled) {
+  function shouldSkip(now, enabled, targetMs = GATE_FRAME_MS) {
     if (!ok || !enabled) {
       s.lastSkipped = false;
       return false;
     }
     poll(now);
-    const saturated = s.samples >= 10 && s.gpuMs > GATE_SATURATED * GATE_FRAME_MS;
+    const frame = targetMs > GATE_FRAME_MS ? targetMs : GATE_FRAME_MS;
+    const saturated = s.samples >= 10 && s.gpuMs > GATE_SATURATED * frame;
     if (saturated && fences[head] !== null && !s.lastSkipped) {
       s.lastSkipped = true;
       s.skipped += 1;

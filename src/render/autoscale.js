@@ -30,7 +30,11 @@
  *            because of the page's own script is not helped by fewer
  *            pixels, so a CPU bound frame does not drop the scale
  *
- * THE RULES, with the reasons in the numbers:
+ * THE RULES, with the reasons in the numbers. Every time below is for a
+ * 60 Hz target and scales with the target the caller passes, which is the
+ * display's own period when that is slower than sixty (see THE TARGET in
+ * latency.js): a Steam Deck at 40 Hz is on time at 25 ms, and measured
+ * against sixty it used to be paced to the floor with the GPU idle.
  *   over budget  dt average over 18.5 ms (under about 54 fps) and not CPU
  *                bound, or the GPU over 90 percent of a 60 Hz frame. Half
  *                a second of it steps the scale down a tenth.
@@ -73,10 +77,16 @@
 export const AUTO_FLOOR = 0.55;
 const STEP_DOWN = 0.1;
 const STEP_UP = 0.05;
+/* The target frame when the caller gives none, and the floor of any it
+ * gives: the aim is sixty. The frame interval rules are the 60 Hz numbers
+ * they were tuned at, as fractions of the target: 18.5, 17.5 and 14.5 ms,
+ * and the F5 rule's 7 ms of render and 9 of shell. */
 const FRAME_MS = 1000 / 60;
-const OVER_DT_MS = 18.5;
-const EASY_DT_MS = 17.5;
-const FAST_DISPLAY_DT_MS = 14.5;
+const OVER_DT = 18.5 / FRAME_MS;
+const EASY_DT = 17.5 / FRAME_MS;
+const FAST_DISPLAY_DT = 14.5 / FRAME_MS;
+const CPU_RENDER = 7 / FRAME_MS;
+const CPU_SHELL = 9 / FRAME_MS;
 const OVER_GPU = 0.9;
 const EASY_GPU = 0.55;
 const PROMOTE_GPU = 0.45;
@@ -121,9 +131,10 @@ export function createAutoScale() {
   /*
    * One frame. dt is the capped frame interval, renderMs the part of the
    * frame callback inside the draw, blockMs the whole callback, gate the
-   * gpugate state (or null), and drew whether this frame drew the world at
-   * all. Returns nothing; `dirty` and `want` say whether the caller should
-   * apply a new scale.
+   * gpugate state (or null), drew whether this frame drew the world at
+   * all, and targetMs the frame to measure against (latency.js targetMs:
+   * sixty, or the display's own period when it is slower). Returns nothing;
+   * `dirty` and `want` say whether the caller should apply a new scale.
    *
    * The render and shell averages learn only from frames that drew. A frame
    * the GPU guard or the frame cap held back has a render time of nothing,
@@ -131,8 +142,9 @@ export function createAutoScale() {
    * measured on 2026-09-27, it stopped the scale dropping on exactly the
    * saturated GPU the guard had just found.
    */
-  function observe(dt, renderMs, blockMs, gate, drew) {
+  function observe(dt, renderMs, blockMs, gate, drew, targetMs = FRAME_MS) {
     s.dirty = 0;
+    const target = targetMs > FRAME_MS ? targetMs : FRAME_MS;
     if (!(dt > 0) || dt > 250) {
       return;
     }
@@ -153,12 +165,13 @@ export function createAutoScale() {
      * where it has left its first reading behind, and on a machine drawing
      * a few frames a second thirty took most of a minute. */
     const gpuKnown = Boolean(gate && gate.on && gate.samples >= 10);
-    const gpuShare = gpuKnown ? gate.gpuMs / FRAME_MS : 0;
+    const gpuShare = gpuKnown ? gate.gpuMs / target : 0;
     /* F5: fewer pixels cannot buy back the page's own script. */
-    s.cpuBound = s.renderEma < 7 && s.shellEma > 9 && s.dtEma > OVER_DT_MS ? 1 : 0;
-    const over = (s.dtEma > OVER_DT_MS && !s.cpuBound) || (gpuKnown && gpuShare > OVER_GPU);
-    const easy = s.dtEma < EASY_DT_MS
-      && (gpuKnown ? gpuShare < EASY_GPU : s.dtEma < FAST_DISPLAY_DT_MS);
+    s.cpuBound = s.renderEma < CPU_RENDER * target && s.shellEma > CPU_SHELL * target
+      && s.dtEma > OVER_DT * target ? 1 : 0;
+    const over = (s.dtEma > OVER_DT * target && !s.cpuBound) || (gpuKnown && gpuShare > OVER_GPU);
+    const easy = s.dtEma < EASY_DT * target
+      && (gpuKnown ? gpuShare < EASY_GPU : s.dtEma < FAST_DISPLAY_DT * target);
     s.overMs = over ? s.overMs + dt : 0;
     s.easyMs = easy ? s.easyMs + dt : 0;
     if (s.climbBlockMs > 0) {

@@ -39,6 +39,7 @@
 
 import { createGpuGate } from '../src/render/gpugate.js';
 import { AUTO_FLOOR, createAutoScale } from '../src/render/autoscale.js';
+import { createLatencyMeter } from '../src/render/latency.js';
 
 let passed = 0;
 let failed = 0;
@@ -99,7 +100,7 @@ function fakeGpu() {
  * the GPU working through them in order (a queue), polled every `pollMs` as
  * the sticks' timer does. Returns the draws the guard held.
  */
-function runFrames(gate, rig, { frames, intervalMs, gpuMs, pollMs = 4, drawMs = 1 }) {
+function runFrames(gate, rig, { frames, intervalMs, gpuMs, pollMs = 4, drawMs = 1, targetMs = undefined }) {
   const { gl, clock } = rig;
   let gpuFree = clock.now;
   let held = 0;
@@ -107,14 +108,17 @@ function runFrames(gate, rig, { frames, intervalMs, gpuMs, pollMs = 4, drawMs = 
   let lastHeld = false;
   for (let i = 0; i < frames; i += 1) {
     const frameAt = clock.now;
-    const skip = gate.shouldSkip(frameAt, true);
+    /* The callback's own work before the draw, `drawMs` (a number, or a
+     * function of the frame for jitter). The main thread is busy then, so
+     * nothing polls, and main.js asks the guard right before the draw. */
+    clock.now = frameAt + (typeof drawMs === 'function' ? drawMs(i) : drawMs);
+    const skip = gate.shouldSkip(clock.now, true, targetMs);
     if (skip) {
       held += 1;
       if (lastHeld) {
         heldTwice += 1;
       }
     } else {
-      clock.now = frameAt + drawMs;
       const start = gpuFree > clock.now ? gpuFree : clock.now;
       gpuFree = start + gpuMs;
       gl.nextDoneAt = gpuFree;
@@ -286,6 +290,121 @@ section('F4: Auto\'s preset evidence says what is true now, not what once was');
   auto.resetEvidence();
   check('resetEvidence withdraws both asks and every accumulator',
     !auto.state.demote && !auto.state.promote && auto.state.floorOverMs === 0 && auto.state.easyFullMs === 0);
+}
+
+/* ------------------------------------------------------------------------
+ * A whole machine, as the frame loop sees it: the display learned from the
+ * frames (latency.js), the gate's state, and Auto measuring against the
+ * target the display gives. `drew` is whether the world was drawn, which
+ * is when the GPU could be the thing pacing the frames.
+ * ---------------------------------------------------------------------- */
+
+function machine() {
+  const latency = createLatencyMeter();
+  const auto = createAutoScale();
+  auto.setFloor(AUTO_FLOOR);
+  const target = () => (typeof latency.targetMs === 'function' ? latency.targetMs() : 1000 / 60);
+  const run = (ms, { dt, gpuMs, blockMs = 5, renderMs = 3, drew = true }) => {
+    const gate = { on: true, samples: 100, gpuMs };
+    const moves = [];
+    for (let t = 0; t < ms; t += dt) {
+      latency.noteFrame(dt, blockMs, gate, drew);
+      auto.observe(dt, renderMs, blockMs, gate, drew, target());
+      if (auto.state.dirty) {
+        auto.applied(auto.state.want);
+        moves.push({ at: Math.round(t), scale: Math.round(auto.state.scale * 100) / 100 });
+      }
+    }
+    return moves;
+  };
+  return { latency, auto, target, run };
+}
+
+section('F2: Auto measures a frame against the display it is on, not against sixty');
+{
+  const m = machine();
+  const moves = m.run(30000, { dt: 25, gpuMs: 6 });
+  check('a Steam Deck in its 40 Hz mode with the GPU at a quarter of a frame is left alone',
+    moves.length === 0, `moves ${moves.map((x) => x.scale).join(', ')}`);
+  check('and its display is learned as 40 Hz', m.latency.refreshHz() === 40, `${m.latency.refreshHz()} Hz`);
+  check('and the target frame is its 25 ms', Math.abs(m.target() - 25) < 0.01, `${m.target().toFixed(2)} ms`);
+}
+{
+  const m = machine();
+  const moves = m.run(30000, { dt: 1000 / 30, gpuMs: 3 });
+  check('a browser holding frames at 30 Hz with the GPU idle is not paced down',
+    moves.length === 0, `moves ${moves.map((x) => x.scale).join(', ')}`);
+  check('and reads as 30 Hz', m.latency.refreshHz() === 30, `${m.latency.refreshHz()} Hz`);
+}
+{
+  const m = machine();
+  const moves = m.run(3000, { dt: 1000 / 30, gpuMs: 30 });
+  check('a 60 Hz screen whose GPU needs 30 ms a frame is paced down within about a second',
+    moves.length > 0 && moves[0].at <= 1100, `first step at ${moves.length ? moves[0].at : 'never'} ms`);
+  check('and is NOT learned as a 30 Hz display, which would hide it',
+    m.latency.refreshHz() !== 30 && Math.abs(m.target() - 1000 / 60) < 0.01,
+    `${m.latency.refreshHz()} Hz, target ${m.target().toFixed(2)} ms`);
+}
+{
+  const m = machine();
+  m.run(10000, { dt: 1000 / 36, gpuMs: 4, blockMs: 25, renderMs: 3 });
+  check('a page busy for most of every frame at 36 fps is not learned as a 36 Hz display',
+    Math.abs(m.target() - 1000 / 60) < 0.01, `${m.latency.refreshHz()} Hz, target ${m.target().toFixed(2)} ms`);
+}
+{
+  const m = machine();
+  m.run(10000, { dt: 1000 / 144, gpuMs: 3 });
+  check('a 144 Hz display is learned as 144', m.latency.refreshHz() === 144, `${m.latency.refreshHz()} Hz`);
+  check('and the aim stays sixty: a faster display does not raise the bar',
+    Math.abs(m.target() - 1000 / 60) < 0.01, `target ${m.target().toFixed(2)} ms`);
+}
+{
+  const m = machine();
+  m.run(1000, { dt: 1000 / 60, gpuMs: 3, drew: false });
+  const moves = m.run(4000, { dt: 1000 / 30, gpuMs: 30 });
+  const drop = moves.length ? moves[0].at : null;
+  const climb = m.run(16000, { dt: 1000 / 60, gpuMs: 4 });
+  check('a step down is followed by no step up for ten seconds',
+    drop != null && climb.length > 0 && climb[0].at >= 10000 - (4000 - drop),
+    `down at ${drop} ms, first climb ${climb.length ? climb[0].at : 'never'} ms after the load went`);
+}
+
+section('F2: the gate measures saturation against the display too');
+{
+  const rig = fakeGpu();
+  const gate = createGpuGate(rig.gl);
+  /* Exactly 18 ms a frame, each fence seen the moment it lands, so the
+   * average is the GPU's and nothing else; then one frame still on the GPU
+   * when the next draw is about to go in, which a jittery callback makes
+   * happen on a GPU that keeps a 40 Hz display fed. 18 ms is over 85
+   * percent of a 60 Hz frame and under it of a 40 Hz one. */
+  const pendingAt = (targetMs) => {
+    const r2 = fakeGpu();
+    const g2 = createGpuGate(r2.gl);
+    for (let i = 0; i < 20; i += 1) {
+      r2.gl.nextDoneAt = r2.clock.now + 18;
+      g2.submitted(r2.clock.now);
+      r2.clock.now += 18;
+      g2.poll(r2.clock.now);
+      r2.clock.now += 7;
+    }
+    r2.gl.nextDoneAt = r2.clock.now + 18;
+    g2.submitted(r2.clock.now);
+    r2.clock.now += 5;
+    return { held: g2.shouldSkip(r2.clock.now, true, targetMs), gpuMs: g2.state.gpuMs };
+  };
+  const at40 = pendingAt(25);
+  check('an 18 ms GPU with the last frame still on it is not held on a 40 Hz display',
+    !at40.held && Math.abs(at40.gpuMs - 18) < 1e-9, `held ${at40.held}, ${at40.gpuMs.toFixed(2)} ms`);
+  const at60 = pendingAt(1000 / 60);
+  check('and the same GPU and fence is held on a 60 Hz one, where it is saturated', at60.held, `held ${at60.held}`);
+}
+{
+  const rig = fakeGpu();
+  const gate = createGpuGate(rig.gl);
+  const r = runFrames(gate, rig, { frames: 240, intervalMs: 1000 / 60, gpuMs: 22, targetMs: 1000 / 60 });
+  check('the same guard still holds draws for a GPU that cannot keep a 60 Hz display',
+    r.held > 40 && r.heldTwice === 0, `${r.held} held, ${r.heldTwice} twice`);
 }
 
 console.log(failed ? `\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);

@@ -8517,7 +8517,7 @@ export async function boot({ loading, bootStart, mapId }) {
      * GPU to be saturated on average before it believes one late fence.
      */
     if (worldLive && drawThis && !film && !replayStepMode
-      && gpuGate.shouldSkip(renderStart, ui.settings.lowLatency !== false)) {
+      && gpuGate.shouldSkip(renderStart, ui.settings.lowLatency !== false, latency.targetMs())) {
       drawThis = false;
     }
     if (worldLive) {
@@ -9046,8 +9046,12 @@ export async function boot({ loading, bootStart, mapId }) {
     if (mode === 'flight' && ui.screen === 'flight' && !replayMode) {
       flightPerf.note(dt, blockMs);
     }
-    /* Every frame, for the refresh rate: see latency.js. */
-    latency.noteFrame(dt);
+    /* Every frame, for the display's period, which Auto and the guard
+     * measure against: see latency.js. A live world says the GPU could have
+     * been pacing this frame whether or not it drew: a draw the guard or the
+     * cap held back still waits on a busy GPU's compositing. The Settings
+     * studio's craft counts too, and the guard does not time it. */
+    latency.noteFrame(dt, blockMs, gpuGate.state, worldLive || studioOn);
     /*
      * AUTO GRAPHICS, from the frames the pilot is looking at: flight, and the
      * title's attract flight over the same world, which is the free
@@ -9059,7 +9063,7 @@ export async function boot({ loading, bootStart, mapId }) {
      */
     if (ui.settings.graphicsAuto && mapReady && !swapInFlight && !replayMode && !film && worldLive
       && ((mode === 'flight' && ui.screen === 'flight') || (mode === 'title' && ui.screen === 'title'))) {
-      autoScale.observe(dt, renderMs, blockMs, gpuGate.state, drawThis);
+      autoScale.observe(dt, renderMs, blockMs, gpuGate.state, drawThis, latency.targetMs());
       if (autoScale.state.dirty) {
         autoFactor = autoScale.state.want;
         applyRenderScale(ui.settings);
