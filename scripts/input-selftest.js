@@ -1434,6 +1434,372 @@ section('a radio whose four axes include one that never moves: bug-338cd29b');
   }
   check('a radio with axes to spare keeps the plain count, since a still slider is normal',
     /Full travel on 3 of 4/.test(wrig.view().hint), wrig.view().hint);
+  check('and the four axis hint names the other place a stick is lost, the browser, and the screen that tells them apart',
+    /Chrome on Android/.test(hint) && /Stick help/.test(hint), hint);
+}
+
+/* ------------------------------------------------------------------------
+ * 9. The stick the pilot is flying without, on any map. The owner, 28
+ *    September: tickets saying a controller "can't use yaw or pitch", and
+ *    no way to tell a radio set up wrong from a fault here. bug-f532d90b,
+ *    a LiteRadio 2 on a phone, "doesn't detect yaw movement", is the shape:
+ *    four axes, one of which never moves.
+ * ---------------------------------------------------------------------- */
+
+/* A pilot flying: roll, pitch and the throttle swept through their travel
+ * over and over, for `ms` of sim time, and nothing on the axes in `still`.
+ * The sweep is a triangle so every level between the ends is visited, which
+ * is what a thumb does and what tells a stick from a switch. */
+function flyFor(rig, ms, lay) {
+  const period = 1600;
+  for (let t = 0; t < ms; t += 16) {
+    const ph = (t % period) / period;
+    const tri = ph < 0.5 ? ph * 4 - 1 : 3 - ph * 4;
+    if (lay.roll != null) {
+      rig.ax(lay.roll, tri * 0.9);
+    }
+    if (lay.pitch != null) {
+      rig.ax(lay.pitch, -tri * 0.7);
+    }
+    if (lay.yaw != null) {
+      rig.ax(lay.yaw, tri * 0.8);
+    }
+    if (lay.thr != null) {
+      rig.ax(lay.thr, -0.6 + (tri + 1) * 0.5);
+    }
+    rig.step(16);
+  }
+  for (const i of [lay.roll, lay.pitch, lay.yaw]) {
+    if (i != null) {
+      rig.ax(i, 0);
+    }
+  }
+}
+
+section('a channel that never moves in real flying: the dead stick verdict');
+{
+  /* bug-f532d90b's shape: four axes, AETR guess, and axis 3, where the
+   * guess reads yaw, reading exactly 0 for the whole flight. */
+  const pad = makePad([0, 0, -1, 0], 16, 'STMicroelectronics BETAFPV Joystick');
+  const rig = new Rig(pad);
+  const im = rig.im;
+  rig.run(100);
+  check('nothing judged on the title', im.padSummary().deadChannels.length === 0);
+  im.flying = true;
+  flyFor(rig, 19000, { roll: 0, pitch: 1, thr: 2 });
+  check('nineteen seconds of flying with yaw still: not yet', im.padSummary().deadChannels.length === 0,
+    JSON.stringify(im.padSummary().deadChannels));
+  flyFor(rig, 1500, { roll: 0, pitch: 1, thr: 2 });
+  const sum = im.padSummary();
+  check('past twenty, with roll, pitch and throttle all in use: yaw is dead',
+    sum.deadChannels.length === 1 && sum.deadChannels[0] === 'yaw', JSON.stringify(sum.deadChannels));
+  check('and it is the only one: the three that moved are not', !sum.deadChannels.includes('roll')
+    && !sum.deadChannels.includes('throttle'));
+  check('a four axis pad with no mapping is reported as one, for the shell to name the platform',
+    sum.fourAxes === true && sum.axisCount === 4);
+  const same = im.padSummary().deadChannels;
+  flyFor(rig, 500, { roll: 0, pitch: 1, thr: 2 });
+  check('the list is the same array until a verdict changes, so the shell can compare it cheaply',
+    im.padSummary().deadChannels === same);
+  const rep = im.mapReport();
+  check('a report carries it, with how long the flight watched and the button count',
+    rep.check && rep.check.dead.includes('yaw') && rep.check.flownS >= 20 && rep.buttons === 16
+    && rep.guess === 'aetr', JSON.stringify(rep));
+  for (let k = 0; k < 4; k += 1) {
+    rig.ax(3, 1); rig.step(); rig.ax(3, -1); rig.step();
+  }
+  rig.ax(3, 0); rig.step();
+  check('a switch thrown on the yaw axis is not yaw coming back: still dead',
+    im.padSummary().deadChannels.includes('yaw'));
+  flyFor(rig, 1600, { roll: 0, pitch: 1, thr: 2, yaw: 3 });
+  check('yaw swept like a stick: the verdict comes down', im.padSummary().deadChannels.length === 0,
+    JSON.stringify(im.padSummary().deadChannels));
+  flyFor(rig, 30000, { roll: 0, pitch: 1, thr: 2 });
+  check('and stays down for good on this pad and map, however long yaw then rests',
+    im.padSummary().deadChannels.length === 0);
+  im.setPadChoice({ kind: 'pad', id: pad.id, index: 0 });
+  flyFor(rig, 21000, { roll: 0, pitch: 1, thr: 2 });
+  check('choosing the pad again starts the question over, and it is asked again',
+    im.padSummary().deadChannels.includes('yaw'));
+}
+{
+  const rig = new Rig(makePad([0, 0, -1, 0], 16, 'Radio on the title'));
+  rig.im.flying = false;
+  flyFor(rig, 30000, { roll: 0, pitch: 1, thr: 2 });
+  check('the same sticks swept in a menu judge nothing: only flight counts',
+    rig.im.padSummary().deadChannels.length === 0);
+}
+{
+  const rig = new Rig(makePad([0, 0, -1, 0], 16, 'Hovering'));
+  rig.im.flying = true;
+  flyFor(rig, 30000, { thr: 2 });
+  check('a pilot only working the throttle is not judged on the rest: two others have to be in use',
+    rig.im.padSummary().deadChannels.length === 0, JSON.stringify(rig.im.padSummary().deadChannels));
+}
+{
+  /* The throttle axis never moving: nothing leaves the pad, so it is judged
+   * sooner. */
+  const rig = new Rig(makePad([0, 0, 0, 0], 16, 'No throttle'));
+  rig.im.flying = true;
+  flyFor(rig, 7000, { roll: 0, pitch: 1, yaw: 3 });
+  check('seven seconds of wiggling every other stick on the pad: not yet',
+    rig.im.padSummary().deadChannels.length === 0);
+  flyFor(rig, 1500, { roll: 0, pitch: 1, yaw: 3 });
+  check('past eight: the throttle is dead', rig.im.padSummary().deadChannels.includes('throttle'),
+    JSON.stringify(rig.im.padSummary().deadChannels));
+}
+{
+  /* Yaw flown on A and D over a radio whose yaw never arrives. The keys are
+   * laid over the pad's channel, and the pad is what is being judged. */
+  const rig = new Rig(makePad([0, 0, -1, 0], 16, 'Radio and keys'));
+  rig.im.flying = true;
+  rig.im.keys.add('KeyD');
+  flyFor(rig, 21000, { roll: 0, pitch: 1, thr: 2 });
+  rig.im.keys.delete('KeyD');
+  check('yaw held on the keyboard does not hide a radio whose yaw never arrives',
+    rig.im.padSummary().deadChannels.includes('yaw'));
+}
+{
+  /* A six axis radio whose yaw is on axis 4, flown on the AETR guess: the
+   * flight also says where the stick went. */
+  const rig = new Rig(makePad([0, 0, -1, 0, 0, -1], 12, 'Six axis radio'));
+  rig.im.flying = true;
+  flyFor(rig, 21000, { roll: 0, pitch: 1, thr: 2, yaw: 4 });
+  const rep = rig.im.mapReport();
+  check('yaw dead on axis 3 and a stick swept on axis 4: the report names axis 4 as the stray',
+    rep.check.dead.includes('yaw') && rep.check.stray.length === 1 && rep.check.stray[0] === 4,
+    JSON.stringify(rep.check));
+  check('and a six axis pad is not the four axis shape', rig.im.padSummary().fourAxes === false);
+}
+
+section('a saved map that reads an axis this pad does not have');
+{
+  const storage = memoryStorage();
+  storage.setItem('webfpv_stick_map_v1', JSON.stringify({
+    roll: { axis: 0, center: 0, pos: 1, neg: -1 },
+    pitch: { axis: 1, center: 0, pos: -1, neg: 1 },
+    yaw: { axis: 5, center: 0, pos: 1, neg: -1 },
+    throttle: { axis: 2, low: -1, high: 1 },
+  }));
+  const phone = new Rig(makePad([0, 0, -1, 0], 16, 'Same radio, on a phone'), storage);
+  phone.step();
+  const sum = phone.im.padSummary();
+  check('yaw saved on axis 5, and this pad has four: named at once, no flying needed',
+    sum.missingChannels.length === 1 && sum.missingChannels[0] === 'yaw', JSON.stringify(sum.missingChannels));
+  check('and in a report', phone.im.mapReport().check.missing.includes('yaw'));
+  const desk = new Rig(makePad([0, 0, -1, 0, 0, 0], 12, 'Same radio, on the desk'), storage);
+  desk.step();
+  check('the same map on the radio it was made on names nothing',
+    desk.im.padSummary().missingChannels.length === 0);
+}
+
+section('Firefox on Linux calls an EdgeTX radio a gamepad: bug-c9423f3e, bug-9cc39ca4');
+{
+  /* LinuxGamepad.cpp: axes 0 to 3 are X, Y, Rx, Ry, then Z, Rz and the
+   * sliders. An AETR radio: aileron, elevator, rudder, channel 5, throttle,
+   * channel 6, channel 7, channel 8. The throttle is parked at the bottom
+   * and channel 5 is a switch at one end. */
+  const ffRadio = (id = '1209-4f54-EdgeTX Radiomaster Pocket Joystick', axes = [0, 0, 0, -1, -1, 0, 0, 0]) => ({
+    ...makePad(axes, 24, id), mapping: 'standard',
+  });
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  {
+    const rig = new Rig(ffRadio());
+    const im = rig.im;
+    rig.step();
+    check('nothing touched: throttle at idle, and channel 5 flies nothing',
+      im.channels.throttle === 0 && im.channels.pitch === 0 && im.channels.yaw === 0, JSON.stringify(im.channels));
+    rig.ax(4, 1); rig.step();
+    check('throttle stick fully up: full throttle, from axis 4', near(im.channels.throttle, 1), JSON.stringify(im.channels));
+    rig.ax(4, -1); rig.ax(2, 1); rig.step();
+    check('rudder right: yaw right, from axis 2, not the throttle it used to be',
+      near(im.channels.yaw, 1) && im.channels.throttle === 0, JSON.stringify(im.channels));
+    rig.ax(2, 0); rig.ax(1, 1); rig.step();
+    check('elevator: pitch, not the throttle the standard layout made it',
+      Math.abs(im.channels.pitch) > 0.99 && im.channels.throttle === 0, JSON.stringify(im.channels));
+    rig.ax(1, 0); rig.ax(3, 1); rig.step();
+    check('channel 5 thrown: nothing, where the standard layout read it as pitch',
+      im.channels.pitch === 0 && im.channels.roll === 0 && im.channels.yaw === 0, JSON.stringify(im.channels));
+    rig.ax(3, -1); rig.step();
+    const rep = im.mapReport();
+    check('a report says it is the Firefox guess', rep.map === 'guess' && rep.guess === 'firefox'
+      && rep.axes.throttle === 4 && rep.axes.yaw === 2, JSON.stringify(rep));
+    check('its throttle parked at the bottom makes it usable, the way the AETR guess earns it',
+      im.mapUsable() === true);
+  }
+  {
+    const pad = { ...makePad([0, 0, 0, 0], 17, '054c-0ce6-Sony Interactive Entertainment DualSense Wireless Controller'), mapping: 'standard' };
+    const rig = new Rig(pad);
+    rig.step();
+    check('a real gamepad in Firefox keeps the standard layout', rig.im.mapReport().guess === 'standard');
+  }
+  {
+    const pad = { ...makePad([0, 0, 0, 0, 0, 0], 17, 'Generic USB Joystick (STANDARD GAMEPAD Vendor: 0079 Product: 0006)'), mapping: 'standard' };
+    const rig = new Rig(pad);
+    rig.step();
+    check('a pad named Joystick in Chrome is not Firefox\'s radio: standard layout', rig.im.mapReport().guess === 'standard');
+  }
+  {
+    const rig = new Rig(ffRadio('1209-4f54-EdgeTX Radiomaster Pocket Joystick', [0, 0, 0, 0]));
+    rig.step();
+    check('four axes cannot carry a throttle on axis 4: standard layout', rig.im.mapReport().guess === 'standard');
+  }
+  {
+    /* The saved AETR guess, as two DualSense pilots saved it from Check
+     * sticks, on the Firefox radio: set aside, as on any standard pad. */
+    const storage = memoryStorage();
+    storage.setItem('webfpv_stick_map_v1', JSON.stringify({
+      roll: { axis: 0, center: 0, full: 1 },
+      pitch: { axis: 1, center: 0, full: -1 },
+      yaw: { axis: 3, center: 0, full: 1 },
+      throttle: { axis: 2, low: -1, high: 1 },
+    }));
+    const rig = new Rig(ffRadio(), storage);
+    rig.ax(4, 1); rig.step();
+    check('a saved AETR guess on the Firefox radio is set aside for the Firefox guess',
+      near(rig.im.channels.throttle, 1) && rig.im.mapReport().guess === 'firefox', JSON.stringify(rig.im.channels));
+  }
+  {
+    const storage = memoryStorage();
+    storage.setItem('webfpv_stick_map_v1', JSON.stringify({
+      roll: { axis: 0, center: 0, pos: 1, neg: -1 },
+      pitch: { axis: 1, center: 0, pos: -1, neg: 1 },
+      yaw: { axis: 2, center: 0, pos: 1, neg: -1 },
+      throttle: { axis: 4, low: -1, high: 1 },
+    }));
+    const rig = new Rig(ffRadio(), storage);
+    rig.step();
+    check('a wizard map on the Firefox radio is the pilot\'s', rig.im.mapReport().map === 'calibrated');
+  }
+}
+
+section('a standard gamepad that rests like a radio');
+{
+  const std = (axes) => ({ ...makePad(axes, 17, 'Mystery pad (STANDARD GAMEPAD Vendor: 1234 Product: 5678)'), mapping: 'standard' });
+  {
+    const rig = new Rig(std([0, -1, 0, 0]));
+    rig.run(3504);
+    check('an axis of the standard sticks held at the stop for three and a half seconds in a menu: not yet',
+      rig.im.padSummary().radioAsGamepad === false);
+    rig.run(704);
+    check('past four, still to a hundredth: a radio dressed as a gamepad', rig.im.padSummary().radioAsGamepad === true);
+    check('and the flight map is left as it is: the verdict only offers the wizard', rig.im.mapReport().guess === 'standard');
+    rig.im.startCalibrationCheck();
+    check('saving a mapping answers it', rig.im.acceptCalibration() && rig.im.padSummary().radioAsGamepad === false);
+  }
+  {
+    const rig = new Rig(std([0, -1, 0, 0]));
+    rig.im.flying = true;
+    rig.run(10000);
+    check('full throttle held on a real gamepad in flight for ten seconds: never', rig.im.padSummary().radioAsGamepad === false);
+  }
+  {
+    const rig = new Rig(std([0, 0, 0, 0, 1, -1]));
+    rig.run(10000);
+    check('extra axes resting at the ends are a gamepad\'s dials, not its sticks: never',
+      rig.im.padSummary().radioAsGamepad === false);
+  }
+}
+
+section('stick help: what the screen reads while the pilot moves the stick that does not work');
+{
+  const pad = makePad([0, 0, -1, 0, 0, -1], 12, 'Six axis radio');
+  const rig = new Rig(pad);
+  const im = rig.im;
+  check('with nothing open there is no watch', im.stickCheck === null);
+  im.startStickCheck();
+  rig.step();
+  let v = im.stickCheckView();
+  check('open: every axis, with the channel the map reads from it',
+    v.axes.length === 6 && v.axes[3].channel === 'yaw' && v.axes[2].channel === 'throttle' && v.axes[4].channel === null,
+    JSON.stringify(v.axes.map((a) => a.channel)));
+  check('and nothing has moved yet', v.moving === null && v.strays.length === 0 && v.moved.length === 0);
+  for (const x of [0.2, 0.45, 0.7, 0.95, 0.6]) {
+    rig.ax(4, x); rig.step();
+  }
+  v = im.stickCheckView();
+  check('a stick pushed on axis 4, which nothing reads: named as moving, and as a stray',
+    v.moving && v.moving.axis === 4 && v.moving.channel === null && v.strays.length === 1 && v.strays[0] === 4,
+    JSON.stringify({ moving: v.moving, strays: v.strays }));
+  rig.ax(4, 0); rig.step();
+  for (const x of [-0.3, -0.6, -0.9, -0.5, 0.2, 0.7]) {
+    rig.ax(0, x); rig.step();
+  }
+  v = im.stickCheckView();
+  check('roll moved: named with its channel, and counted as reaching the sim',
+    v.moving && v.moving.axis === 0 && v.moving.channel === 'roll' && v.moved.includes('roll'),
+    JSON.stringify({ moving: v.moving, moved: v.moved }));
+  for (let k = 0; k < 3; k += 1) {
+    rig.ax(5, 1); rig.step(); rig.ax(5, -1); rig.step();
+  }
+  v = im.stickCheckView();
+  check('a switch thrown on axis 5 is not a stray stick', !v.strays.includes(5), JSON.stringify(v.strays));
+  im.stopStickCheck();
+  rig.step();
+  check('closed: the watch is gone', im.stickCheck === null && im.stickCheckView().strays.length === 0);
+}
+
+section('stick help: which machine, and what the screen says');
+{
+  const {
+    stickPlatform, stickBrowser, stickSay, platformHelp, lostStickNotice, channelList,
+  } = await import('../src/ui/stickhelp.js');
+  const phoneUa = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36';
+  const desktopLinux = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
+  check('an Android phone is Android', stickPlatform({ userAgent: phoneUa }) === 'android');
+  check('the same phone asking for the desktop site, a finger for a pointer: still Android, as four of the nine phone tickets were',
+    stickPlatform({ userAgent: desktopLinux, maxTouchPoints: 5, coarse: true }) === 'android');
+  check('a Linux laptop with a touch screen and a touchpad is Linux',
+    stickPlatform({ userAgent: desktopLinux, maxTouchPoints: 10, coarse: false }) === 'linux');
+  check('Client Hints are believed over the string', stickPlatform({ userAgent: desktopLinux, uaPlatform: 'Android' }) === 'android');
+  check('an iPad asking for the desktop site says Macintosh with touch points: iPad',
+    stickPlatform({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15', maxTouchPoints: 5 }) === 'ios');
+  check('a Mac is a Mac', stickPlatform({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15' }) === 'mac');
+  check('Windows is Windows', stickPlatform({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36' }) === 'windows');
+  check('Safari, Firefox and Edge are told apart for the lines that name them',
+    stickBrowser('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15') === 'safari'
+    && stickBrowser('Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0') === 'firefox'
+    && stickBrowser('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36 Edg/153.0.0.0') === 'chromium');
+  check('channels read as a sentence', channelList(['yaw']) === 'yaw' && channelList(['yaw', 'throttle']) === 'yaw and throttle'
+    && channelList(['roll', 'pitch', 'yaw']) === 'roll, pitch and yaw');
+
+  const base = {
+    pad: 'Radio', axisCount: 4, axes: [], moving: null, strays: [], moved: [], dead: [], missing: [], fourAxes: false,
+  };
+  check('no pad: the sentence says a browser needs to see it move first', /only once something on it moves/.test(stickSay({})));
+  check('a missing axis outranks everything, and names the channel and the count',
+    /reads yaw from an axis this pad does not have/.test(stickSay({ ...base, missing: ['yaw'], moving: { axis: 0, channel: 'roll' } }))
+    && /It has 4/.test(stickSay({ ...base, missing: ['yaw'] })));
+  check('an unread axis moving like a stick: the browser has it, the sim has it on the wrong channel',
+    /Axis 4 is moving like a stick/.test(stickSay({ ...base, moving: { axis: 4, channel: null }, strays: [4] })));
+  check('an unread axis that moved without being a stick is offered, not diagnosed',
+    /If that is the stick that is not working/.test(stickSay({ ...base, moving: { axis: 5, channel: null } })));
+  check('a read axis moving is named and said to arrive',
+    stickSay({ ...base, moving: { axis: 3, channel: 'yaw' } }) === 'That is yaw, on axis 3, and it is reaching the sim.');
+  check('a dead channel on a phone passing four axes says what no bar moving would mean',
+    /Chrome is dropping it/.test(stickSay({ ...base, dead: ['yaw'], fourAxes: true }, 'android'))
+    && !/Chrome/.test(stickSay({ ...base, dead: ['yaw'], fourAxes: true }, 'windows')));
+  const android = platformHelp('android', 'chromium', { fourAxes: true, axisCount: 4 });
+  check('Android: four axes, the computer, and the radio side worded as untried',
+    /only four axes/.test(android.lines.join(' ')) && /computer/.test(android.lines.join(' '))
+    && /should get\s+all four through/.test(android.lines.join(' ')) && /arriving as 4 axes/.test(android.lines.join(' ')));
+  check('Windows: joy.cpl as the test, and not as a calibration',
+    /joy\.cpl/.test(platformHelp('windows').lines.join(' ')) && /changes nothing a browser reads/.test(platformHelp('windows').lines.join(' ')));
+  check('Safari on a Mac is told to try another browser first, and Chrome on a Mac is not',
+    /Try Chrome, Edge or Firefox/.test(platformHelp('mac', 'safari').lines[0])
+    && !/Try Chrome/.test(platformHelp('mac', 'chromium').lines.join(' ')));
+  check('the in flight banner is two short lines naming the one thing to do',
+    lostStickNotice('yaw') === 'Yaw is not reaching the sim.\nPause for Stick help.');
+  /* CLAUDE.md: no em or en dashes in anything a pilot reads. */
+  const every = [
+    stickSay({}), stickSay({ ...base }), stickSay({ ...base, missing: ['yaw', 'pitch'] }),
+    stickSay({ ...base, dead: ['yaw', 'throttle'], fourAxes: true }, 'android'),
+    ...['android', 'windows', 'mac', 'linux', 'ios', 'chromeos', 'other'].flatMap((p) => {
+      const h = platformHelp(p, p === 'mac' ? 'safari' : 'firefox', { fourAxes: true, axisCount: 4 });
+      return [h.title, ...h.lines];
+    }),
+  ].join('\n');
+  check('no em or en dash in any of it', !/[\u2013\u2014]/.test(every));
 }
 
 console.log(failed ? `\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);

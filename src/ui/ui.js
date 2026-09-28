@@ -186,6 +186,9 @@ import { mountRatesPanel } from './ratespanel.js';
 import { mountPidsPanel } from './pidspanel.js';
 import { touchWanted } from '../input/touchsticks.js';
 import {
+  capital, channelList, platformHelp, stickBrowser, stickPlatform, stickSay,
+} from './stickhelp.js';
+import {
   downloadCli, drawAttitude, FcSession, paintPageStrip, paintTabStrip,
 } from './fc.js';
 import { FC_DUMP_KEY, FC_DUMP_AIRFRAME_KEY } from '../fc/dump.js';
@@ -217,7 +220,7 @@ const LINK_ACTIONS = new Set(['leaderboard', 'wiki', 'support', 'partners']);
 const SCREEN_ACTIONS = new Set([
   'courses', 'race', 'freestyle', 'pilot', 'quad', 'launch', 'standings', 'rates', 'pids', 'fc',
   'howto', 'tricks', 'credits', 'trackbuilder', 'mapbuilder', 'builder', 'remix', 'editown',
-  'choosepad', 'calibrate',
+  'choosepad', 'calibrate', 'stickhelp', 'stickhelp-calibrate', 'stickhelp-check',
 ]);
 
 /* What the breadcrumb says, per screen. A room is a navigation parent, so a
@@ -284,6 +287,7 @@ const SCREEN_TITLES = {
   howto: 'How to fly',
   tricks: 'Trick list',
   credits: 'Credits',
+  stickhelp: 'Stick help',
 };
 const CRUMBS = {
   courses: ['Race'],
@@ -300,6 +304,7 @@ const CRUMBS = {
   howto: ['How to fly'],
   tricks: ['Freestyle', 'Trick list'],
   credits: ['Credits'],
+  stickhelp: ['Settings', 'Stick help'],
   title: ['WebFPV'],
 };
 
@@ -1847,6 +1852,67 @@ function makeWeightSlider({ min, max, step, value, label }) {
   return { box, range, cap, hint, dismiss };
 }
 
+/*
+ * ONE CELL PER AXIS THE RADIO REPORTS, for the calibrate screen and Stick
+ * help alike. Built once per axis count and moved after that: rebuilding the
+ * row every frame would throw away the dot's transition and churn the DOM at
+ * the frame rate, for a strip whose whole job is to look steady.
+ *
+ * The dot is the live value on a fixed -1 to 1 track, so a coarse axis steps
+ * and a fine one glides, and a pilot can see which of their controls is which
+ * without knowing what any of it means yet. `withChannel` writes under each
+ * cell the channel the sim reads from that axis, which is Stick help's whole
+ * point and would be noise in the wizard, where the channels are the thing
+ * still being found. Returns the cells, which the caller keeps.
+ */
+function paintAxisStrip(root, cells, axes, withChannel) {
+  let out = cells;
+  if (out.length !== axes.length) {
+    root.textContent = '';
+    out = axes.map((a) => {
+      const cell = el('div', 'cal-axis');
+      cell.append(el('span', 'cal-axis-n', String(a.i)));
+      const track = el('span', 'cal-axis-track');
+      const span = el('i', 'cal-axis-span');
+      const dot = el('i', 'cal-axis-dot');
+      track.append(span, dot);
+      cell.append(track);
+      const ch = withChannel ? el('span', 'cal-axis-ch', '') : null;
+      if (ch) {
+        cell.append(ch);
+      }
+      root.append(cell);
+      return {
+        cell, span, dot, ch,
+      };
+    });
+  }
+  /* Nothing to say about a radio that has gone away, and an empty strip
+   * says it better than eight stale dots. */
+  root.hidden = axes.length === 0;
+  const pct = (v) => `${Math.max(0, Math.min(100, ((v + 1) / 2) * 100)).toFixed(1)}%`;
+  axes.forEach((a, k) => {
+    const c = out[k];
+    if (!c) {
+      return;
+    }
+    c.dot.style.left = pct(a.v);
+    /* The travel bar is the range seen so far, drawn between its two
+     * ends, which is what the full range step is asking the pilot to
+     * grow. One axis unit is half the track. */
+    const lo = Number.isFinite(a.lo) ? a.lo : a.v;
+    const hi = Number.isFinite(a.hi) ? a.hi : a.v;
+    c.span.style.left = pct(lo);
+    c.span.style.width = `${Math.max(0, Math.min(100, (hi - lo) * 50)).toFixed(1)}%`;
+    const live = Math.abs(a.v - (a.rest || 0)) > 0.15;
+    Ui.klass(c.cell, `cal-axis${a.mapped ? ' is-mapped' : ''}${live ? ' is-live' : ''}`);
+    if (c.ch) {
+      Ui.text(c.ch, a.channel || 'unread');
+    }
+  });
+  return out;
+}
+
 function makePadCard() {
   const card = el('div', 'pad-card');
   const title = el('div', 'pad-card-title', '');
@@ -2341,7 +2407,7 @@ function recordSentence(s, trackName) {
  * complaining about. A banner nobody can focus is a banner a radio pilot
  * cannot act on, which would be the same joke twice.
  */
-function padTroubleItem(info) {
+function padTroubleItem(info, platform = 'other') {
   if (!info || !info.count || info.using === 'Keyboard') {
     return null;
   }
@@ -2354,6 +2420,25 @@ function padTroubleItem(info) {
         + ' Hold any stick away from centre for about a second and that counts as one press,'
         + ' which is enough to get in here and fix it properly. Calibrating ends by asking you'
         + ' to throw the switch you want as Enter, and after that it works like a button.',
+    };
+  }
+  /*
+   * A SAVED MAP THAT READS AN AXIS THIS PAD DOES NOT HAVE, which reads as a
+   * stick that does nothing and says nothing: see missingChannels in
+   * src/input/input.js. A fact about the map rather than an inference, so
+   * it goes first of the stick rows. It opens Stick help rather than the
+   * wizard, because on a phone passing four axes the wizard cannot finish
+   * either, and Stick help is the screen that says so.
+   */
+  const missing = info.missingChannels || [];
+  if (missing.length) {
+    return {
+      label: `Your calibration reads ${channelList(missing)} from an axis this radio does not have`,
+      action: 'stickhelp',
+      rowClass: 'row-warn',
+      note: `It was saved from a radio or a browser that sent more axes than the ${info.axisCount || 'few'}`
+        + ` arriving now, so ${channelList(missing)} reads nothing. Stick help shows what this radio`
+        + ' sends and whether calibrating again will find it.',
     };
   }
   /*
@@ -2379,15 +2464,27 @@ function padTroubleItem(info) {
    * a gamepad or a radio in some other order, and that pilot is about to
    * take off at half power on a stick that springs back.
    */
+  /*
+   * ON A PHONE THAT HANDS OVER FOUR AXES, the throttle sitting at the middle
+   * has a third explanation the two above do not: Chrome dropped the real
+   * throttle and axis 2 is the yaw stick. The wizard cannot finish with a
+   * stick missing, so there the row opens Stick help, which shows whether
+   * all four arrive and carries the wizard for when they do. See fourAxisPad
+   * in src/input/input.js.
+   */
   if (!info.calibrated && !info.mapUsable) {
+    const phone = platform === 'android' && info.fourAxes;
     return {
       label: 'This browser is guessing your stick order',
-      action: 'calibrate',
+      action: phone ? 'stickhelp' : 'calibrate',
       rowClass: 'row-warn',
       note: 'The axis it thinks is your throttle is sitting at the middle, and a real'
         + ' throttle rests at one end because it has no centring spring. So the guess is'
         + ' probably wrong, and a wrong guess means taking off at half power on a stick'
-        + ' that springs back. Calibrating takes about a minute and fixes it for good.',
+        + (phone
+          ? ' that springs back. On a phone, first check that all four sticks arrive at all:'
+            + ' Chrome on Android passes on only four of a radio\'s axes. Stick help shows which.'
+          : ' that springs back. Calibrating takes about a minute and fixes it for good.'),
     };
   }
   /*
@@ -2436,6 +2533,47 @@ function padTroubleItem(info) {
         + ' channels in another order, and your throttle is probably turning the quad'
         + ' instead of lifting it. Calibrating takes about a minute and tells this page'
         + ' which axis is which.',
+    };
+  }
+  /*
+   * A RADIO THE BROWSER HAS DRESSED AS A GAMEPAD. The standard layout reads
+   * its sticks as a gamepad's, which puts them on the wrong channels, and
+   * none of the three rows above is asked on the standard layout, because
+   * for a real gamepad there is no order to guess. See noteStandardParked
+   * in src/input/input.js.
+   */
+  if (!info.calibrated && info.radioAsGamepad) {
+    return {
+      label: 'This browser calls your radio a gamepad',
+      action: 'calibrate',
+      rowClass: 'row-warn',
+      note: 'One of its stick axes rests off centre and stays there, which a gamepad stick never'
+        + ' does and a radio\'s throttle always does. Read as a gamepad, its sticks land on the'
+        + ' wrong channels. Calibrating takes about a minute and tells this page which axis is'
+        + ' which.',
+    };
+  }
+  /*
+   * A STICK THE PILOT FLEW WITHOUT, on any map, calibrated or not: the
+   * owner's ask of 28 September, a stick not being moved for long enough
+   * brings up help. It is decided in flight (noteDeadChannels) and seen
+   * here on the pause menu and the title, and in flight as a banner. It
+   * opens Stick help, not the wizard, because the wizard only helps when
+   * the stick reaches the browser, and whether it does is exactly what the
+   * pilot does not know yet.
+   */
+  const dead = info.deadChannels || [];
+  if (dead.length) {
+    const phone = platform === 'android' && info.fourAxes
+      ? ' On a phone the likeliest cause is Chrome passing on only four of the radio\'s axes.'
+      : '';
+    return {
+      label: `${capital(channelList(dead))} ${dead.length > 1 ? 'are' : 'is'} not reaching the sim`,
+      action: 'stickhelp',
+      rowClass: 'row-warn',
+      note: `${capital(channelList(dead))} did not move once in flight while your other sticks did.`
+        + ' If you were moving it, the sim was not getting it. Stick help finds out whether that'
+        + ` is the sim, the browser or the radio, and says what fixes it.${phone}`,
     };
   }
   return null;
@@ -4057,6 +4195,20 @@ export class Ui {
     this.gpuInfo = null;
     /* Set by main.js; see setStickProbe. */
     this.stickProbe = null;
+    /* The machine and the browser, as far as Stick help's advice and the
+     * stick rows care. Read once: neither changes under a running page.
+     * See src/ui/stickhelp.js. */
+    const nav = typeof navigator !== 'undefined' ? navigator : {};
+    this.stickPlatform = stickPlatform({
+      userAgent: nav.userAgent,
+      uaPlatform: nav.userAgentData && nav.userAgentData.platform,
+      maxTouchPoints: nav.maxTouchPoints,
+      coarse: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,
+    });
+    this.stickBrowser = stickBrowser(nav.userAgent);
+    /* What the help block under the bars was last built for, so it is
+     * rebuilt only when that changes. See setStickHelp. */
+    this.stickHelpKey = '';
     /* Set by main.js when a map fails to load; see bugSnapshot. */
     this.loadFailure = null;
     /* The gravity hint is shown at most once per page load even before the
@@ -4942,6 +5094,48 @@ export class Ui {
     this.screens.calibrate = calibrate;
     this.calCanSave = false;
     this.calCanSkip = false;
+
+    /*
+     * STICK HELP. A stick that does nothing, and the one question that tells
+     * where it is lost: move it, does any bar move? See src/ui/stickhelp.js
+     * for the argument and every sentence, and STICK HELP in
+     * src/input/input.js for what is watched.
+     *
+     * The strip is the calibrate screen's, the same cells in the same
+     * classes painted by the same function, with the channel each axis is
+     * read as written under it, because "the sim reads this axis as yaw" is
+     * the thing this screen has to show and the calibrate screen does not.
+     * It is a room with rows, unlike the calibrate screen, so a radio pilot
+     * can leave it and the shell check walks it.
+     */
+    const stickhelp = el('div', 'screen screen-page screen-stickhelp');
+    stickhelp.append(el('h2', null, 'Stick help'));
+    stickhelp.append(el(
+      'p',
+      'stickhelp-lede',
+      'Move the stick that is not working, all the way to each end. Each bar is one axis your'
+        + ' radio sends to this browser. If one moves, the sim has your stick and Calibrate sticks'
+        + ' puts it on the right channel. If none does, the stick is not reaching the browser, and'
+        + ' the fix is in the block below.',
+    ));
+    this.stickAxes = el('div', 'cal-axes stickhelp-axes');
+    this.stickAxisCells = [];
+    this.stickSay = el('p', 'stickhelp-say', '');
+    this.stickSay.setAttribute('aria-live', 'polite');
+    this.stickPad = el('p', 'stickhelp-pad', '');
+    this.stickSteps = el('div', 'stickhelp-steps');
+    const stickBlock = wrapMenu();
+    this.stickHelpMenu = stickBlock.menu;
+    this.stickHelpHelp = stickBlock.help;
+    stickhelp.append(
+      this.stickPad,
+      this.stickAxes,
+      this.stickSay,
+      this.stickSteps,
+      stickBlock.stage,
+      hintWithKeys(['Esc'], 'Goes back. The sticks do not move the menu here: they are what is being tested.'),
+    );
+    this.screens.stickhelp = stickhelp;
 
     const padpick = el('div', 'screen screen-page screen-padpick');
     padpick.append(el('h2', null, 'Choose joystick'));
@@ -6506,7 +6700,7 @@ export class Ui {
        * offset as `items.length - rows.length`, so every card has to come
        * before every row or the cursor and the row list disagree by one.
        */
-      const trouble = padTroubleItem(this.padInfo);
+      const trouble = padTroubleItem(this.padInfo, this.stickPlatform);
       /*
        * THE GATE. THREE PICTURES, AND NOTHING ELSE ON THE PAGE TO ANSWER.
        *
@@ -6770,6 +6964,46 @@ export class Ui {
     }
     if (this.screen === 'howto') {
       return [{ label: 'Back', action: 'back' }];
+    }
+    /*
+     * STICK HELP'S WAYS ON, in the order the screen argues for them. The
+     * wizard first, because a bar that moves means the browser has the stick
+     * and a minute of calibrating is the whole fix. The pad picker last of
+     * the three, for the pilot whose bars are somebody else's device.
+     *
+     * ROUND TRIPS, so their own actions. The two wizard rows here come BACK
+     * here when the wizard ends, saved or cancelled, where the ones in
+     * Settings go back to Settings: the next thing a pilot who has just
+     * calibrated wants is to move the stick that was dead and watch it
+     * arrive, and this is the screen that shows that. Settings stays the one
+     * room that holds calibration, which lint:input asserts by the
+     * `calibrate` action, and these are doors into the same wizard from the
+     * one screen that sends people to it.
+     */
+    if (this.screen === 'stickhelp') {
+      return [
+        {
+          label: 'Calibrate sticks',
+          action: 'stickhelp-calibrate',
+          primary: true,
+          note: 'Centre, full range, then one named move per stick. It maps whatever axis actually'
+            + ' moves, so a stick the sim has on the wrong channel is fixed by this. A stick no bar'
+            + ' moves for is not: the block above says where that one is lost.',
+        },
+        {
+          label: 'Check sticks',
+          action: 'stickhelp-check',
+          note: 'The mapping flying now, live. Reverse a channel that goes the wrong way, or put the'
+            + ' sticks on the other hands.',
+        },
+        {
+          label: 'Choose joystick',
+          value: (this.padInfo && this.padInfo.using) || 'Keyboard',
+          action: 'choosepad',
+          note: padChooseNote(this.padInfo),
+        },
+        { label: 'Back', action: 'back' },
+      ];
     }
     /*
      * THE PARTNERS' ROW lives here, under the roll that names them, and not
@@ -7252,6 +7486,19 @@ export class Ui {
             + ' moves on screen, one key puts them on the other hands. Nothing is kept until you save.',
         },
         /*
+         * THE ONE FOR A STICK THAT DOES NOTHING AT ALL, which the two above
+         * cannot help with when the stick never reaches the browser. Always
+         * here, not only when a verdict is up, because the pilot who knows
+         * their yaw is dead should not have to fly twenty seconds to be let
+         * in. See STICK HELP in src/input/input.js.
+         */
+        {
+          label: 'Stick help',
+          action: 'stickhelp',
+          note: 'A stick that does nothing? Move it here and watch every axis your radio sends.'
+            + ' That tells the sim, the browser and the radio apart, and says what fixes each.',
+        },
+        /*
          * RESTART FROM THE RADIO, bug-a25bc2dd: "As people start to grind
          * tracks they will need ready access to a restart race hot key...
          * can be assigned to an AUX on the radio too." R was the only way
@@ -7675,11 +7922,26 @@ export class Ui {
       /* Third, under the two that keep the pilot flying: Escape, down, down,
        * Enter is the whole way to the builder. See builderReturnItem. */
       const builder = builderReturnItem(s, this.sharedMap);
+      /*
+       * THE STICK ROW, when there is one, under the rows that keep the pilot
+       * flying and never above them: Resume is where the cursor lands and
+       * the builder's row is a muscle memory. The pause is where a pilot
+       * lands after the in flight banner about a dead stick, so the row that
+       * banner points at has to be here, not only on the title.
+       *
+       * Whatever the row is about, from here it opens Stick help, which
+       * carries the wizard as a round trip and says what else it could be:
+       * a pilot mid run is better served by the screen that tests the stick
+       * than by a wizard that drops them in Settings.
+       */
+      const stickRow = padTroubleItem(this.padInfo, this.stickPlatform);
+      const trouble = stickRow ? { ...stickRow, action: 'stickhelp' } : null;
       return [
         { label: 'Resume', action: 'resume', primary: true },
         { label: 'Restart run', action: 'restart' },
         ...(builder ? [builder] : []),
         ...this.ghostItems(),
+        ...(trouble ? [trouble] : []),
         { label: 'Does it feel wrong?', section: true },
         tuneItem(s, true),
         /*
@@ -8272,6 +8534,7 @@ export class Ui {
     const host = {
       title: this.titleMenu,
       howto: this.howtoMenu,
+      stickhelp: this.stickHelpMenu,
       tricks: this.trickMenu,
       credits: this.creditsMenu,
       courses: this.coursesMenu,
@@ -8628,6 +8891,7 @@ export class Ui {
     return {
       title: this.titleHelp,
       howto: this.howtoHelp,
+      stickhelp: this.stickHelpHelp,
       tricks: this.trickHelp,
       credits: this.creditsHelp,
       courses: this.coursesHelp,
@@ -13535,53 +13799,51 @@ export class Ui {
   }
 
   /*
-   * One cell per axis the radio reports, built once per axis count and
-   * moved after that. Rebuilding the row every frame would throw away the
-   * dot's transition and churn the DOM at the frame rate for a screen whose
-   * whole job is to look steady.
-   *
-   * The dot is the live value on a fixed -1 to 1 track, so a coarse axis
-   * steps and a fine one glides, and a pilot can see which of their
-   * controls is which without knowing what any of it means yet.
+   * The calibrate screen's strip, painted by paintAxisStrip, which Stick
+   * help shares so the two screens draw an axis the same way.
    */
   setCalAxes(axes) {
     if (!this.calAxes) {
       return;
     }
-    if (this.calAxisCells.length !== axes.length) {
-      this.calAxes.textContent = '';
-      this.calAxisCells = axes.map((a) => {
-        const cell = el('div', 'cal-axis');
-        cell.append(el('span', 'cal-axis-n', String(a.i)));
-        const track = el('span', 'cal-axis-track');
-        const span = el('i', 'cal-axis-span');
-        const dot = el('i', 'cal-axis-dot');
-        track.append(span, dot);
-        cell.append(track);
-        this.calAxes.append(cell);
-        return { cell, span, dot };
-      });
+    this.calAxisCells = paintAxisStrip(this.calAxes, this.calAxisCells, axes, false);
+  }
+
+  /*
+   * STICK HELP, every frame it is up: the pad, the strip, the sentence that
+   * reads what the pilot's hand just did, and the block for when no bar
+   * moves. `view` is input.js's stickCheckView. The block is rebuilt only
+   * when what it depends on changes, because it is paragraphs, and the
+   * strip moves in place for the reason setCalAxes gives.
+   */
+  setStickHelp(view) {
+    if (!this.stickAxes || !view) {
+      return;
     }
-    /* Nothing to say about a radio that has gone away, and an empty strip
-     * says it better than eight stale dots. */
-    this.calAxes.hidden = axes.length === 0;
-    axes.forEach((a, k) => {
-      const cells = this.calAxisCells[k];
-      if (!cells) {
-        return;
+    const how = {
+      calibrated: 'read through your calibration',
+      standard: 'read as a standard gamepad',
+    }[view.map] || (view.guess === 'firefox'
+      ? 'read the way Firefox lays out a radio'
+      : 'read by the built in guess of a radio\'s channel order');
+    Ui.text(this.stickPad, view.pad
+      ? `${view.pad}: ${view.axisCount} ${view.axisCount === 1 ? 'axis' : 'axes'}, ${how}.`
+      : 'No radio or gamepad.');
+    this.stickAxisCells = paintAxisStrip(this.stickAxes, this.stickAxisCells, view.axes || [], true);
+    Ui.text(this.stickSay, stickSay(view, this.stickPlatform));
+    const key = `${this.stickPlatform}|${this.stickBrowser}|${view.fourAxes ? view.axisCount : ''}`;
+    if (key !== this.stickHelpKey) {
+      this.stickHelpKey = key;
+      const help = platformHelp(this.stickPlatform, this.stickBrowser, {
+        fourAxes: view.fourAxes,
+        axisCount: view.axisCount,
+      });
+      this.stickSteps.textContent = '';
+      this.stickSteps.append(el('h3', 'stickhelp-steps-title', help.title));
+      for (const line of help.lines) {
+        this.stickSteps.append(el('p', null, line));
       }
-      const pct = (v) => `${Math.max(0, Math.min(100, ((v + 1) / 2) * 100)).toFixed(1)}%`;
-      cells.dot.style.left = pct(a.v);
-      /* The travel bar is the range seen so far, drawn between its two
-       * ends, which is what the full range step is asking the pilot to
-       * grow. One axis unit is half the track. */
-      const lo = Number.isFinite(a.lo) ? a.lo : a.v;
-      const hi = Number.isFinite(a.hi) ? a.hi : a.v;
-      cells.span.style.left = pct(lo);
-      cells.span.style.width = `${Math.max(0, Math.min(100, (hi - lo) * 50)).toFixed(1)}%`;
-      const live = Math.abs(a.v - (a.rest || 0)) > 0.15;
-      Ui.klass(cells.cell, `cal-axis${a.mapped ? ' is-mapped' : ''}${live ? ' is-live' : ''}`);
-    });
+    }
   }
 
   setCalibration(view) {
@@ -13719,7 +13981,7 @@ export class Ui {
   }
 
   setPadInfo(info) {
-    const was = padTroubleItem(this.padInfo);
+    const was = padTroubleItem(this.padInfo, this.stickPlatform);
     const wasRestart = (this.padInfo && this.padInfo.restart) || null;
     const wasCapturing = Boolean(this.padInfo && this.padInfo.restartCapturing);
     this.padInfo = info || { count: 0, using: 'Keyboard' };
@@ -13743,9 +14005,12 @@ export class Ui {
      * every frame (the pad roster, the name) and the row is what is being
      * painted. Unchanged label, no work.
      */
-    const now = padTroubleItem(this.padInfo);
+    const now = padTroubleItem(this.padInfo, this.stickPlatform);
     const label = (r) => (r ? r.label : '');
-    if (this.screen === 'title' && label(was) !== label(now)) {
+    /* The pause menu carries the row too, and a dead stick is decided in
+     * flight, so the pause is usually the first screen to see it. See the
+     * paused list in buildItems. */
+    if ((this.screen === 'title' || this.screen === 'paused') && label(was) !== label(now)) {
       this.renderMenu();
     }
     /* The same for the restart switch row in Settings, which changes when
@@ -15178,7 +15443,7 @@ export class Ui {
      */
     if (action === 'howto' || action === 'pilot' || action === 'quad'
       || action === 'courses' || action === 'freestyle' || action === 'credits'
-      || action === 'tricks') {
+      || action === 'tricks' || action === 'stickhelp') {
       /*
        * A room opened FROM another room remembers which, so Back is the way
        * you came rather than a jump to the title. Only from a real room,
@@ -15838,7 +16103,22 @@ export class Ui {
      * the gate the sticks fall through to the ordinary card walk, pitch to
      * move and roll right to choose, which is what the hint under it says.
      */
-    if (this.screen === 'quad' || (this.screen === 'title' && !this.onGate()) || this.screen === 'rates' || this.screen === 'pids' || this.screen === 'fc') {
+    /*
+     * STICK HELP is on the same list for the strongest reason of any: the
+     * sticks are what is under test, and the screen tells the pilot to push
+     * each one to its stops. A stick that walked the cursor there would have
+     * pressed Back or Calibrate the first time it was pushed.
+     *
+     * And its select is not the hold. A radio with no buttons presses Enter
+     * by holding a stick off centre for most of a second (see holdSelect in
+     * src/input/input.js), which on this screen is what the pilot is asked
+     * to do with every stick, so that radio selects here by key, click or
+     * its assigned menu switch only.
+     */
+    if (this.screen === 'stickhelp' && this.padInfo && !this.padInfo.buttons && !this.padInfo.hasSelect) {
+      now.select = false;
+    }
+    if (this.screen === 'quad' || (this.screen === 'title' && !this.onGate()) || this.screen === 'rates' || this.screen === 'pids' || this.screen === 'fc' || this.screen === 'stickhelp') {
       /*
        * The STICKS stay out, for the reasons above. The BUTTONS do not.
        *

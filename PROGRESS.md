@@ -58733,6 +58733,200 @@ try each shape. What would count as wrong: the mark off the centre of
 the picture, lost against the sky or the ground, covering the gate
 you aim through, showing over a menu, or still drawn on Off.
 
+## 2026-09-28 | input, ui, checks | Stick help: a stick that does nothing is caught in flight, and the pilot is shown where it is lost
+
+### What the owner asked, and the answer
+
+The owner, 28 September: "i'm getting bug tickets that some controllers
+can [not] use yaw or pitch etc ... its hard to know if the user just isn't
+setting their radio up correctly on their pc as a joystick etc. perhaps we
+can implement a system where if one axis is not being inputted after a
+given amount of time, a help system comes up directing the user how to
+calibrate their joysticks etc in game or in OS? thoughts?"
+
+The reply read the board first and proposed: a detector gated on evidence
+as well as time, a banner in flight rather than anything modal, a help
+screen that diagnoses with the pilot's hand on the stick before it
+instructs, the verdicts in every bug report, and two fixes found on the
+way (a radio Firefox calls a gamepad, a saved map naming an axis the pad
+does not have). It said the Android advice on the radio side is worked out
+from Chromium's code and not tried on a phone. The owner's answer, 28
+September 2026: "yes build it". Nothing here touches the plant, the module
+ABI or the build.
+
+### What the board said
+
+Read only, GET /board/api/bugs?limit=500 (200 tickets, 6 open: one stick
+ticket, bug-f532d90b, and five Flight feel replies) and the full report of
+each of the 31 stick tickets through GET /api/bugs/<id>.
+
+- PHONES, nine tickets, every one about yaw or throttle: bug-f532d90b
+  (LiteRadio 2, open), bug-338cd29b, bug-87023680, bug-a7787168,
+  bug-753fdbde, bug-3d72d9a4, bug-94f7e52b, bug-13519874, bug-27386f07.
+  Four of them say "X11; Linux x86_64", a phone asking for the desktop
+  site; their GPUs, Adreno and Mali, say phone. The two that list their
+  axes list exactly four. Chromium's GamepadMappings.java, the unknown
+  pad's legacy branch: X and Y, the last of Z and Rx, the last of Ry and
+  Rz, and every other axis dropped. A radio in AETR order has throttle on
+  Z and yaw on Rx, one slot between them. A newer branch that keeps the
+  rest is behind kAndroidUnknownGamepadExtraAxes, enabled by default in
+  Chromium's current source; bug-f532d90b, Chrome 153 today, still shows
+  four. Five of the nine were closed as fixed on changes that lead to
+  calibrating, which cannot bring back an axis the browser never hands
+  over.
+- FIREFOX ON LINUX, both tickets: bug-c9423f3e and bug-9cc39ca4 ("no
+  pitch", marked fixed on the board with no resolution and no commit).
+  LinuxGamepad.cpp calls any device with BTN_GAMEPAD a standard gamepad,
+  takes axes 0 to 3 from X, Y, Rx and Ry and appends Z, Rz and the sliders
+  after them. An AETR EdgeTX radio reads aileron, elevator, rudder, channel
+  5, throttle, channel 6, 7, 8. On the AETR guess that is the throttle on
+  the rudder stick and the real throttle unread (the first ticket, word for
+  word); on the standard layout since 27 September it is pitch read from
+  channel 5 (the second).
+- DESKTOPS: mostly a radio flown on the AETR guess in another order, which
+  the wizard fixes; the three rows on the title only ever watched yaw, only
+  before calibration, only on the title.
+- SAFARI ON A MAC: bug-7d3064fc and bug-c3ecb273, no radio seen at all.
+- WINDOWS: Chrome reads raw HID against the report descriptor's range
+  (raw_input_gamepad_device_win.cc), so Windows' Game Controllers
+  calibration never reaches a browser. joy.cpl is a test, not a fix.
+
+### What changed
+
+- `src/input/input.js`
+  - noteDeadChannels: a channel whose whole range in 20 s of flight (the
+    throttle's in 8 s) is under 0.05, while two of the others have swept
+    like sticks, is dead. On any map. Read from the pad before the keys
+    are laid over it. Tested both ways: it comes down for good when the
+    channel moves like a stick, and a switch thrown on it is not that.
+    Reset with the pad, the map and a calibration. No allocation per poll
+    once the watch exists.
+  - missingChannels: the map reads an axis this pad does not have, which
+    readGamepad reads as a silent 0. The saved map is one per browser.
+  - strayAxes: axes no channel reads that the flight saw swept like a
+    stick, for the report and the help screen.
+  - fourAxisPad: the shape Chrome on Android gives a radio.
+  - firefoxRadio and a new guess, 'firefox': a standard pad whose Firefox
+    id (vendor, product, name, hyphen joined) names a radio, with five
+    axes or more, flies the AETR guess read through Firefox's table: roll
+    0, pitch 1, yaw 2, throttle 4. Every check the AETR guess gets runs on
+    it and the wizard overrides it. THIS CHANGES WHAT FLIES for those
+    pilots, which is the point: with it taken out, the self test's Firefox
+    radio at rest read full pitch down from a channel 5 switch parked at
+    one end.
+  - noteStandardParked: a pad called standard whose stick axis rests off
+    centre and still for four seconds in a menu is a radio. A row offers
+    the wizard; nothing that flies changes. Never in flight, where a
+    gamepad pilot holds full throttle against the stop.
+  - Stick help's watch: startStickCheck, noteStickCheck in poll(),
+    stickCheckView.
+  - padSummary and mapReport carry it all; a report gains `guess`,
+    `buttons` and `check` { dead, missing, stray, flownS, asGamepad }.
+  - The four axis sweep hint names the browser as well as the radio.
+- `src/ui/stickhelp.js`, new: the platform (a phone asking for the desktop
+  site is told by a coarse pointer), the live sentence, the block for when
+  no bar moves per platform, the banner's two lines.
+- `src/ui/ui.js`: the Stick help screen; paintAxisStrip, the calibrate
+  screen's strip made shared, with the channel read from each axis written
+  under it; three new trouble rows (a missing axis, a radio dressed as a
+  gamepad, a dead stick); the old "guessing your stick order" row opens
+  Stick help on a phone passing four axes; the pause menu carries the row,
+  always opening Stick help; Settings has a Stick help row; on Stick help
+  the sticks do not move the cursor and the hold gesture does not select.
+- `src/main.js`: the banner, once per channel per page, in flight only;
+  the wizard's exit goes back to where it was opened.
+- `index.html`: the screen's styles. `src/fresh.js`: regenerated.
+- Checks: `scripts/input-selftest.js` 225 to 292, `scripts/input-check.js`
+  a Stick help section, and Stick help added to the screens
+  `scripts/shell-check.js` and `scripts/device-check.js` walk.
+
+### Decisions made here, for the owner to overrule
+
+1. 20 s, 8 s for the throttle, two other sticks in use. "A given amount
+   of time" asked for a number and these were reasoned, not measured. A
+   pilot who has not needed yaw yet may see the banner once; the row goes
+   the moment they yaw.
+2. A banner, not a panel, and once per channel per page load.
+3. The Firefox guess changes what a Firefox on Linux pilot's radio flies.
+4. Stick help's Calibrate sticks and Check sticks are round trips with
+   their own actions, stickhelp-calibrate and stickhelp-check, so the
+   wizard ends back on Stick help. lint:input asserts that exactly one room
+   holds a row whose action is `calibrate`, Settings, and that stays true;
+   the check was not widened.
+5. The Android paragraph's radio half is worked out from Chromium's code
+   and not tried on a phone. It says "should" and asks for a report from
+   the screen, which would carry the axis list that settles it.
+
+### The baseline, and the argument
+
+tests/shell-baseline.json: Settings overflow 1138 to 1182 px, one row
+(Stick help), by hand, the argument of the Crosshairs, Frame pacing and
+Predicted view rows before it: the file is today's overflow and not a
+target, the row is deliberate, and lint:devices reaching every row is the
+condition, run below. Not --record: the fc and tricks improvement notes
+are on main already and not this change's.
+
+### What went wrong
+
+- The live sentence reused .cal-hint, whose min-height lets a flex column
+  squash it under its own text: at 850 by 383, the phone of bug-f532d90b,
+  it drew over the panel below. Seen in a scratch screenshot; nothing on
+  the screen shrinks now and the page scrolls.
+- The lint:input section needed three goes: a const name used twice in
+  that function, `ui.act('pause')` alone does not change the screen (the
+  shell pairs it with show, so the check presses Escape), and it assumed
+  the AETR guess on a page an earlier section had calibrated. It reads the
+  flying map now. The product was right each time.
+- The self test's dash check had the dash characters in its source; it
+  uses escapes now, and a dash put in one sentence made it fail.
+- Not this change, found running the cheap checks: lint:boot is 8 of 9 on
+  main. "A thrown frame is caught and reported" looks for the try in
+  frame(), and the frame pacing change moved it into runFrame(); the frame
+  is still wrapped, and the same pattern fails on origin/main's main.js.
+  Last recorded 9 of 9 before that change. lint:nouns fails on
+  src/maps/built/showpiece.js:149 "Drift course", as in the entry above.
+
+### RUN LOG
+
+    node scripts/input-selftest.js   all 292 passed (225 before, 67 new)
+    mutations, each restored         dead verdict at 30 s, a switch
+                                     counted as a stick, no Firefox guess,
+                                     the standard parked test in flight,
+                                     a dash in one sentence: each caught
+    npm run lint:input               all 170 passed, 193 s
+    npm run lint:shell               FAIL on pilot overflow 1138 to 1182,
+                                     the one row; after the baseline edit
+                                     PASS. stickhelp 4 of 4 stops reached,
+                                     Escape to title
+    npm run lint:devices             PASS, Stick help included, five devices
+    npm run lint:preload             up to date, boot 121, 230 served
+    npm run lint:boot                8 of 9, the stale pattern above
+    npm run lint:nouns               FAIL, "Drift course", not this change
+    scratch probe (tests/lib/page.js, the real shell, 1600x900 and 850x383,
+      not in the repository)         the screen, the live sentence for an
+                                     unread stick and a read one, Back,
+                                     the round trip, the pause row;
+                                     screenshots looked at, not committed
+    npm run verify                   not run. The verify harness does not
+                                     import InputManager and headless
+                                     Chromium has no gamepad, so the gp
+                                     branch this adds to is never taken
+                                     there. That is reasoning, not a
+                                     result; the scale is put to the owner
+    scripts/shots.js                 not run; put to the owner
+    board                            nothing written. bug-f532d90b is open
+                                     and is this change's first reader
+
+### The owner's answer, 2026-09-28
+
+"Merge to main". It covered the merge; the verification scale was not
+chosen, so no pass beyond the RUN LOG above was run, and nobody has flown
+Stick help yet. main had not moved from f496be3, fetched and checked
+before the push, so it goes to main as a fast-forward of
+claude/funny-hamilton-k6vwfb, no merge commit and no force. Nothing was
+written to the board: whether to answer bug-f532d90b is still the
+owner's.
+
 ## 2026-09-28 | ui, settings | Manga and scoring: one switch for the manga look and the score's readouts
 
 ### The ask
@@ -58932,3 +59126,48 @@ while it was off. What would count as wrong: anything lettered, inked or
 scored on the screen with it off, a title drawn twice or left transparent,
 a note under the bottom bar, or a score that differs with it on from the
 same flight with it off.
+
+### The owner's answer, 2026-09-28, and the merge
+
+"Merge to main". It covered the merge. The verification scale was not
+chosen, so no pass beyond the checks below was run, and nobody has flown
+Manga and scoring yet. The two questions left open above, Save share card
+with the switch off and the results list under the menu, were not answered
+and stay open.
+
+main had moved while this was built: f496be3 when it started, ca4bac0 when
+the answer came, with Stick help (5bbea5b) and its note on it. So
+origin/main was merged into claude/relaxed-ride-gwrarg with a merge commit:
+no rebase and no force. Two conflicts, both expected. PROGRESS.md, where
+each change had appended its entry at the end: Stick help's goes first, as
+it reached main first. And the Settings overflow in
+tests/shell-baseline.json, which each change had moved for a row of its
+own, 1182 on main and 1183 here: the merged tree was measured rather than
+the two added up, 1227 px with 33 of 33 stops reached, which is main's 1182
+and this row's 45. The argument is the one above, and lint:devices reaching
+every row on the merged tree is its condition. ui.js, main.js and
+index.html merged without a conflict, and this change's added and removed
+lines against main's base are the same, line for line, as against f496be3.
+main then went forward to the merge as a fast-forward, fetched and checked
+just before the push.
+
+On the merged tree:
+
+    node --check                 src/ui/ui.js and src/main.js clean
+    npm run lint:preload         up to date, boot 121 modules, city 75,
+                                 built 35; 230 served
+    npm run lint:shell           first run FAIL, "pilot: overflow grew from
+                                 1182 to 1227 px", 33 of 33 stops, stickhelp
+                                 4 of 4, ids 320 rows across 15 screens all
+                                 named, unique and stable; after the
+                                 baseline edit PASS
+    npm run lint:devices         PASS, every row and note on five devices,
+                                 Stick help included, the builder bars,
+                                 the results page, the flight OSD on phones
+    scratch probe                42 of 42, the same probe as above
+    npm run lint:input           not run: nothing in the input path changed
+                                 here, and the merge takes Stick help's
+                                 input code exactly as main has it, where
+                                 its own run passed 170 of 170
+    npm run verify               not run: neither change touches the plant,
+                                 the module ABI or the build

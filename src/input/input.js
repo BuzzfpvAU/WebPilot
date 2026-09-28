@@ -315,6 +315,142 @@ const GUESS = {
 };
 
 /*
+ * A STICK THE PILOT IS FLYING WITHOUT. See noteDeadChannels.
+ *
+ * The three questions above are asked of the AETR guess and nothing else,
+ * and each asks about one axis. Most of the stick tickets on the board were
+ * outside all three: a calibrated map, a standard gamepad, a saved map on a
+ * different radio, and above all a phone whose browser never delivered the
+ * axis in the first place. What they share is the symptom, so this watches
+ * the symptom: a channel that has not moved once in real flying, while the
+ * pilot has plainly been using the others.
+ */
+const DEAD = {
+  /* Flight time on this pad and this map before a still channel is called
+   * dead. Long enough that a pilot who has not needed yaw yet is not told
+   * off for it, short enough that the pilot who is trying to yaw hears about
+   * it inside their first minute. */
+  FLY_MS: 20000,
+  /* The throttle is judged sooner, because without it nothing leaves the
+   * pad, and eight seconds of wiggling every other stick on the start block
+   * is already a pilot looking for it. */
+  THROTTLE_MS: 8000,
+  /* A channel counts as in use once it has swept this far, in the channel's
+   * own units: -1 to 1 for the centred three, 0 to 1 for the throttle. With
+   * the level count below, so a switch thrown twice does not count. */
+  USED: 0.6,
+  USED_THROTTLE: 0.3,
+  /* How many of the other three have to be in use. Two, so a pilot who is
+   * only hovering on throttle and pitch is not judged on roll and yaw. */
+  OTHERS: 2,
+  /* A channel whose whole range in flight is under this has not moved. The
+   * deadband in readGamepad already holds a resting stick at exactly 0, so a
+   * live stick nobody touches reads 0 here, and so does an axis that is not
+   * there at all. */
+  STILL: 0.05,
+  /* And once a channel has moved like a stick, this far and through enough
+   * levels, it is alive, the verdict comes down, and nothing reopens it on
+   * this pad and map. The same latch noteGuessOrder keeps, for its reason: a
+   * warning that blinks is worse than either answer. */
+  ALIVE: 0.4,
+};
+
+/* Did this range move like a stick: far enough, and through enough distinct
+ * levels that it was not a switch. Shared by the flight's watch and the help
+ * screen's, which ask the same question. */
+function sweptLikeStick(span, far) {
+  return span.hi - span.lo >= far && span.levels.size >= GUESS.STRAY_LEVELS;
+}
+
+/* One range, grown by one reading. The level set stops growing at the
+ * count sweptLikeStick asks for, so a long flight costs nothing more. */
+function growSpan(span, v) {
+  if (v < span.lo) {
+    span.lo = v;
+  }
+  if (v > span.hi) {
+    span.hi = v;
+  }
+  if (span.levels.size < GUESS.STRAY_LEVELS) {
+    span.levels.add(Math.round(v / GUESS.LEVEL_STEP));
+  }
+}
+
+function newSpan(v) {
+  return { lo: v, hi: v, levels: new Set([Math.round(v / GUESS.LEVEL_STEP)]) };
+}
+
+/*
+ * A BROWSER THAT HANDS OVER EXACTLY FOUR AXES.
+ *
+ * Chrome on Android, given a joystick it does not recognise, passes on four
+ * axes and drops every other one. Its fallback mapping (GamepadMappings.java,
+ * UnknownGamepadMappings) keeps X, Y, the last of Z and Rx, and the last of
+ * Ry and Rz. A radio in AETR order sends throttle on Z and yaw on Rx, so one
+ * of the two is always among the dropped, and which one depends on the radio
+ * and the phone. Nine radio tickets from phones up to 28 September read like
+ * this, every one about yaw or throttle, and the two that listed their axes
+ * listed four (bug-338cd29b, bug-f532d90b). The mapping for an unknown pad is
+ * never 'standard' there, which is what tells it from a gamepad Chrome knows.
+ *
+ * This file cannot see the phone, only the four axes, so it reports the
+ * shape and the shell, which can read the platform, says what it means.
+ */
+function fourAxisPad(gp) {
+  return Boolean(gp && gp.mapping !== 'standard' && gp.axes && gp.axes.length === 4);
+}
+
+/*
+ * FIREFOX ON LINUX CALLS A RADIO A GAMEPAD, AND MOVES ITS AXES WHEN IT DOES.
+ *
+ * Its evdev backend (dom/gamepad/linux/LinuxGamepad.cpp) treats any device
+ * with the BTN_GAMEPAD key as a standard gamepad, and an EdgeTX radio in
+ * joystick mode has it: bug-9cc39ca4's Pocket arrived as `mapping ===
+ * 'standard'` with eight axes. Firefox then takes axes 0 to 3 from X, Y, Rx
+ * and Ry, the standard layout's four sticks, and appends every other axis
+ * after them in evdev order: Z, Rz, then the sliders. The radio sends its
+ * channels on X, Y, Z, Rx, Ry, Rz and the two sliders, in order, so an AETR
+ * radio reads here as
+ *
+ *   0 aileron  1 elevator  2 rudder  3 channel 5  4 throttle  5 channel 6 ...
+ *
+ * Both Firefox tickets on the board are that table:
+ *
+ *   bug-c9423f3e  Radiomaster Pocket, 24 September, on the AETR guess:
+ *                 "the throttle is mapped on the yaw axes and the throttle
+ *                 movement is not detected". Axis 2 is the rudder and the
+ *                 throttle is on axis 4, which nothing read.
+ *   bug-9cc39ca4  the same radio, 27 September, on the standard layout the
+ *                 gamepad change had just given it: "no pitch". Pitch was
+ *                 read from axis 3, which is channel 5, a switch.
+ *
+ * So a standard pad that Firefox names like a radio is flown as the AETR
+ * guess read through that table. Only Firefox builds an id as vendor,
+ * product and name joined by hyphens, and the name has to say Joystick or
+ * the firmware, so a real gamepad in Firefox and every pad in Chrome keep
+ * the standard layout. It is still a guess, with every check the AETR guess
+ * gets, and the wizard still overrides it.
+ */
+const FIREFOX_PAD_ID = /^[0-9a-f]{4}-[0-9a-f]{4}-(.*)$/i;
+const RADIO_NAME = /joystick|edgetx|opentx|freedomtx/i;
+
+function firefoxRadio(gp) {
+  if (!gp || gp.mapping !== 'standard' || !gp.axes || gp.axes.length < 5) {
+    return false;
+  }
+  const m = FIREFOX_PAD_ID.exec(String(gp.id || ''));
+  return Boolean(m && RADIO_NAME.test(m[1]));
+}
+
+function firefoxRadioGuessMap() {
+  const map = cloneMap({ ...DEFAULT_MAP, stored: false });
+  map.yaw = { ...DEFAULT_MAP.yaw, axis: 2 };
+  map.throttle = { ...DEFAULT_MAP.throttle, axis: 4 };
+  map.guess = 'firefox';
+  return map;
+}
+
+/*
  * WHICH CHANNELS ARE BACKWARDS, AND WHY THIS HAD TO EXIST.
  *
  * The wizard works out a channel's direction from the direction the pilot
@@ -859,13 +995,22 @@ function calHint(c, travelled, need, gp, idleThrottle = 0, moving = null) {
      * no amount of stick moving on this screen will finish the step. Say
      * which, and where the fix is. Only for a radio with no spare axis,
      * because on one with switches and sliders a still axis is normal.
+     *
+     * AND IT IS NOT ALWAYS THE RADIO. Four axes is also exactly what Chrome
+     * on Android hands over from a radio it does not recognise, having
+     * dropped the rest, and that is the more common way to arrive here: see
+     * fourAxisPad. The sentence used to send every one of those pilots to a
+     * radio setting that was already right. It names both now, and the
+     * screen that can tell them apart.
      */
     if (travelled === need - 1 && c.min && c.max && c.min.length === need) {
       for (let i = 0; i < need; i += 1) {
         if (c.max[i] - c.min[i] < 0.02) {
-          return `Axis ${i} has not moved at all. If you have moved every stick,`
-            + ' your radio is not sending that one: in its USB joystick settings,'
-            + ' give each of the four sticks a channel, then reconnect.';
+          return `Axis ${i} has not moved at all. If you have moved every stick, that one`
+            + ' is not reaching this browser. Either the radio is not sending it (in its'
+            + ' USB joystick settings, give each of the four sticks a channel, then'
+            + ' reconnect), or the browser is dropping it, which Chrome on Android does.'
+            + ' Stick help, in Settings, tells the two apart.';
         }
       }
     }
@@ -1163,6 +1308,22 @@ export class InputManager {
     this.guessYawParked = false;
     this.yawParkAt = null;
     this.yawParkSince = 0;
+    /* The stick the pilot is flying without, on any map: the flight's
+     * watch, the channels judged dead (a new array on every change, so the
+     * shell can compare it by reference), and the ones that have proved
+     * alive and are never judged again. See noteDeadChannels. Reset with
+     * the pad and with the map, because it is a fact about both. */
+    this.deadWatch = null;
+    this.deadList = [];
+    this.deadAlive = new Set();
+    /* A pad the browser calls a standard gamepad whose stick axis rests off
+     * centre like a throttle, which no gamepad does. See
+     * noteStandardParked. */
+    this.radioAsGamepad = false;
+    this.stdPark = null;
+    /* The help screen's own watch, from the moment it opened: every axis's
+     * rest and range. Null while the screen is not up. See stickCheckView. */
+    this.stickCheck = null;
     /* The radio's restart switch. See RESTART_STORE_KEY and
      * noteRestartSwitch. restartPrevOn starts unknown, so a switch that is
      * already on when the page loads is not a flip. */
@@ -1584,6 +1745,194 @@ export class InputManager {
   }
 
   /*
+   * A CHANNEL THAT HAS NOT MOVED ONCE IN REAL FLYING.
+   *
+   * The owner, 28 September: tickets saying a controller "can't use yaw or
+   * pitch", and no way to tell a radio set up wrong from a fault here. The
+   * pilot who files one has usually spent a minute trying to yaw first, and
+   * that minute is evidence nobody was reading. So the flight reads it: how
+   * far each channel has gone, as this pad and this map deliver it, before
+   * any key is laid over the top, and how long it has been flown.
+   *
+   * A channel is called DEAD when its whole range in DEAD.FLY_MS of flight
+   * (the throttle's in THROTTLE_MS) is under DEAD.STILL, while at least two
+   * of the others have swept like sticks. Nothing about why: the axis may
+   * not exist on this pad (see missingChannels), the browser may never have
+   * delivered it (see fourAxisPad), the map may have the stick somewhere
+   * else (see strayAxes), or the radio may not send it. Telling those apart
+   * is the help screen's job, with the pilot's hand on the stick, and this
+   * only has to say that there is something to tell apart.
+   *
+   * Tested both ways, as every latch here is: a dead channel that then moves
+   * like a stick comes down and is never judged again on this pad and map,
+   * and a switch thrown on the same axis is not a stick moving.
+   *
+   * Called from poll() while flying, with the pad's own reading. Nothing is
+   * allocated per poll once the watch exists: the ranges are grown in place
+   * and the list is replaced only when a verdict changes.
+   */
+  noteDeadChannels(ch, gp, dtMs) {
+    let w = this.deadWatch;
+    if (!w) {
+      w = { ms: 0, span: {}, axes: [] };
+      for (const name of IDENT_CHANNELS) {
+        w.span[name] = newSpan(ch[name]);
+      }
+      this.deadWatch = w;
+    }
+    w.ms += dtMs;
+    for (const name of IDENT_CHANNELS) {
+      growSpan(w.span[name], ch[name]);
+    }
+    /* The raw axes too, bounded like mapReport's, so a report and the help
+     * screen can say where a missing stick went. See strayAxes. */
+    const n = Math.min(gp.axes.length, 16);
+    for (let i = 0; i < n; i += 1) {
+      if (w.axes[i]) {
+        growSpan(w.axes[i], gp.axes[i]);
+      } else {
+        w.axes[i] = newSpan(gp.axes[i]);
+      }
+    }
+    for (const name of IDENT_CHANNELS) {
+      if (this.deadAlive.has(name)) {
+        continue;
+      }
+      const s = w.span[name];
+      if (sweptLikeStick(s, DEAD.ALIVE)) {
+        this.deadAlive.add(name);
+        if (this.deadList.includes(name)) {
+          this.deadList = this.deadList.filter((x) => x !== name);
+        }
+        continue;
+      }
+      if (this.deadList.includes(name) || s.hi - s.lo >= DEAD.STILL) {
+        continue;
+      }
+      if (w.ms < (name === 'throttle' ? DEAD.THROTTLE_MS : DEAD.FLY_MS)) {
+        continue;
+      }
+      let others = 0;
+      for (const o of IDENT_CHANNELS) {
+        if (o !== name && sweptLikeStick(w.span[o], o === 'throttle' ? DEAD.USED_THROTTLE : DEAD.USED)) {
+          others += 1;
+        }
+      }
+      if (others >= DEAD.OTHERS) {
+        this.deadList = this.deadList.concat(name);
+      }
+    }
+  }
+
+  /* A new pad or a new map: the old flight said nothing about either. */
+  forgetDeadChannels() {
+    this.deadWatch = null;
+    if (this.deadList.length) {
+      this.deadList = [];
+    }
+    this.deadAlive.clear();
+  }
+
+  /*
+   * THE SAVED MAP NAMES AN AXIS THIS PAD DOES NOT HAVE.
+   *
+   * readGamepad reads a missing axis as 0, silently, which is right for a
+   * poll and wrong for a pilot: calibrate a radio with eight axes, plug in
+   * one with four, or open the same page on a phone whose browser hands over
+   * four, and yaw on axis 5 is a stick that does nothing and says nothing.
+   * The map is one per browser, not one per radio, so this is not rare.
+   * Asked live rather than latched, because plugging the first radio back in
+   * answers it.
+   */
+  missingChannels(gp) {
+    if (!gp || !gp.axes) {
+      return [];
+    }
+    const out = [];
+    for (const ch of IDENT_CHANNELS) {
+      const spec = this.map[ch];
+      if (spec && Number.isInteger(spec.axis) && spec.axis >= gp.axes.length) {
+        out.push(ch);
+      }
+    }
+    return out;
+  }
+
+  /*
+   * AXES THE MAP DOES NOT READ THAT THE FLIGHT HAS SEEN SWEPT LIKE A STICK,
+   * which is where a dead channel usually went. noteGuessOrder's question,
+   * asked of every map rather than the guess alone, and only answered here
+   * for a report and the help screen: on its own it proves nothing, because
+   * a pilot may simply have turned a knob.
+   */
+  strayAxes() {
+    const w = this.deadWatch;
+    if (!w) {
+      return [];
+    }
+    const named = usedAxes(this.map);
+    const out = [];
+    for (let i = 0; i < w.axes.length; i += 1) {
+      if (w.axes[i] && !named.has(i) && sweptLikeStick(w.axes[i], GUESS.STRAY_SWEPT)) {
+        out.push(i);
+      }
+    }
+    return out;
+  }
+
+  /*
+   * A STANDARD GAMEPAD WHOSE STICK RESTS LIKE A THROTTLE IS NOT A GAMEPAD.
+   *
+   * The Standard Gamepad layout's axes 0 to 3 are four sprung stick axes,
+   * and a sprung stick nobody is touching reads zero. A radio's throttle has
+   * no spring and waits wherever it was left. So a pad the browser calls
+   * standard, flying the standard layout, with one of those four axes off
+   * centre and still for GUESS.PARK_MS, is a radio the browser has dressed
+   * as a gamepad, and the standard layout is putting its sticks on the wrong
+   * channels. firefoxRadio catches the case this is known to happen in by
+   * name; this catches it by behaviour, wherever else it turns up.
+   *
+   * ONLY OUT OF FLIGHT. In flight a gamepad pilot holds full throttle against
+   * the stop for seconds at a time, which is exactly this reading. In a menu
+   * nobody does, and a radio's throttle sits at the bottom through all of it.
+   * The verdict changes nothing that flies: it is a row offering the wizard,
+   * which maps whatever actually moves.
+   */
+  noteStandardParked(gp, nowWall) {
+    if (this.flying) {
+      this.stdPark = null;
+      return;
+    }
+    if (this.radioAsGamepad || this.map.guess !== 'standard') {
+      return;
+    }
+    const n = Math.min(gp.axes.length, 4);
+    if (!this.stdPark || this.stdPark.length !== n) {
+      this.stdPark = [];
+      for (let i = 0; i < n; i += 1) {
+        this.stdPark.push({ at: null, since: 0 });
+      }
+    }
+    for (let i = 0; i < n; i += 1) {
+      const v = gp.axes[i];
+      const p = this.stdPark[i];
+      if (!(Math.abs(v) >= GUESS.PARK_OFF)) {
+        p.at = null;
+        continue;
+      }
+      if (p.at === null || Math.abs(v - p.at) > GUESS.PARK_STILL) {
+        p.at = v;
+        p.since = nowWall;
+        continue;
+      }
+      if (nowWall - p.since >= GUESS.PARK_MS) {
+        this.radioAsGamepad = true;
+        return;
+      }
+    }
+  }
+
+  /*
    * THE RESTART SWITCH, watched on every poll that reads a radio.
    *
    * A flip is the moment it goes from off to on. Only that moment counts, so
@@ -1706,7 +2055,12 @@ export class InputManager {
     const own = this.ownMap;
     const standard = Boolean(gp && gp.mapping === 'standard');
     const mine = own.stored && !(standard && isAetrGuess(own));
-    return mine || !standard ? 'own' : `standard${this.stickMode}`;
+    if (mine || !standard) {
+      return 'own';
+    }
+    /* A radio Firefox has called a gamepad. Not in the stick mode's key: a
+     * radio applies its own mode. See firefoxRadio. */
+    return firefoxRadio(gp) ? 'firefox' : `standard${this.stickMode}`;
   }
 
   /* The map a given pad would fly, without making it the one that flies.
@@ -1716,7 +2070,10 @@ export class InputManager {
     if (key === this.mapKey) {
       return this.map;
     }
-    return key === 'own' ? this.ownMap : standardGuessMap(this.stickMode);
+    if (key === 'own') {
+      return this.ownMap;
+    }
+    return key === 'firefox' ? firefoxRadioGuessMap() : standardGuessMap(this.stickMode);
   }
 
   syncGuess(gp) {
@@ -1726,8 +2083,10 @@ export class InputManager {
     }
     this.map = this.mapFor(gp);
     this.mapKey = key;
-    /* Different axes, so the step measured on the old ones is not these. */
+    /* Different axes, so the step measured on the old ones is not these,
+     * and a channel judged on the old map was judged on other axes. */
     this.forgetAxisResolution();
+    this.forgetDeadChannels();
   }
 
   /*
@@ -1765,6 +2124,23 @@ export class InputManager {
       usable: this.mapUsable(),
       noYaw: this.guessWrongOrder,
       yawParked: this.guessYawParked,
+      /*
+       * WHICH GUESS, AND WHAT THE STICK CHECK HAS SEEN. `map` says guess for
+       * the AETR guess and for the Firefox radio guess alike, and they read
+       * different axes. The button count is the other half of a pad's shape:
+       * four axes and sixteen or seventeen buttons with no mapping is Chrome
+       * on Android's fallback for a radio (see fourAxisPad), and none of the
+       * phone tickets could say so.
+       */
+      guess: m.stored ? null : (m.guess || 'aetr'),
+      buttons: gp.buttons ? gp.buttons.length : 0,
+      check: {
+        dead: this.deadList,
+        missing: this.missingChannels(gp),
+        stray: this.strayAxes(),
+        flownS: this.deadWatch ? Math.round(this.deadWatch.ms / 1000) : 0,
+        asGamepad: this.radioAsGamepad,
+      },
     };
   }
 
@@ -1830,6 +2206,11 @@ export class InputManager {
     /* And so is the stick resolution. Same line, same reason. */
     this.forgetAxisResolution();
     this.forgetFlightRecord();
+    /* And what the flight and the menus have said about its sticks: see
+     * noteDeadChannels and noteStandardParked. */
+    this.forgetDeadChannels();
+    this.radioAsGamepad = false;
+    this.stdPark = null;
   }
 
   seedPadRoster() {
@@ -2173,6 +2554,22 @@ export class InputManager {
        *            way a throttle does: the pilot's throttle is on the axis
        *            being flown as yaw. See noteYawParked. */
       guessYawParked: this.guessYawParked,
+      /* deadChannels  channels that have not moved once in real flying while
+       *            the others were in use, on any map. The same array until
+       *            a verdict changes. See noteDeadChannels.
+       * missingChannels  channels the map reads from an axis this pad does
+       *            not have. See missingChannels.
+       * radioAsGamepad  a pad the browser calls a gamepad that rests like a
+       *            radio. See noteStandardParked.
+       * fourAxes   the pad hands over exactly four axes and is not a
+       *            standard gamepad: what Chrome on Android does with a
+       *            radio. The shell knows the platform. See fourAxisPad.
+       * axisCount  how many it hands over, for the words. */
+      deadChannels: this.deadList,
+      missingChannels: this.missingChannels(selected),
+      radioAsGamepad: this.radioAsGamepad,
+      fourAxes: fourAxisPad(selected),
+      axisCount: selected && selected.axes ? selected.axes.length : 0,
       /* restart    the restart switch for the pad in use, as the Settings
        *            row names it, or null. restartCapturing: the row is
        *            waiting for a flip. See noteRestartSwitch. */
@@ -2552,10 +2949,156 @@ export class InputManager {
     this.guessYawParked = false;
     this.yawParkAt = null;
     this.yawParkSince = 0;
+    /* The same goes for a dead channel, which was judged on the old axes,
+     * and for a radio dressed as a gamepad, which the wizard has just read
+     * for what it is. */
+    this.forgetDeadChannels();
+    this.radioAsGamepad = false;
+    this.stdPark = null;
     /* Two outcomes, and the shell says which. See saveMap. */
     this.calResult = this.saveMap() ? 'saved' : 'saved-unstored';
     this.calibration = null;
     return true;
+  }
+
+  /*
+   * STICK HELP, the screen a pilot is sent to when a stick does nothing.
+   *
+   * Its whole method is one question asked with the pilot's hand on the
+   * stick: move the stick that is not working, and does ANY axis move? The
+   * answer splits every cause there is into two piles.
+   *
+   *   An axis moves   the browser has the stick and this page is reading it
+   *                   as something else, or not at all. That is a mapping,
+   *                   and the wizard fixes it in a minute.
+   *   Nothing moves   the stick never reached the browser. No calibration
+   *                   in any page can fix that; the radio's USB joystick
+   *                   setup, the operating system or the browser can, and
+   *                   the shell says which for the platform it is on.
+   *
+   * That split is also the owner's question about the tickets, "is it their
+   * radio or is it us", answered by the pilot before they file one.
+   *
+   * The watch starts when the screen opens and stops when it closes. Every
+   * axis's rest is where it was at the first poll, and its range grows from
+   * there, in poll() at the pad's own rate rather than the frame's, so a
+   * quick flick is not missed between two paints.
+   */
+  startStickCheck() {
+    this.stickCheck = { id: null, rest: null, axes: [] };
+  }
+
+  stopStickCheck() {
+    this.stickCheck = null;
+  }
+
+  noteStickCheck(gp) {
+    const c = this.stickCheck;
+    const n = Math.min(gp.axes.length, 16);
+    if (c.id !== gp.id || !c.rest || c.rest.length !== n) {
+      /* A different pad, or the same one reporting a different shape, is a
+       * fresh start: nothing it did before counts for this one. */
+      c.id = gp.id;
+      c.rest = [];
+      c.axes = [];
+      for (let i = 0; i < n; i += 1) {
+        c.rest.push(gp.axes[i]);
+        c.axes.push(newSpan(gp.axes[i]));
+      }
+      return;
+    }
+    for (let i = 0; i < n; i += 1) {
+      growSpan(c.axes[i], gp.axes[i]);
+    }
+  }
+
+  /*
+   * What the help screen draws, every frame it is up. No opinion about what
+   * any of it means, which is the shell's job and src/ui/stickhelp.js's:
+   * this is the axes, which channel reads each, which have moved like a
+   * stick since the screen opened, which one is moving now, and the
+   * verdicts the flight and the map have already reached.
+   */
+  stickCheckView() {
+    const gp = this.firstGamepad();
+    const view = {
+      pad: null,
+      axisCount: 0,
+      buttons: 0,
+      layout: 'none',
+      map: 'guess',
+      guess: null,
+      axes: [],
+      moving: null,
+      strays: [],
+      moved: [],
+      dead: this.deadList,
+      missing: [],
+      fourAxes: false,
+      asGamepad: this.radioAsGamepad,
+    };
+    if (!gp) {
+      return view;
+    }
+    this.syncGuess(gp);
+    const m = this.map;
+    const owner = new Map();
+    for (const ch of IDENT_CHANNELS) {
+      const spec = m[ch];
+      if (spec && Number.isInteger(spec.axis)) {
+        owner.set(spec.axis, ch);
+      }
+    }
+    const c = this.stickCheck;
+    const n = Math.min(gp.axes.length, 16);
+    const ready = Boolean(c && c.rest && c.id === gp.id && c.rest.length === n);
+    let best = 0;
+    let bestAxis = -1;
+    for (let i = 0; i < n; i += 1) {
+      const v = gp.axes[i];
+      const span = ready ? c.axes[i] : null;
+      const rest = ready ? c.rest[i] : v;
+      view.axes.push({
+        i,
+        v,
+        rest,
+        lo: span ? span.lo : v,
+        hi: span ? span.hi : v,
+        channel: owner.get(i) || null,
+        mapped: owner.has(i),
+        stick: Boolean(span && sweptLikeStick(span, GUESS.STRAY_SWEPT)),
+      });
+      const d = Math.abs(v - rest);
+      if (d > best) {
+        best = d;
+        bestAxis = i;
+      }
+    }
+    /* The same line the identify steps call a deliberate push. */
+    if (best >= CAL.IDENT_DELTA) {
+      view.moving = { axis: bestAxis, channel: owner.get(bestAxis) || null };
+    }
+    for (const a of view.axes) {
+      if (a.stick && !a.mapped) {
+        view.strays.push(a.i);
+      }
+    }
+    for (const ch of IDENT_CHANNELS) {
+      const spec = m[ch];
+      const a = spec && Number.isInteger(spec.axis) ? view.axes[spec.axis] : null;
+      if (a && a.stick) {
+        view.moved.push(ch);
+      }
+    }
+    view.pad = shortPadName(gp.id);
+    view.axisCount = gp.axes.length;
+    view.buttons = gp.buttons ? gp.buttons.length : 0;
+    view.layout = gp.mapping || 'none';
+    view.map = m.stored ? 'calibrated' : (m.guess === 'standard' ? 'standard' : 'guess');
+    view.guess = m.stored ? null : (m.guess || 'aetr');
+    view.missing = this.missingChannels(gp);
+    view.fourAxes = fourAxisPad(gp);
+    return view;
   }
 
   calibrationView() {
@@ -3239,10 +3782,19 @@ export class InputManager {
       this.source = 'the calibration wizard';
     } else if (gp) {
       next = this.readGamepad(gp);
+      /* The pad's own reading, before the keys below are laid over it: a
+       * yaw flown on A and D is not the radio's yaw arriving. */
+      if (this.flying) {
+        this.noteDeadChannels(next, gp, dtMs);
+      }
       this.noteThrottleParked(gp);
       this.noteGuessOrder(gp);
       this.noteYawParked(gp, nowWall);
+      this.noteStandardParked(gp, nowWall);
       this.noteRestartSwitch(gp);
+      if (this.stickCheck) {
+        this.noteStickCheck(gp);
+      }
       this.source = this.mapUsable() ? 'a radio' : 'a radio whose stick order is a guess';
       /* Keyboard still works while a pad is plugged in: any held stick
        * key overrides that channel. */

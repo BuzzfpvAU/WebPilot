@@ -72,6 +72,9 @@ const DEVICES = [
 const SCREENS = [
   'title', 'courses', 'freestyle', 'quad', 'pilot', 'launch',
   'rates', 'pids', 'fc', 'paused', 'results', 'howto', 'credits',
+  /* Stick help, 28 September. Most of the pilots it is for are on phones:
+   * nine of the stick tickets it answers came from one. */
+  'stickhelp',
 ];
 
 /* Apple's and Google's guidance agree on 44, and the shell already has a
