@@ -57853,3 +57853,22 @@ Main then fast-forwarded from 5eed2d8 to b4b7edd, append only, at 03:22 UTC.
     npm run verify               not run: nothing either side changed
                                  reaches the plant, the module ABI, the
                                  build or the input path
+
+### The site, once it was live
+
+webfpv.org/sim served the new deploy at 03:23 UTC, its files stamped
+03:23:17, about a minute after the push. Read off the live site with a
+cache busting query and hashed against b4b7edd: src/maps/built/place.js,
+src/trackbuilder/warnings.js and selftest.js, src/maps/preload.js,
+index.html and src/main.js, and the feel report's src/ui/ui.js and
+configs/rates.js all match byte for byte.
+
+### For the owner, when flying
+
+Reload the page once, so src/fresh.js loads this deploy whole. Then, in
+the builder, a map with no start pads and a pylon (or a building) over the
+spot 8 m in from the left edge, halfway up, and Fly this map. The craft
+should be on open paving beside it, a metre or more clear with nothing
+overhead, facing right, and the builder's fs-no-start note says where.
+Wrong would be the craft inside or under anything, on a road, or off the
+plot while the plot has open ground.
