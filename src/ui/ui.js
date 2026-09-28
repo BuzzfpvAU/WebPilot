@@ -474,6 +474,15 @@ export function pacingTimerOn(s) {
 }
 
 /*
+ * The crosshairs' shapes, 'off' first because it is the default. 'wings'
+ * is the flat mark a Betaflight OSD's crosshairs element draws, 'cross' is
+ * four short arms round an open centre, and 'dot' is the least in the way.
+ * Each is one class on .osd-cross in index.html; see syncCrosshair.
+ */
+export const CROSSHAIRS = ['off', 'wings', 'cross', 'dot'];
+const CROSSHAIR_LABEL = { off: 'Off', wings: 'Wings', cross: 'Cross', dot: 'Dot' };
+
+/*
  * WEIGHT: the pilot's answer to "floaty", as a percentage of the weight the
  * airframe is flown at. 100 is normal, and normal is configs/airframes.js
  * gravityBase, 1.62 times 9.80665 on the five inch, which is what the shell
@@ -1021,6 +1030,14 @@ const DEFAULTS = {
    * src/render/manga.js, GENTLE.
    */
   impactFrame: true,
+  /*
+   * CROSSHAIRS: a fixed mark at the centre of the picture, which is where
+   * the camera points, the way a Betaflight OSD can draw one. Off by
+   * default, because a mark nobody asked for is a mark in the way of the
+   * gate. Only the picture: the flight never sees it. A string so the
+   * typeof gate accepts it, and loadSettings holds it to CROSSHAIRS.
+   */
+  crosshair: 'off',
   packVoltage: 4.2,
   /*
    * How heavy the quad is, as a percentage of the weight the airframe is
@@ -1323,6 +1340,7 @@ export function loadSettings() {
     ['musicTrack', musicIds()],
     ['ghost', ['off', 'best', 'previous']],
     ['freestyleScoring', FREESTYLE_SCORING],
+    ['crosshair', CROSSHAIRS],
     ['graphicsAutoRaised', ['', ...GRAPHICS_IDS]],
     ['graphicsAutoCeiling', ['', ...GRAPHICS_IDS]],
   ]) {
@@ -4115,7 +4133,13 @@ export class Ui {
     sticks.append(this.osdStickLeft.box, this.osdAir.box, this.osdStickRight.box);
     this.osdSticks = sticks;
     this.bindAirSlider();
-    this.osd.append(top, packBlock, flightBlock, sticks, this.osdLaunch, this.buildTargetLock());
+    /* The crosshairs, at the centre of the canvas, which is the camera's
+     * axis. Four arms and a dot, and the shape class says which of them
+     * draw: see syncCrosshair and .osd-cross in index.html. */
+    this.osdCross = el('div', 'osd-cross is-off');
+    this.osdCross.append(el('i', 'xh-l'), el('i', 'xh-r'), el('i', 'xh-t'), el('i', 'xh-b'), el('i', 'xh-dot'));
+    this.osdCrossShape = 'off';
+    this.osd.append(this.osdCross, top, packBlock, flightBlock, sticks, this.osdLaunch, this.buildTargetLock());
     r.append(this.osd);
 
     /*
@@ -7351,6 +7375,25 @@ export class Ui {
             : 'Off: a crash cuts straight to where you are set down, with no held frame. The rest of the manga look stays.',
           s.impactFrame,
           (v) => { s.impactFrame = v; },
+        ),
+        /*
+         * THE HUD: what is drawn over the picture in flight. One row for
+         * now, the crosshairs, a fixed mark at the centre of the frame.
+         * The note says per shape what it is, like Frame pacing's.
+         */
+        { label: 'HUD', section: true },
+        choice(
+          'Crosshairs',
+          {
+            off: 'A mark at the centre of the picture, which is where the camera points. Off: nothing is drawn there.',
+            wings: 'Wings: a short line either side of a centre dot, the flat mark a Betaflight OSD draws, fixed at the centre of the picture where the camera points.',
+            cross: 'Cross: four short arms round an open centre, fixed at the centre of the picture where the camera points, so what you aim at stays in view.',
+            dot: 'Dot: one small dot at the centre of the picture, where the camera points. The least in the way.',
+          }[s.crosshair] || '',
+          CROSSHAIRS,
+          s.crosshair,
+          (id) => CROSSHAIR_LABEL[id],
+          (id) => { s.crosshair = id; },
         ),
         { label: 'Sound', section: true },
         toggle('Sound', 'All sound: motors, wind, music, cues and every lap time called out loud.', s.sound, (v) => { s.sound = v; }),
@@ -11107,6 +11150,7 @@ export class Ui {
     this.osd.style.display = screen === 'flight' || screen === 'paused' ? '' : 'none';
     /* A toggle, not a className: setOsd keeps is-free on the same node. */
     this.osd.classList.toggle('dim', screen === 'paused');
+    this.syncCrosshair();
     this.pauseAirSlider(screen);
     /* The score follows the OSD onto and off the screen, but only in
      * freestyle: a race has no score and an empty Score 0 over a lap timer
@@ -12483,6 +12527,23 @@ export class Ui {
     }
     if (this.stfLayer) {
       Ui.klass(this.stfLayer, this.manga ? 'stf-found' : 'stf-found is-clean');
+    }
+  }
+
+  /*
+   * The crosshairs follow the Crosshairs row. Called from show(), because
+   * the OSD is only up in flight and paused, and every way from the row to
+   * the flight goes through a show(), so no settings path can leave a stale
+   * shape behind. One comparison and at most one class write.
+   */
+  syncCrosshair() {
+    if (!this.osdCross) {
+      return;
+    }
+    const shape = CROSSHAIRS.includes(this.settings.crosshair) ? this.settings.crosshair : 'off';
+    if (shape !== this.osdCrossShape) {
+      this.osdCrossShape = shape;
+      this.osdCross.className = `osd-cross is-${shape}`;
     }
   }
 

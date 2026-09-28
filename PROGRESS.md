@@ -58614,3 +58614,99 @@ small stops that flick back on a radio whose feel report reads a pad under
 about 190 Hz (that part is the input path, measured and put to the owner
 above), or the quad settling off attitude after a quick bank and back by
 more than a degree. Personal bests on the default tune start again.
+
+## 2026-09-28 | ui | Settings has a HUD section, and its first row is Crosshairs
+
+### The ask
+
+The owner: "add a hud menu item, that allows for crosshairs on the
+screen." So Settings gains a HUD section, between Screen and Sound, and
+its one row is Crosshairs: a fixed mark at the centre of the picture,
+which is where the camera points, the way a Betaflight OSD's crosshairs
+element draws one. Not put to the owner first: it is a DOM overlay, and
+nothing in the physics model, the module ABI or the build moved.
+
+### What changed
+
+- `src/ui/ui.js`: `crosshair` in DEFAULTS, 'off', because a mark nobody
+  asked for is a mark in the way of the gate. CROSSHAIRS is the list,
+  off, wings, cross, dot, and the loadSettings whitelist holds a stored
+  value to it, so a hand edited 'laser' loads as off. The row is a choice
+  under the new HUD section header, four segments (Off, Wings, Cross,
+  Dot: 16 characters, inside SEGMENT_CHARS), with a note per shape that
+  says what it draws. The mark is `.osd-cross` inside the OSD, so it is
+  up exactly when the OSD is, in flight and dimmed when paused, and
+  `syncCrosshair` writes its shape class from show(). show() is the one
+  place because every way from the row back to flight passes through a
+  show(), the pause menu's Settings included, so no settings path can
+  leave a stale shape behind; the write is one comparison and at most one
+  class change.
+- `index.html`: the `.osd-cross` rules. A zero sized box pinned at 50%
+  50% of the OSD, which is the canvas centre and so the camera's axis
+  (the flight camera has no view offset; only the title's attract camera
+  does), and four arms and a dot placed in pixels from that point. The
+  OSD's cream with its one pixel ink edge, as a box shadow. Wings is two
+  13 px arms either side of a small dot, Cross is four 8 px arms round an
+  open centre so the thing aimed at stays visible, Dot is one 6 px dot.
+- `tests/shell-baseline.json`: Settings overflow 1059 to 1138 px, the
+  section header and the row, by hand, the argument of the Frame pacing
+  row: the file is today's overflow and not a target, the row is
+  deliberate, and lint:devices reaching every row is the condition, run
+  below. The fc and tricks improvement notes are there on main as well
+  and are left for whoever owns them.
+
+### What went wrong
+
+Nothing in the product. The scratch probe needed three goes at its own
+driving, not at the code: a bare `ui.cursor =` does not move the cursor
+the keys read (`ui.setCursor` does, as input-check uses), race mode from
+the title wants a track the probe had not seeded (the device check's
+freestyle route in the built world works), and `act('pause')` alone does
+not show the pause screen (the device check pairs it with
+`show('paused')`).
+
+The phone OSD rule in lint:devices keeps the centre third clear of every
+drawn OSD node. With the crosshairs off, the default and what the check
+boots with, the pieces are display none and the rule does not see them.
+A device run that turned them on would flag them, correctly by the
+rule's letter; the rule is left as it is, because the mark is opt in and
+centred by definition, and changing a check this change does not trip is
+not this change's to do.
+
+### RUN LOG
+
+    node --check src/ui/ui.js    clean
+    scratch render (headless Chromium, the .osd-cross rules lifted out
+      of index.html)             the three shapes over sky, sand and dark
+                                 grass: centred, legible on each
+    scratch probe (tests/lib/page.js, the real shell, 1280x720, not in
+      the repository)            11 of 11 behaviour checks: default off;
+                                 the row under HUD with Off, Wings, Cross,
+                                 Dot; Right twice from the keys lands on
+                                 cross and is saved; no mark over
+                                 Settings; in freestyle flight .osd-cross
+                                 is-cross draws its four arms at 640,360,
+                                 the canvas centre to the half pixel; up
+                                 when paused; Dot after a change from the
+                                 pause menu's Settings; Off hides it; a
+                                 stored 'laser' loads as off. Its one
+                                 failure was a refused fetch to the board,
+                                 which is not running here (lint:shell
+                                 counts the same 11)
+    npm run lint:shell           first run FAIL, pilot overflow 1059 to
+                                 1138, the new rows, 31 of 31 stops
+                                 reached; after the baseline edit PASS
+    npm run lint:devices         PASS, every row and note reachable on
+                                 every device, the Crosshairs row
+                                 included; the flight OSD on a phone
+                                 clear of the centre third, 87 s
+    npm run lint:preload         up to date, 229 served
+    npm run lint:nouns           FAIL on src/maps/built/showpiece.js:149
+                                 "Drift course", the same on main with
+                                 this change stashed; not this change
+    npm run verify               not run: nothing in the plant, the
+                                 module, the input path or the build
+                                 moved, and the mark is a DOM node the
+                                 trace never sees. Put to the owner with
+                                 the other scales.
+    scripts/shots.js             not run; put to the owner

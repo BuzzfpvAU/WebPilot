@@ -259,6 +259,38 @@
       @keyframes launch-blink {
         50% { opacity: 0.2; }
       }
+      /* The crosshairs: Settings, HUD, Crosshairs. A zero sized box pinned
+         at the centre of the canvas, the camera's axis, and each piece
+         placed from that point, so no shape depends on the window's size.
+         The pieces are the OSD's cream with its one pixel ink edge, the
+         same reading as the numbers. The shape class says which pieces
+         draw: Wings the two long arms and the dot, Cross the four short
+         arms round an open centre, Dot the dot. See syncCrosshair in
+         src/ui/ui.js. */
+      .osd-cross {
+        position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+        pointer-events: none;
+      }
+      .osd-cross.is-off { display: none; }
+      .osd-cross i {
+        position: absolute; display: none;
+        background: var(--cream);
+        box-shadow: 0 0 0 1px var(--osd-ink), 0 1px 3px rgba(0, 0, 0, 0.5);
+      }
+      .osd-cross .xh-l, .osd-cross .xh-r { height: 2px; top: -1px; }
+      .osd-cross .xh-t, .osd-cross .xh-b { width: 2px; left: -1px; }
+      .osd-cross .xh-dot { width: 4px; height: 4px; left: -2px; top: -2px; border-radius: 50%; }
+      .osd-cross.is-wings .xh-l, .osd-cross.is-wings .xh-r { display: block; width: 13px; }
+      .osd-cross.is-wings .xh-l { right: 6px; }
+      .osd-cross.is-wings .xh-r { left: 6px; }
+      .osd-cross.is-wings .xh-dot { display: block; }
+      .osd-cross.is-cross .xh-l, .osd-cross.is-cross .xh-r { display: block; width: 8px; }
+      .osd-cross.is-cross .xh-t, .osd-cross.is-cross .xh-b { display: block; height: 8px; }
+      .osd-cross.is-cross .xh-l { right: 4px; }
+      .osd-cross.is-cross .xh-r { left: 4px; }
+      .osd-cross.is-cross .xh-t { bottom: 4px; }
+      .osd-cross.is-cross .xh-b { top: 4px; }
+      .osd-cross.is-dot .xh-dot { display: block; width: 6px; height: 6px; left: -3px; top: -3px; }
 
       /* FREESTYLE SCORE, down the left. See src/ui/scorehud.js for why it
          is here and not anywhere else: the top centre, both bottom corners
