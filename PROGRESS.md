@@ -58417,3 +58417,12 @@ ancestor of ffb173e, 160 commits behind, nothing rewritten.
     git diff --stat vendor/betaflight   empty (the submodule was fetched
                                  at its pinned commit to read pid.c,
                                  simplified_tuning.c and rc.c)
+
+### The owner's answers, 2026-09-28
+
+"merge it to main, I'll fly it keep the bf default lable". So the Tune row
+keeps the name "Betaflight default", with the note under it saying what
+changed, and the verification scale is the owner's own flight. Merged to
+main as a fast-forward of claude/vigilant-lovelace-x3mmoa (main had not
+moved since ffb173e); no check was re-run for the merge, because the
+merged tree is the tree the RUN LOG above was run on.
