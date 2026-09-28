@@ -58426,3 +58426,24 @@ changed, and the verification scale is the owner's own flight. Merged to
 main as a fast-forward of claude/vigilant-lovelace-x3mmoa (main had not
 moved since ffb173e); no check was re-run for the merge, because the
 merged tree is the tree the RUN LOG above was run on.
+
+### Live on webfpv.org
+
+main moved to 3d3d79a at 05:46:25 UTC and the deploy was served at
+05:47:57, its files stamped 05:47:23. Read off the live site with a cache
+busting query and hashed against the commit: configs/betaflight-default.diff,
+configs/registry.js, src/ui/ui.js and src/ui/pidspanel.js all match. The
+tune file comes back max-age=0 and cf-cache-status DYNAMIC, so no browser
+holds the old one, and src/fresh.js gives a reloaded page this deploy's
+scripts whole.
+
+For the owner's flight: reload once. The PIDs screen should show the Stick
+response slider at 125 and the three F bars above the stock 4.5.1 notch
+(150, 156, 150). Full stick flips and rolls should stop where the stick
+stops instead of bobbing back, quick stick moves should answer sooner, and
+a yaw turn at three quarter stick should swing back about half as far.
+What would count as wrong: a full stick flip that still visibly bounces,
+small stops that flick back on a radio whose feel report reads a pad under
+about 190 Hz (that part is the input path, measured and put to the owner
+above), or the quad settling off attitude after a quick bank and back by
+more than a degree. Personal bests on the default tune start again.
