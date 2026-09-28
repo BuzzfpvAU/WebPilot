@@ -55,6 +55,7 @@ import { createFlightPerf } from './render/flightperf.js';
 import { createGpuGate } from './render/gpugate.js';
 import { AUTO_FLOOR, autoPresetMove, createAutoScale } from './render/autoscale.js';
 import { createLatencyMeter } from './render/latency.js';
+import { moveRigid, predictDelta, PREDICT_MAX_MS } from './render/predict.js';
 import { simPosToThree, simQuatToThree, simLenToWorld, threePosToSim, threeDirToSim, WORLD_SCALE } from './render/frame.js';
 import { CAMERA_MOUNT_FORWARD, CAMERA_MOUNT_UP, cameraTiltRad, clampCameraAngle, makeLensShake, fpvLensClear } from './render/lens.js';
 import { MotorAudio } from './render/audio.js';
@@ -2861,6 +2862,16 @@ export async function boot({ loading, bootStart, mapId }) {
   let lastUpz = 1;
   let lastFpvY = 0;
   let lastCamFloor = 0;
+  /* The predicted view's per frame mark and scratch, and the horizon it
+   * last used in flight, for the report: see predictView before the draw.
+   * Allocated once, because the frame loop allocates nothing (P8). */
+  let predictCam = false;
+  let predictApplied = false;
+  let predictLastMs = 0;
+  const predDp = new THREE.Vector3();
+  const predDq = new THREE.Quaternion();
+  const predR = new THREE.Quaternion();
+  const predV = new THREE.Vector3();
   let lastCamClear = 0;
   let lastCamFwdY = 0;
   let lastCamUpY = 0;
@@ -7119,6 +7130,10 @@ export async function boot({ loading, bootStart, mapId }) {
   }
 
   function frameBody(nowWall) {
+    /* Whether this frame's camera is the FPV mount the predicted view may
+     * move: set by that branch below, and only by it. And whether it did. */
+    predictCam = false;
+    predictApplied = false;
     /* Once a frame, whatever the window did since the last one. */
     applyResizeIfDirty();
     if (!mapReady) {
@@ -8444,6 +8459,9 @@ export async function boot({ loading, bootStart, mapId }) {
         const held = manga.holding();
         shell.camera.position.copy(held ? manga.holdPos : fpvPos);
         shell.camera.quaternion.copy(held ? manga.holdQuat : fpvQuat);
+        /* The mount, not the held impact frame, is what the predicted view
+         * moves: see predictView before the draw. */
+        predictCam = !held;
         setCameraNear(fpvNear(held ? manga.holdPos : fpvPos));
         if (shell.camera.fov !== ui.settings.cameraFov) {
           shell.camera.fov = ui.settings.cameraFov;
@@ -8570,6 +8588,45 @@ export async function boot({ loading, bootStart, mapId }) {
     }
     if (worldLive) {
       mangaFrame(dt);
+    }
+    /*
+     * THE PREDICTED VIEW (src/render/predict.js): the FPV camera moved on to
+     * where the quad will be when this frame is on the glass, one display
+     * period from now, or more if this callback has already run past the
+     * next vsync, never more than PREDICT_MAX_MS. The frame is drawn from
+     * the state at its start and seen a period later, so without this the
+     * picture is always one frame behind the sticks.
+     *
+     * Only the camera moves, rigidly about the drawn craft, and only here:
+     * every piece of logic, the gates, the contact, the tricks, the lap,
+     * reads the craft's own pose, which this never touches, and the camera
+     * is set from the mount afresh every frame. The chevron is placed after
+     * the draw from this same camera, so it stays on the gate it marks.
+     *
+     * Only in flight, on the FPV mount, never on the ground or about to
+     * be: landed, parked on the stand, turtle, a pose lock, the crash
+     * reset, a replay, the film or a harness camera all draw the pose as
+     * it is. And never under the floor the mount was held above (camFloor):
+     * a quad about to touch down is drawn at the floor, not below it.
+     */
+    if (worldLive && drawThis && predictCam && ui.settings.predictView !== false
+      && mode === 'flight' && ui.screen === 'flight' && !replayMode && !film && !camOverride
+      && !landed && !launchStaging && !turtleWait && !turtleFlip.active && !poseLock && !crashReset) {
+      const period = latency.displayPeriodMs();
+      const late = renderStart - nowWall;
+      let horizon = period * (1 + (late > 0 ? Math.floor(late / period) : 0));
+      if (horizon > PREDICT_MAX_MS) {
+        horizon = PREDICT_MAX_MS;
+      }
+      predictDelta(stateCurr, horizon, qSpawn, predDp, predDq);
+      moveRigid(shell.camera.position, shell.camera.quaternion, shell.quad.position, shell.quad.quaternion,
+        predDp, predDq, predR, predV);
+      if (shell.camera.position.y < lastCamFloor) {
+        shell.camera.position.y = lastCamFloor;
+      }
+      shell.camera.updateMatrixWorld();
+      predictLastMs = horizon;
+      predictApplied = true;
     }
     if (worldLive && drawThis) {
       view.post.render();
@@ -10482,6 +10539,9 @@ export async function boot({ loading, bootStart, mapId }) {
     keyToScreen: latency.report(),
     hz: latency.refreshHz(),
     fullscreen: Boolean(document.fullscreenElement),
+    /* The predicted view's setting and the horizon it last looked ahead in
+     * flight: see predictView before the draw. */
+    predict: ui.settings.predictView !== false ? Math.round(predictLastMs * 10) / 10 : 0,
     cores: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 0,
   }));
   ui.setLatencyProbe(() => ({
@@ -10492,6 +10552,20 @@ export async function boot({ loading, bootStart, mapId }) {
     lowLatency: shell.granted.desynchronized && ui.settings.lowLatency !== false,
   }));
   window.__perfProbe = () => (ui.perfProbe ? ui.perfProbe() : null);
+  /* The predicted view on the last frame: whether it moved the camera, how
+   * far ahead it looked and how far it turned and moved the view. Harness
+   * only. */
+  window.__predict = () => ({
+    on: ui.settings.predictView !== false,
+    applied: predictApplied,
+    horizonMs: predictLastMs,
+    turnDeg: 2 * Math.acos(Math.min(1, Math.abs(predDq.w))) * 180 / Math.PI,
+    moveM: predDp.length(),
+    /* The body rate and speed it predicted from, so a probe can check the
+     * turn is the rate times the horizon. */
+    rateDegS: stateCurr ? Math.hypot(stateCurr[11], stateCurr[12], stateCurr[13]) * 180 / Math.PI : 0,
+    speedMs: stateCurr ? Math.hypot(stateCurr[4], stateCurr[5], stateCurr[6]) : 0,
+  });
   /* Auto graphics and the GPU guard as they stand. Harness only. */
   window.__auto = () => ({
     auto: ui.settings.graphicsAuto,

@@ -1084,6 +1084,15 @@ const DEFAULTS = {
    */
   lowLatency: true,
   /*
+   * PREDICTED VIEW: draw the FPV view where the quad will be when the frame
+   * reaches the screen, one frame ahead, from its speed and rotation (see
+   * src/render/predict.js). The picture is otherwise always a frame behind
+   * the sticks. Only the picture: the flight, the lap and the physics never
+   * see it. On by default; a row, because it is a thing a pilot feels and
+   * may not want, and a report says whether it was on.
+   */
+  predictView: true,
+  /*
    * FULLSCREEN IN FLIGHT: Fly, Restart and Resume take the page fullscreen,
    * and the title gives the window back. A window in a desktop is composited
    * by the desktop, which on many a Linux laptop is one more frame between
@@ -7223,6 +7232,14 @@ export class Ui {
           lowLatencyNote(s.lowLatency, this.gpuInfo),
           s.lowLatency,
           (v) => { s.lowLatency = v; },
+        ),
+        toggle(
+          'Predicted view',
+          s.predictView
+            ? 'On: in flight the view is drawn where the quad will be when the frame reaches the screen, from its speed and rotation, a frame ahead of where it was when the frame began. That takes about a frame off the time between your sticks and the picture. Only the picture moves; the flight, the lap and the physics are the same either way.'
+            : 'Off: the view is drawn where the quad was when the frame began, which the screen shows a frame later.',
+          s.predictView,
+          (v) => { s.predictView = v; },
         ),
         toggle(
           'Fullscreen in flight',

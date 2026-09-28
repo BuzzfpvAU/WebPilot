@@ -108,6 +108,12 @@ export function createLatencyMeter() {
     supported = false;
   }
 
+  /* The display's period itself, faster displays included: how far ahead
+   * the predicted view looks (src/render/predict.js). */
+  function displayPeriodMs() {
+    return displayMs;
+  }
+
   /* The frame Auto and the guard measure against: see THE TARGET above. */
   function targetMs() {
     return displayMs > SIXTY_MS ? displayMs : SIXTY_MS;
@@ -196,5 +202,5 @@ export function createLatencyMeter() {
     };
   }
 
-  return { supported, noteFrame, refreshHz, targetMs, report };
+  return { supported, noteFrame, refreshHz, targetMs, displayPeriodMs, report };
 }

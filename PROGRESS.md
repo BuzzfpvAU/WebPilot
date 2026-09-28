@@ -57155,3 +57155,92 @@ as the after.
                                  499 meshes, the same after a city round
                                  trip; world golden 35 of 35; crash pacing
                                  48 of 48.
+
+## 2026-09-28 | render | The view is drawn where the quad will be when it is seen (plan P3.1)
+
+### Why
+
+Phase 3, item 1 of the review plan, which the owner asked to have added
+("are there any other things we can do, perhaps more drastic to reduce
+input lag") and then started ("start on the plan"). A frame is drawn from
+the state at its own start and is on the glass a display period later at
+the soonest, so the picture is always a frame behind the sticks: at sixty,
+17 ms, eleven degrees of a 670 degree per second roll. The state carries
+what a one frame prediction needs, velocity and body rates, so the view
+can be drawn where the quad will be, the way a VR runtime draws a head.
+
+### What changed
+
+- `src/render/predict.js`, new: `predictDelta` (the displacement and the
+  body frame turn over a horizon, through frame.js's own conversions),
+  `moveRigid` (a camera bolted to the craft moved with it). Plain
+  arithmetic, nothing allocated, usable on Three.js objects and plain ones.
+- `src/main.js`: just before the draw, in flight, on the FPV mount only,
+  the camera is moved rigidly about the drawn craft by the prediction over
+  one display period (more if the callback has run past the next vsync,
+  never over 25 ms), and never under the floor the mount is held above.
+  Nothing else moves: every piece of logic reads the craft's own pose,
+  which is untouched, and the camera is set from the mount afresh each
+  frame. Off on the pads, the stand, in turtle, a pose lock, the crash
+  reset, a replay, the film and under a harness camera. The chevron is
+  placed after the draw from the same camera, so it stays on its gate.
+  `window.__predict` shows the last frame's prediction for a probe; the
+  report's `perf.predict` is the horizon it last used, 0 with the row off.
+- `src/render/latency.js`: `displayPeriodMs()`, the learned period itself.
+- `src/ui/ui.js`: `predictView`, on by default, and a Settings row under
+  Screen, because it is a thing a pilot feels and may not want.
+- `scripts/predict-selftest.js`, new, `npm run predict:selftest`: eleven
+  cases, among them that a body rate turned on the sim side and converted
+  is the same rotation as one converted and turned (64 attitudes), and that
+  the camera stays on its mount. Two deliberately broken copies of the
+  module (the roll's sign flipped, the camera's travel dropped) were each
+  caught before this was trusted.
+- `src/fresh.js` regenerated with the new module staged, boot 120 modules,
+  229 served (the lesson of 2026-09-27: the served list reads tracked
+  files).
+
+### The baseline, and the argument
+
+tests/shell-baseline.json: Settings overflow 968 to 1012 px, one row
+(Predicted view), by hand, the same argument as the three rows of
+2026-09-27 and the Impact frame, Clean FPV, Stick mode, Check sticks and
+Keyboard throttle rows before them: the file is today's overflow and not a
+target, the row is deliberate. lint:devices, which must reach every row,
+had not finished when this was committed; its result is in the next entry.
+
+### For the owner, when flying
+
+Settings, Screen, Predicted view is on. Fly a lap with it on and one with
+it off. Right would be the view answering the sticks a frame sooner, most
+noticeable in rolls and flips. Wrong would be the view overshooting at the
+end of a flip, a wobble when a roll stops, or the picture jumping when you
+land: say which, and turn it off.
+
+### RUN LOG
+
+On the working tree over c291606, 01:25 to 01:33 UTC. The run was still
+going when the stop hook asked for this commit; what had not finished is
+marked, and its results follow in the next entry.
+
+    npm run predict:selftest     all 11 passed; the two broken copies
+                                 failed 2 and 1 checks as they should
+    prediction probe (scratch)   Flags and cones, flying: on the pads not
+                                 applied; in the air holding a 257 deg/s
+                                 roll, applied, horizon 16.67 ms, the view
+                                 turned 4.29 degrees a frame, rate times
+                                 horizon to 0.0000 degrees over 11 reads;
+                                 the row off, not applied and perf.predict
+                                 0; no page errors
+    npm run input:selftest       all 225 passed
+    npm run autoscale:selftest   all 46 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         64 of 64 checks clean
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           FAIL before the baseline: pilot overflow
+                                 968 to 1012 px, the new row, above; not
+                                 yet run after it
+    npm run lint:input           running at commit time
+    npm run verify               not yet run at commit time
+    replay:test, lint:attract, lint:devices, lint:scale
+                                 not yet run at commit time
