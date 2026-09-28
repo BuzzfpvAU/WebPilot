@@ -57516,3 +57516,70 @@ lead back, paid for in roughness (0.016 to 0.021 on the shipped row, and
     npm run verify               not run: nothing that reaches the module,
                                  the trace or the input path changed. The
                                  script only reads the module.
+
+## 2026-09-28 | git | This branch fast-forwarded onto main, for the owner to fly
+
+The owner: "merge it to main so i can fly it". A fetch and `git ls-remote`
+showed main at e63026b, which is this branch's merge base, with nothing on
+it the branch lacked. So no merge commit was needed: main was
+fast-forwarded from e63026b to 9d16ca8, seventeen commits, append only,
+nothing rewritten. The front door and the board had nothing ahead of their
+own mains, so only the simulator moved.
+
+What reached main is the input lag change and its review, 903f95b to
+9d16ca8: the low latency canvas asked for for real, the GPU guard, Auto
+graphics, review findings F1 to F8, the predicted view (plan P3.1), F6 as
+the owner decided it, and P3.3's measurements, which changed nothing in
+the flight path.
+
+### RUN LOG (on 9d16ca8, the commit main points at)
+
+    node --check                 the 21 js files the branch changed, none
+                                 failed
+    npm run input:selftest       all 225 passed
+    npm run autoscale:selftest   all 46 passed
+    npm run predict:selftest     all 11 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         65 of 65 checks clean
+    npm run lint:preload         up to date, boot 120 modules, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           all 160 passed, 201 s, run while the
+                                 deploy built
+    npm run verify               not run for the push. The last run was
+                                 earlier today on 6a3a541's tree, 17 of 17
+                                 with the trace hash de0401cd4266 unchanged,
+                                 and nothing after it reaches the input
+                                 path, the plant or the module
+
+### The site, once it was live
+
+webfpv.org/sim served the new deploy at 02:24 UTC, its files stamped
+02:23:53, a minute or so after the push. Read off the live site with a
+cache busting query and hashed against the commit: index.html,
+src/main.js, src/ui/ui.js, src/input/input.js, src/fresh.js, and
+src/render/predict.js, quality.js, autoscale.js and latency.js all match
+byte for byte, and dist/sim.wasm is the unchanged module.
+
+One thing that is not tidy and not harmful: src/render/pace.js, deleted in
+869425e, still answers 200 from the origin with the previous deploy's
+Last-Modified (27 September, 15:35). The static host keeps a file a new
+build no longer contains. Nothing imports it, and src/fresh.js's import
+map does not name it, so no page can run it.
+
+### For the owner, when flying
+
+Reload the page once. src/fresh.js gives every deploy its own module
+addresses, so a reload runs this deploy whole and never half of the last
+one. Low latency view is read at load, so it takes effect on that reload.
+
+- Settings, Screen: Low latency view, Predicted view and Fullscreen in
+  flight are on by default, so Fly now goes fullscreen, and Escape leaves
+  it and pauses. The Input to screen row fills in after a few key presses,
+  and says whether the low latency canvas was granted on this machine.
+- For the locked in feel P3.3 measured: the PIDs screen, Stick response
+  FF at 150, one lap against stock.
+- Right would be the view answering the sticks sooner, and a flick that
+  lands sooner without buzzing on small corrections. Wrong would be the
+  view overshooting at the end of a flip, a wobble when a roll stops, a
+  jump on landing, or a rough roll near centre stick with FF at 150.
