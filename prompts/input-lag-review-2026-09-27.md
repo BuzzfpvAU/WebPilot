@@ -473,6 +473,13 @@ and a few captured reports as fixtures; `npm run lint:input`; the
 verify-flight-model procedure, with the trace unchanged (the source only
 makes samples); the owner's `padHzMax` before and after.
 
+Update, 2026-09-28. The premise above, that Chrome refreshes a pad on a
+16 ms timer, does not hold for most pilots: 26 of the 30 open feel
+reports flown on a radio in Chrome or Edge carry a `padHzMax` of 125 to
+242 Hz, median 193, and four read 22 to 64. By this item's own gate that
+is a skip for most, and the owner's own reading is still the one that
+decides it for the owner's laptop. PROGRESS.md, the P3.3 entry.
+
 ### P3.3. The radio link's own quantisation in the plant (a few ms, the owner's)
 
 What. The shell resamples sticks onto a 250 Hz RC grid (`RC_HZ` in
@@ -492,6 +499,16 @@ owner can already try alone, in the FC configurator screen, and say
 whether the feel is worth it. If the owner says yes to 500 Hz, it goes
 through the verify-flight-model procedure with the new hash recorded as a
 deliberate change.
+
+Answered, 2026-09-28: the owner asked for "whatever will deliver a more
+locked in feeling". Measured before changing anything
+(`npm run feel:response`, the real module at the pad rates the reports
+show): 500 Hz is 1 to 4 ms slower on a fast flick at 180 to 250 Hz pads,
+because the controller is handed repeated frames, and lighter smoothing
+buys about 1 ms. Neither was changed. The lever that moves the feel is
+feedforward, the PIDs screen's Stick response slider, which is the
+pilot's and was put to the owner rather than made the default.
+PROGRESS.md, the P3.3 entry, has the table.
 
 ### P3.4. A render loop without vsync (uncertain, real hardware only)
 

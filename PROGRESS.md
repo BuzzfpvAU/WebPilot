@@ -57396,3 +57396,123 @@ cannot hold sixty there, Auto moves you to Low on the title after the run.
                                  of Auto's resolution factor, render side,
                                  and nothing in it reaches the input, the
                                  plant, the trace or the module
+
+## 2026-09-28 | input, fc | The owner's "more locked in": the link and the smoothing measured, and neither is the lever (plan P3.3)
+
+### The question and the answer
+
+Plan item P3.3 (prompts/input-lag-review-2026-09-27.md) was a question for
+the owner, not a change: raise the shell's RC grid from 250 to 500 Hz
+(RC_HZ in src/main.js), and lighten Betaflight's RC smoothing, both of which
+move what the controller sees. The owner's answer, 2026-09-28: "p3.3 i want
+what ever will deliver a more locked in feeling, currently it feels a
+little mushy, it could do with a little more authority."
+
+So the test for any change was whether it delivers that, and the module
+was asked before anything was changed.
+
+### How it was measured
+
+`scripts/stick-response.js`, new, `npm run feel:response`: the real
+dist/sim.wasm in Node, the five inch as a pilot meets it (the Betaflight
+default tune and rates, the airframe's own 1.62 g, a charged pack, the
+35.0 percent hover stick), fed the way the shell's perfect link feeds it.
+It flies a 40 ms flick from centre to full stick and a 2 Hz stick sine,
+and prints how the roll rate follows. About a second and a half.
+
+The pad matters more than anything else in that chain, so it is a
+parameter and not an assumption. The plan assumed Chrome refreshes a pad
+on a 16 ms timer. The board says otherwise: of the 30 open feel reports
+flown on a radio in Chrome or Edge, 26 carry a `stick.flight.padHzMax` of
+125 to 242 Hz, median 193; the other four read 22, 22, 52 and 64. So the
+pads are flown at 250, 220 and 180 Hz, off the RC grid, as a browser
+delivers them, and at an ideal 1 kHz, which no browser offers today.
+
+### The numbers
+
+The flick's t50 is the ms to half the settled roll rate after a 40 ms
+throw; lag is how far the rate trails a 2 Hz stick sine. Lower is more
+locked in.
+
+| change                              | ideal pad    | 250 Hz pad   | 220 Hz pad   | 180 Hz pad   |
+|-------------------------------------|--------------|--------------|--------------|--------------|
+| shipped: 250 Hz, factory smoothing  | t50 40, 8.6  | t50 42, 10.9 | t50 43, 9.4  | t50 43, 7.2  |
+| 500 Hz grid                         | t50 37, 8.3  | t50 43, 9.3  | t50 45, 10.4 | t50 47, 11.1 |
+| lighter smoothing, auto factor 15   | t50 39, 7.6  | t50 41, 9.9  | t50 42, 8.4  | t50 42, 6.3  |
+| PIDs screen, Stick response FF 150  | t50 36, 5.0  | t50 38, 7.3  | t50 39, 4.9  | t50 40, 1.1  |
+| PIDs screen, Master multiplier 130  | t50 37, 7.2  | t50 39, 9.5  | t50 40, 8.0  | t50 41, 5.9  |
+
+The lag at the uneven pads reads lower than at the ideal one, and that is
+the controller, not the arithmetic: the same estimator on the stick signal
+alone gives 2.5, 4.8, 4.95 and 5.5 ms, rising as it should, and it is
+Betaflight's feedforward overshooting on the uneven steps that buys the
+lead back, paid for in roughness (0.016 to 0.021 on the shipped row, and
+0.026 with FF 150 at 180 Hz). The flick is the cleaner column.
+
+### What was decided, and why
+
+- **The RC grid stays at 250 Hz.** At the rates browsers actually deliver
+  a pad, 500 Hz is slower, not faster: the flick's t50 is 1 to 4 ms later
+  at 250, 220 and 180 Hz, because half the frames the controller is
+  handed repeat the one before and its feedforward reads a repeat as a
+  stop. It wins the flick only with a source faster than any browser
+  gives, and the sine's lag only at a pad of exactly 250 Hz. It
+  would also have moved every run pinned in tests/goldens/world.json and
+  tests/goldens/plant.json, which fly the shell's 4 ms grid, for a feel
+  that measured worse. Not changed.
+- **The smoothing stays at the factory setting.** Auto factor 15 is about
+  a millisecond better on every row, which no pilot will feel, and
+  configs/betaflight-default.diff exists to be exactly what a freshly
+  flashed quad flies. An exception to that for one millisecond is not one
+  worth making. Measured and declined.
+- **What does move it is feedforward.** The PIDs screen's Stick response
+  slider at 150 takes the flick's half way point 3 to 4 ms sooner and its
+  90 percent point 7 to 10 ms sooner, and takes 3.6 to 6.1 ms off the
+  lag, for a rougher rate at the slower pads. Master multiplier 130 moves
+  the flick 2 to 3 ms and the lag 1.4, with less overshoot: stiffer
+  rather than quicker. Both
+  are the pilot's own sliders on the tune the doctrine ships, which is
+  where the default tune's header says a change belongs, so neither was
+  made the default here. That would reverse the rule that the one shipped
+  tune is Betaflight's factory tune, and it is the owner's to reverse. The
+  open feel reports are split, besides: of 36, twenty say floppy, soft or
+  slow, eleven say twitchy or stiff (three say both), and nine say about
+  right.
+
+### What the owner can do in a minute, and what else is the owner's
+
+- On the PIDs screen, Stick response to 150, and fly the same lap. If that
+  is the feel, say so and it can become the shipped default, with the
+  tune's header saying why.
+- "Authority" may be the weight rather than the tune. The five inch flies
+  at 1.62 g (gravityBase in configs/airframes.js, the owner's own choice
+  on 2026-09-18: full Sinky "feels about right", normal at ninety percent
+  of it), so its thrust to weight is 8.4 on paper and 5.2 in the air. The
+  Weight slider at 80 is 1.30 g. That moves how hard it climbs and how
+  much it carries, not how fast it turns: the flick reads the same at
+  1.0 g within two milliseconds (the scratch run in the log below).
+- The default rates are Betaflight's, 70 deg/s at centre, and at a quarter
+  stick that is 55 deg/s.
+- The biggest remaining term may not be any of these. None of this
+  branch's work is on main yet: the low latency canvas, the GPU guard,
+  Auto graphics and the predicted view are all on
+  claude/sharp-einstein-80sgui, so the "mushy" the owner described was
+  flown without them.
+
+### RUN LOG
+
+    npm run feel:response        the table above, 1.3 s, the same every
+                                 run (no clock, no random)
+    estimator check (scratch)    the lag estimator on the held stick
+                                 signal alone, no module: 2.50, 4.80,
+                                 4.95, 5.50 ms at the four pads on the
+                                 250 Hz grid, 1.50 to 4.50 on 500 Hz
+    weight (scratch)             the same flick at 4.0 V, 1.62 g against
+                                 1.0 g on the 250 Hz grid: t50 41 and 42
+                                 ms on the ideal pad, 44 and 45 at 220 Hz,
+                                 43 and 44 at 250, 44 and 46 at 180
+    board, read only             GET /board/api/bugs and each open feel
+                                 report, for padHzMax; nothing written
+    npm run verify               not run: nothing that reaches the module,
+                                 the trace or the input path changed. The
+                                 script only reads the module.
