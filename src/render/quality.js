@@ -100,6 +100,19 @@ const PRESETS = {
       shadowHalf: 72,
       outline: false,
       bloom: false,
+      /*
+       * No drifting cloud shading either, 2026-09-28: three octaves of
+       * value noise on every terrain, pitch and clubhouse fragment, which
+       * is most of the frame's lower half, on the preset that has already
+       * traded every shadow for fill rate. Read at scene build
+       * (setCelCloudShadows in celmat.js). Together with the 8 bit sRGB
+       * composer target (post.js), this is for the machine bug-435f6aaa
+       * was flown on: an integrated GPU spending 9.1 ms of a 16.7 ms
+       * frame, where every millisecond the GPU gives back is a
+       * millisecond the picture can reach the glass sooner through the
+       * low latency canvas.
+       */
+      clouds: false,
       /* The Deck's own 1280x800 at the authored 0.85 is 0.74 Mpx, well
        * inside this. The number is 1080p times this preset's own 0.85
        * squared, so a 1080p screen at DPR 1 lands exactly on its authored

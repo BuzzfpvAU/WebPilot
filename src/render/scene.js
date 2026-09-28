@@ -42,7 +42,7 @@
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import {
-  celMaterial, outlineHull, updateCelTime, CLOUD_SHADOW_GLSL,
+  celMaterial, outlineHull, updateCelTime, setCelCloudShadows, CLOUD_SHADOW_GLSL,
   CLOTH_CHUNK, FLAG_SAIL_CLOTH,
 } from './celmat.js';
 import { disposeSceneGraph } from './shell.js';
@@ -4348,6 +4348,10 @@ function clouds(rng) {
  */
 export async function buildFieldScene(shell, onProgress, course = null, quality = null) {
   const q = quality && quality.field ? quality : qualityFor(quality);
+  /* Before any material is built, because celMaterial reads the flag at
+   * build: Low turns the drifting cloud shading off with the shadow maps
+   * (quality.js, field.clouds), fill rate back on the machines Low is for. */
+  setCelCloudShadows(q.field.clouds !== false);
   const renderer = shell.renderer;
   const camera = shell.camera;
   const progress = onProgress ?? (() => {});

@@ -57583,3 +57583,88 @@ one. Low latency view is read at load, so it takes effect on that reload.
   lands sooner without buzzing on small corrections. Wrong would be the
   view overshooting at the end of a flip, a wobble when a roll stops, a
   jump on landing, or a rough roll near centre stick with FF at 150.
+
+## 2026-09-28 | render | Low gives the GPU back two of its jobs, for the machines where GPU time is latency
+
+### Why
+
+bug-435f6aaa, the owner's Iris Xe laptop after the input lag work landed:
+"much better but still laggy on pototo pc". Its report says where the time
+is now. The page's own work is 2 ms, the flight held sixty with no frame
+over 25 ms, and the GPU took 9.1 ms of every 16.7 ms frame, on Low at 0.85
+of a 1896 by 909 window, 1.25 Mpx. On a 60 Hz panel the page cannot
+shorten the screen's own wait; what it can shorten is the drawing, because
+with the low latency canvas a finished frame can reach the glass when it
+is finished, and 9.1 ms of GPU is 9.1 ms of that. The owner asked what
+Low can drop, and declined more measuring on that laptop, so the two cuts
+below are argued from what each costs by construction, not from a reading
+this container cannot take (SwiftShader's milliseconds are not a laptop's).
+
+### What changed
+
+Two cuts, both Low only, neither moving a pixel count.
+
+- The composer target is 8 bit sRGB where neither the outline nor bloom
+  runs, which is Low (post.js). It was RGBA16F on every preset for the two
+  readers Low does not have. sRGB is not the 8 bit linear the old comment
+  warned about: the hardware encodes on the scene's write and decodes on
+  the grade's fetch, so the grade still gets linear values and the shadow
+  end keeps its precision. The scene's colour writes and the grade's reads
+  halve, 8 bytes a pixel to 4, and the two ping pong targets halve, 10 MB
+  to 5 each at the owner's window. The cost: a value above one clamps at
+  the write. The field keeps its materials at or under one (no tone
+  mapping, the bloom threshold note), so what clamps is a few additive
+  halo overlaps whose shoulder output was within three percent of one
+  anyway.
+- The cloud shading goes with the shadows it imitates (quality.js
+  field.clouds, read at scene build by setCelCloudShadows in celmat.js):
+  three octaves of value noise per fragment on the terrain, the pitch and
+  the clubhouse, most of the frame's lower half, behind a uniform branch
+  a zero now skips. Low had already dropped every real shadow for fill
+  rate; the dapple was the one shadow it kept paying for. Medium and High
+  keep it, and lint:quality pins which presets have it.
+
+A knock on worth naming: latency.js only learns the display's period from
+frames whose GPU average is under half the target, and the owner's report
+read hz 0 because 9.1 is over that bar. Every millisecond cut here also
+helps that learner reach its answer on exactly these machines.
+
+What was considered and not done here: thinning the field's trees at Low
+reverses a documented decision (the preset notes were rewritten on purpose
+to stop promising a planting lever the field does not have), and cutting
+Low's pixel budget from 1.5 to 1.0 Mpx trades picture for fill on every
+Low machine with a window over about 1.4 Mpx CSS, which is a look decision
+the owner has not made. Both went to the owner as questions instead.
+
+### RUN LOG
+
+    node --check                 celmat, scene, quality, post,
+                                 quality-check: clean
+    npm run lint:quality         66 of 66 checks clean, with the new row:
+                                 field clouds low off, medium on, high on
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    shots, old against new       scripts/shots.js at 1280 by 720 on the
+                                 field at Low, HEAD in a worktree against
+                                 this tree. Mean sRGB per channel, whole
+                                 frame: 70.2 79.1 62.1 before, 69.3 78.4
+                                 61.5 after; sky band 107.2 111.5 93.0 to
+                                 103.9 109.0 90.5; ground band 26.7 38.3
+                                 24.8 to 26.5 38.1 24.7. The attract
+                                 camera differs slightly between runs;
+                                 there is no gamma shift, which is what a
+                                 double or missing sRGB transfer would be
+                                 (tens of units). Eyeballed both frames:
+                                 the same picture, sky gradient smooth, no
+                                 banding. A High shot on the new tree is
+                                 the untouched HalfFloat path, ink and
+                                 bloom intact. Console: only the two board
+                                 fetches this container always refuses.
+    npm run verify               not run: render side only, nothing
+                                 reaches the input path, the plant, the
+                                 trace or the module. The GPU cut itself
+                                 cannot be timed in this container and is
+                                 not claimed as a number; it is claimed as
+                                 bytes and fragments that are no longer
+                                 asked for.

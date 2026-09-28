@@ -390,12 +390,28 @@ export function buildComposer(renderer, scene, camera, quality) {
    * machine is 120 MB. The second one is spent entirely on multisampling a
    * fullscreen quad, which multisampling cannot improve. Antialiasing is
    * done instead in the outline pass, out of texture fetches it was
-   * already making. RGBA16F stays: the grade's highlight shoulder and the
-   * bloom high pass both work on linear values, and 8 bit linear crushes
-   * the shadow end of the sky gradient.
+   * already making. RGBA16F stays where the outline or bloom runs: the
+   * grade's highlight shoulder and the bloom high pass both work on linear
+   * values, and 8 bit LINEAR crushes the shadow end of the sky gradient.
+   *
+   * Where neither runs, which is Low, the target is 8 bit sRGB instead,
+   * 2026-09-28. sRGB is not linear: the hardware encodes on the scene's
+   * write and decodes on the grade's fetch, so the grade still does its
+   * arithmetic on linear values and the shadow end keeps the precision the
+   * encoding exists to keep. What changes is the bytes: the two ping pong
+   * targets and the scene's writes and the grade's reads all halve, on the
+   * bandwidth starved integrated machines Low is for (bug-435f6aaa's GPU
+   * spent 9.1 ms of a 16.7 ms frame). What it costs: a value above one
+   * clamps at the write instead of surviving to the grade's shoulder. The
+   * field keeps every material at or under one because the renderer runs
+   * no tone mapping (the bloom threshold note below), so the only writes
+   * above one are a few additive halo overlaps, and the shoulder was
+   * mapping one to 0.967 anyway.
    */
-  const composerTarget = new THREE.WebGLRenderTarget(w, h, {
+  const composerTarget = new THREE.WebGLRenderTarget(w, h, wantOutline || wantBloom ? {
     type: THREE.HalfFloatType,
+  } : {
+    colorSpace: THREE.SRGBColorSpace,
   });
   const composer = new EffectComposer(renderer, composerTarget);
   composer.addPass(new RenderPass(scene, camera));

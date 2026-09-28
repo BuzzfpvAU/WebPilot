@@ -173,6 +173,27 @@ export const CLOUD_SHADOW_GLSL = /* glsl */ `
 `;
 
 /*
+ * Whether cel materials get their cloud shading at all, set per scene build
+ * from the preset (buildFieldScene reads quality.js's field.clouds). The
+ * shadow is three octaves of value noise per fragment, over the terrain,
+ * the pitch and the clubhouse, which together are most of every frame's
+ * lower half; on the integrated laptop of bug-435f6aaa the GPU spent 9.1 ms
+ * of a 16.7 ms frame, and the noise is pure fill with every real shadow on
+ * Low already gone. The guard in the shader is a uniform branch, so a zero
+ * skips the noise without another program. A module flag rather than an
+ * option threaded through every call site, because the terrain, the pitch
+ * and the clubhouse are built by helpers that do not see the preset, and a
+ * preset change rebuilds the world, so the flag is always set before any
+ * material that reads it is built. The craft's materials are built at boot,
+ * before any scene, and none carries a cloud shadow.
+ */
+let cloudShadowsOn = 1;
+
+export function setCelCloudShadows(on) {
+  cloudShadowsOn = on === false ? 0 : 1;
+}
+
+/*
  * Every live cel material's uCelTime uniform, keyed by the material so a
  * shader recompile OVERWRITES the entry instead of adding one, and pruned on
  * the material's own dispose event. This used to be a push-only array: every
@@ -267,7 +288,7 @@ export function celMaterial(opts = {}) {
   });
   const rimColor = new THREE.Color(opts.rimColor ?? 0x9ec8ff);
   const specColor = new THREE.Color(opts.specColor ?? 0xffffff);
-  const cloud = opts.cloudShadow ?? 0;
+  const cloud = (opts.cloudShadow ?? 0) * cloudShadowsOn;
   const cloth = opts.cloth ?? 0;
   /* The two injections cloth decides, named once. See the cache key below:
    * these strings ARE the key, so the condition cannot be changed in one

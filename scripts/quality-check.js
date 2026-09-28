@@ -243,6 +243,23 @@ for (const raw of NOT_INTEGRATED) {
 }
 
 /*
+ * What Low leaves out of the field's frame for fill rate, 2026-09-28: the
+ * cloud shading (three octaves of noise per ground fragment, read at scene
+ * build) goes with the shadows it imitates, and the composer target drops
+ * to 8 bit sRGB in post.js because neither the outline nor bloom is there
+ * to need linear kept past one. The other presets keep both. This row pins
+ * the table's half of that; the target's half is derived in post.js from
+ * outline and bloom, which the rows above already pin per preset.
+ */
+{
+  const got = GRAPHICS_IDS.map((id) => `${id} ${qualityFor(id).field.clouds === false ? 'off' : 'on'}`).join(', ');
+  check('field: Low turns the cloud shading off, Medium and High keep it',
+    qualityFor('low').field.clouds === false
+    && qualityFor('medium').field.clouds !== false
+    && qualityFor('high').field.clouds !== false, got);
+}
+
+/*
  * Where Auto graphics may take the picture on its own: the owner's decision
  * of 2026-09-28 (review finding F6), autoMinPixels in quality.js. Low is the
  * one exception to the rubric's 1,200,000 pixels, because it has no preset
