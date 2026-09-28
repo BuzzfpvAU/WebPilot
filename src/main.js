@@ -83,6 +83,7 @@ import { Chase, CHASE_EVERY, pays } from './game/chase.js';
 import { sincos } from './props/trig.js';
 import { setCraftAirframe, CRAFT_R, CRAFT_WORLD_R, CRAFT_V_UP, CRAFT_V_DOWN, craftVerticalHalf, craftVerticalOffset, canPerch, shouldScorePass, shouldEnterTurtle, uprightPlantQuat, turtleFlipEase, turtleFlipLift, turtleSlerpQuat, TURTLE_STICK_MIN, TURTLE_SPEED, TURTLE_RATE, TURTLE_FLIP_MS, TURTLE_INVERT_UPZ, TURTLE_EXIT_UPZ, turtleClearance, findRestSpot, PROP_PLANE_MAX_UP_DOT, GRAZE_SPEED_MAX, BOUNCE_SPEED_MAX, BOUNCE_COOLDOWN_MS, LAND_DESCENT_MAX, LAND_HORIZONTAL_MAX, LAND_TILT_MAX_DEG, LAND_TILT_HARD_DEG, LAND_TIP_SPEED_MAX, GROUND_MU, GROUND_E, CLIP_SPAWN_GRACE_MS, CrashJudge, emptyWorldReport, foldWorldReport } from './game/collide.js';
 import { Ui, formatTime, WEIGHT_STOCK, clampWeight, gravityScaleFor, loadSettings, pacingTimerOn } from './ui/ui.js';
+import { lostStickNotice } from './ui/stickhelp.js';
 import {
   adoptMapFromLocation, adoptMostFlownTrack, adoptShareFromLocation, boardPageUrl, fetchGhost,
   fetchMapDocument, fetchTrackDocument, fetchTrackTimes, postFreestyleRun, postTime,
@@ -6216,6 +6217,42 @@ export async function boot({ loading, bootStart, mapId }) {
     }
   }
 
+  /*
+   * THE BANNER FOR A STICK THE PILOT IS FLYING WITHOUT. The owner's ask of
+   * 28 September: when a stick has not been used for long enough, help comes
+   * up. input.js decides it (noteDeadChannels, missingChannels); this says it
+   * once per channel per page, in flight, as the banner the shell already
+   * flies its notices in, and never as anything that stops the run: the
+   * pilot may be on a lap, and the one sentence names the one thing to do.
+   * The pause menu and the title then carry the row that opens Stick help.
+   */
+  const stickNoticed = new Set();
+  /* Where the calibration wizard goes when it ends: Settings, which holds
+   * it, or Stick help, whose two doors into it are round trips. Set by the
+   * action that opened it. */
+  let calReturn = 'pilot';
+  function firstUnnoticed(list) {
+    if (!list) {
+      return null;
+    }
+    for (let i = 0; i < list.length; i += 1) {
+      if (!stickNoticed.has(list[i])) {
+        return list[i];
+      }
+    }
+    return null;
+  }
+  function noteLostSticks(sum, nowWall) {
+    if (mode !== 'flight' || ui.screen !== 'flight') {
+      return;
+    }
+    const ch = firstUnnoticed(sum.missingChannels) || firstUnnoticed(sum.deadChannels);
+    if (ch) {
+      stickNoticed.add(ch);
+      notice = { text: lostStickNotice(ch), untilMs: nowWall + 5200 };
+    }
+  }
+
   function openPadPick(reason) {
     if (ui.nameDialog && !ui.nameDialog.hidden) {
       input.requestPadPick(reason);
@@ -6378,26 +6415,29 @@ export async function boot({ loading, bootStart, mapId }) {
     } else if (action === 'title') {
       mode = 'title';
       reset();
-    } else if (action === 'calibrate') {
+    } else if (action === 'calibrate' || action === 'stickhelp-calibrate') {
       if (input.firstGamepad()) {
+        /* Stick help's door is a round trip: see its rows in ui.js. */
+        calReturn = action === 'stickhelp-calibrate' ? 'stickhelp' : 'pilot';
         input.startCalibration();
         ui.show('calibrate');
       } else {
         notice = { text: 'No radio or gamepad found.\nPlug one in, set it to joystick mode, and reload.', untilMs: performance.now() + 3200 };
       }
-    } else if (action === 'calibrate-check') {
+    } else if (action === 'calibrate-check' || action === 'stickhelp-check') {
       /* The check step on its own, against the mapping already saved. Same
        * door as calibrate above, and the same answer when there is nothing
        * plugged in, because a mapping with no radio behind it is nothing to
        * look at. See startCalibrationCheck in input.js. */
       if (input.startCalibrationCheck()) {
+        calReturn = action === 'stickhelp-check' ? 'stickhelp' : 'pilot';
         ui.show('calibrate');
       } else {
         notice = { text: 'No radio or gamepad found.\nPlug one in, set it to joystick mode, and reload.', untilMs: performance.now() + 3200 };
       }
     } else if (action === 'calibrate-cancel') {
       input.cancelCalibration();
-      ui.show('pilot');
+      ui.show(calReturn);
     } else if (action === 'calibrate-reverse') {
       /* No notice, for the reason on calibrate-zero-throttle below: the
        * calibrate branch of the frame loop blanks the banner every frame.
@@ -6419,7 +6459,7 @@ export async function boot({ loading, bootStart, mapId }) {
       input.skipCalibrationSelect();
     } else if (action === 'calibrate-save') {
       if (input.acceptCalibration()) {
-        ui.show('pilot');
+        ui.show(calReturn);
         /*
          * The notice is decided by what localStorage actually did, not by
          * the fact that the wizard finished. See saveMap in input.js: a
@@ -9157,6 +9197,18 @@ export async function boot({ loading, bootStart, mapId }) {
     ) ? guidedPrompt(race) : '';
     const padSum = input.padSummary();
     ui.setPadInfo(padSum);
+    noteLostSticks(padSum, nowWall);
+    /* Stick help's watch runs while its screen is up and only then, so every
+     * visit starts from where the sticks are when it opens. See STICK HELP
+     * in src/input/input.js. */
+    if (ui.screen === 'stickhelp') {
+      if (!input.stickCheck) {
+        input.startStickCheck();
+      }
+      ui.setStickHelp(input.stickCheckView());
+    } else if (input.stickCheck) {
+      input.stopStickCheck();
+    }
     const restartSet = input.takeRestartResult();
     if (restartSet && padSum.restart) {
       notice = restartSet === 'saved'
@@ -9179,7 +9231,7 @@ export async function boot({ loading, bootStart, mapId }) {
       if (cal) {
         ui.setCalibration(cal);
       } else {
-        ui.show('pilot');
+        ui.show(calReturn);
         if (input.calResult === 'saved') {
           notice = { text: 'Stick mapping saved.', untilMs: nowWall + 2800 };
         } else if (input.calResult === 'saved-unstored') {

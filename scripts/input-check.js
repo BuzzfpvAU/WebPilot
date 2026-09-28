@@ -978,6 +978,107 @@ async function mousePage(page) {
   check('the top of the throttle is the half it was flown at, and the bottom is idle',
     !!fr && fr.travel.throttle[0] === 0 && fr.travel.throttle[1] === 0.5, JSON.stringify(fr && fr.travel));
   check('and roll went both ways, to the stop', !!fr && fr.travel.roll.join() === '-1,1', JSON.stringify(fr && fr.travel));
+
+  /* --------------------------------------------------------------------
+   * 6e. Stick help, the owner's ask of 28 September: when a stick has not
+   *     been used for long enough, help comes up. Whether a channel is
+   *     dead is proven in Node (scripts/input-selftest.js, the dead stick
+   *     verdict), over twenty seconds of flying this page would have to
+   *     spend in real time, so here the verdict is handed in and this is
+   *     the shell's half: the banner in flight, once; the pause row; the
+   *     screen it opens reading the stick the pilot moves; and the wizard's
+   *     round trip back to it.
+   * ------------------------------------------------------------------ */
+  section('stick help: a dead stick is said once in flight, the pause row opens the screen, and the screen reads it');
+  check('Settings always holds a Stick help row, verdict or not',
+    await ev("ui.show('pilot'); return ui.items().some((it) => it && it.action === 'stickhelp');"));
+  /* Chosen again, so the verdicts the sections above latched are gone and
+   * the row this section earns is the one that shows. */
+  await ev('input.setPadChoice({ kind: \'pad\', id: window.__pad.id, index: 0 }); return 1;');
+  await ev('const sp = window.__map().spawn; window.__placeCraft(sp.x + 6, sp.y + 30, sp.z); return 1;');
+  await page.until("window.__ui.screen === 'flight'", 5000).catch(() => {});
+  await ev("input.deadList = ['pitch']; return 1;");
+  const LOST = 'Pitch is not reaching the sim.\nPause for Stick help.';
+  const lostShown = `window.__ui.banner.textContent === ${JSON.stringify(LOST)}`;
+  let lostSaid = true;
+  await page.until(lostShown, 3000).catch(() => { lostSaid = false; });
+  check('in flight, the frame loop says it by itself, in the banner', lostSaid,
+    await ev('return JSON.stringify(ui.banner.textContent);'));
+  /* Past the notice's five seconds, held in the air the whole time, so the
+   * frame loop that said it once is still running and could say it again. */
+  for (let k = 0; k < 3; k += 1) {
+    await page.sleep(1950);
+    await ev('const sp = window.__map().spawn; window.__placeCraft(sp.x + 6, sp.y + 30, sp.z); return 1;');
+  }
+  await page.sleep(100);
+  check('once: the banner moves on and does not come back while the verdict stands',
+    await ev(`return !(${lostShown}) && input.padSummary().deadChannels.includes('pitch');`));
+  /* Escape, the way a pilot pauses: act('pause') alone moves the mode and
+   * leaves the screen to the caller. */
+  await page.tap('Escape');
+  await page.until("window.__ui.screen === 'paused'", 3000).catch(() => {});
+  const pauseRow = await ev(`const items = ui.items(); const i = items.findIndex((it) => it && it.rowClass === 'row-warn');
+    return JSON.stringify({ i, label: i >= 0 ? items[i].label : null, action: i >= 0 ? items[i].action : null,
+      first: items[0] && items[0].label });`).then(JSON.parse);
+  check('the pause menu carries the row, under Resume, and it opens Stick help',
+    pauseRow.label === 'Pitch is not reaching the sim' && pauseRow.action === 'stickhelp'
+    && pauseRow.i > 0 && pauseRow.first === 'Resume', JSON.stringify(pauseRow));
+  await ev(`ui.setCursor(${Math.max(0, pauseRow.i)}); return 1;`);
+  await page.tap('Enter');
+  await page.until("window.__ui.screen === 'stickhelp'", 3000).catch(() => {});
+  await page.sleep(300);
+  /* Whatever map is flying: the wizard earlier in this page has already
+   * put this rig's yaw where it really is, on axis 4, so the cells are read
+   * against input.map rather than written out, and the stray pushed is an
+   * axis that map does not read. */
+  const helpOpen = await ev(`const m = input.map;
+    const owner = (i) => ['roll', 'pitch', 'yaw', 'throttle'].find((ch) => m[ch] && m[ch].axis === i) || 'unread';
+    return JSON.stringify({ screen: ui.screen,
+      cells: Array.from(ui.stickAxes.querySelectorAll('.cal-axis-ch')).map((n) => n.textContent),
+      want: window.__pad.axes.map((v, i) => owner(i)),
+      yaw: m.yaw.axis,
+      say: ui.stickSay.textContent, watch: Boolean(input.stickCheck) });`).then(JSON.parse);
+  check('Enter on it opens Stick help, watching, with a cell per axis naming what the sim reads there',
+    helpOpen.screen === 'stickhelp' && helpOpen.watch && helpOpen.cells.length === 6
+    && helpOpen.cells.join() === helpOpen.want.join(), JSON.stringify(helpOpen));
+  check('and before anything moves, it names the dead stick and asks for it',
+    /Pitch did not move once in flight/.test(helpOpen.say), helpOpen.say);
+  const stray = helpOpen.want.indexOf('unread');
+  const sweep = (axis) => page.evaluate(`(async () => {
+    const pad = window.__pad;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (const v of [0.2, 0.45, 0.7, 0.95, 0.8]) {
+      pad.axes[${axis}] = v; pad.timestamp += 1; await sleep(40);
+    }
+  })()`);
+  await sweep(stray);
+  let named = true;
+  await page.until(`/Axis ${stray} is moving like a stick/.test(window.__ui.stickSay.textContent)`, 3000).catch(() => { named = false; });
+  check('a stick pushed on an axis the map does not read: named as a stick on the wrong channel',
+    named, `axis ${stray}: ${await ev('return ui.stickSay.textContent;')}`);
+  await page.evaluate(`window.__pad.axes[${stray}] = 0; window.__pad.timestamp += 1; 0`);
+  await page.sleep(100);
+  await sweep(helpOpen.yaw);
+  let arrives = true;
+  await page.until(`window.__ui.stickSay.textContent === 'That is yaw, on axis ${helpOpen.yaw}, and it is reaching the sim.'`, 3000)
+    .catch(() => { arrives = false; });
+  check('and the yaw stick, where the map reads it: named, and said to reach the sim',
+    arrives, await ev('return ui.stickSay.textContent;'));
+  await page.evaluate(`window.__pad.axes[${helpOpen.yaw}] = 0; window.__pad.timestamp += 1; 0`);
+  await ev('ui.act(ui.items()[0].action); return 1;');
+  await page.until("window.__ui.screen === 'calibrate'", 3000).catch(() => {});
+  const wasCal = await ev('return ui.screen;');
+  await page.tap('Escape');
+  let cameBack = true;
+  await page.until("window.__ui.screen === 'stickhelp'", 3000).catch(() => { cameBack = false; });
+  check('its Calibrate sticks is a round trip: the wizard, Escape, and back on Stick help',
+    wasCal === 'calibrate' && cameBack, wasCal);
+  await page.tap('Escape');
+  let toPause = true;
+  await page.until("window.__ui.screen === 'paused'", 3000).catch(() => { toPause = false; });
+  await page.sleep(200);
+  check('and Escape from Stick help goes back to the pause it came from, with the watch stopped',
+    toPause && await ev('return input.stickCheck === null;'));
 }
 
 async function touchPage(page) {

@@ -3571,6 +3571,54 @@
       .cal-steps li.done { color: var(--mint); }
       .cal-actions { display: flex; gap: 10px; margin-top: 4px; }
       .cal-actions .name-dialog-btn:disabled { opacity: 0.35; cursor: default; }
+      /*
+       * STICK HELP. See setStickHelp in src/ui/ui.js and src/ui/stickhelp.js.
+       * The strip is the calibrate screen's; each cell also says which channel
+       * the sim reads from that axis, in the colour the cell already wears,
+       * so a yaw stick moving a bar that says "unread" is visible for what it
+       * is. The live sentence is cream, because it is the instrument here; the
+       * block under it is a panel, because it is what to do when no bar moves.
+       * It scrolls on a phone with the rest of the page: see .screen-page.
+       * Nothing in it shrinks to make room, because in a flex column the
+       * paragraph that gives way is squashed below its own text and draws
+       * over the panel under it: measured at 850 by 383, the size of the
+       * phone in bug-f532d90b, before this line.
+       */
+      .screen-stickhelp > * { flex-shrink: 0; }
+      .stickhelp-lede {
+        margin: 0 0 10px; max-width: 40em; text-align: center;
+        font-size: 14px; line-height: 1.45; color: var(--cream);
+      }
+      .stickhelp-pad {
+        margin: 0 0 12px; max-width: 40em; text-align: center;
+        font-size: 12px; letter-spacing: 0.04em; color: var(--slate);
+      }
+      .cal-axis-ch {
+        min-width: 4.4em; font-size: 10px; letter-spacing: 0.06em;
+        color: rgba(235, 230, 215, 0.45);
+      }
+      .cal-axis.is-mapped .cal-axis-ch { color: var(--mint); }
+      .cal-axis.is-live .cal-axis-ch { color: var(--amber); }
+      .stickhelp-axes { margin-bottom: 12px; }
+      .stickhelp-say {
+        max-width: 40em; margin: 0 0 14px; text-align: center;
+        font-size: 15px; line-height: 1.45; color: var(--cream);
+      }
+      .stickhelp-steps {
+        max-width: 40em; margin: 0 0 16px; padding: 12px 16px;
+        border-radius: 6px; background: rgba(12, 18, 14, 0.62);
+        box-shadow: inset 0 0 0 1px rgba(232, 168, 184, 0.28);
+        text-align: left;
+      }
+      .stickhelp-steps-title {
+        margin: 0 0 6px; font-size: 11px; font-weight: 600;
+        letter-spacing: 0.14em; text-transform: uppercase; color: var(--sakura);
+      }
+      .stickhelp-steps p {
+        margin: 0 0 6px; font-size: 13px; line-height: 1.45; color: var(--cream);
+      }
+      /* The radio's own line, which every platform shares, recedes. */
+      .stickhelp-steps p:last-child { margin-bottom: 0; color: var(--slate); }
       .screen-padpick {
         pointer-events: auto;
         padding: 4vh 4vw 3vh;

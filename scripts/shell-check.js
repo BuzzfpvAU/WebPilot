@@ -111,6 +111,10 @@ const SCREENS = [
    * the three faults in that ticket would quietly come back when it
    * reopens. show() reaches it whether or not a row does. */
   'paused', 'results', 'howto', 'tricks', 'credits',
+  /* Stick help, from 28 September: a room with rows, unlike the calibrate
+   * screen whose stick help it is, so a radio pilot can leave it and this
+   * walks it. */
+  'stickhelp',
 ];
 
 /*
