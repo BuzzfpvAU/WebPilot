@@ -80,6 +80,17 @@ function usage() {
   console.log('  seconds a card rather than the second or two it takes on real hardware.');
 }
 
+/* Rejects anything that is not a plain http(s) origin, so a --board value
+ * cannot be used to reach the cloud metadata service or another
+ * link-local/internal address instead of the intended board. */
+function isAllowedBoard(urlStr) {
+  let u;
+  try { u = new URL(urlStr); } catch { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') { return false; }
+  if (u.hostname === '169.254.169.254' || u.hostname === 'metadata.google.internal') { return false; }
+  return true;
+}
+
 function parseArgs(argv) {
   const opts = {
     board: process.env.BOARD_ORIGIN || 'http://127.0.0.1:3100',
@@ -96,8 +107,8 @@ function parseArgs(argv) {
     throw new Error(`unknown option ${a}`);
   }
   opts.board = String(opts.board || '').replace(/\/+$/, '');
-  if (!opts.board) {
-    throw new Error('--board wants an origin');
+  if (!opts.board || !isAllowedBoard(opts.board)) {
+    throw new Error('--board wants a plain http(s) origin, not a link-local/metadata address');
   }
   return opts;
 }
