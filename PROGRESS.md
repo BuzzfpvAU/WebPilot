@@ -57583,3 +57583,103 @@ one. Low latency view is read at load, so it takes effect on that reload.
   lands sooner without buzzing on small corrections. Wrong would be the
   view overshooting at the end of a flip, a wobble when a roll stops, a
   jump on landing, or a rough roll near centre stick with FF at 150.
+
+## 2026-09-28 | shell | The feel report quotes the pilot's own hover, and the whoop that felt underpowered
+
+### The report
+
+"Underpowered Whoop", anonymous, 2026-09-28: "The whoop model feels
+underpowered compared to my betafpv air 65", expecting it "Easier to float
+and level up from a dive". Firefox 156 on a Mac, a Radiomaster Pocket, the
+whoop at Weight 70 (gravityScale 1.417) on a charged pack, and the throttle
+flown through its whole travel, 0 to 1, so the channel was not clipped.
+
+### What was wrong in the report itself
+
+Its throttle line said "hover near 39.9 percent of stick", which is the
+whoop's figure at Weight 100. `throttleSummary` in configs/rates.js took the
+airframe alone, so `hoverStickPercent` fell back to its defaults, the
+shipped weight on a fresh pack, whatever the pilot flew. The same report
+said weight 70 and a keyboard hover of 32.3, and scripts/flightcheck.js at
+--gravity=1.417 measures 32.4. Read on its own, the line made the whoop
+sound heavier than it was flown, which is the wrong way round for exactly
+this complaint.
+
+### What changed
+
+- configs/rates.js: `throttleSummary(r, airframe, weight = 100, cellV = 4.2)`
+  passes both through to `hoverStickPercent`. Left out, they are the shipped
+  machine's, so a call without them reads exactly as before.
+- src/ui/ui.js, `bugSnapshot`: passes `clampWeight(s.weight, s.airframe)` and
+  `s.packVoltage`, the two the report prints below the line.
+
+Nothing else. Asked about the thrust question below, the owner said "lets
+not make large changes, just a incremental change, it feels ok now, lets not
+break that". So nothing that flies moved: no plant, no module, no tune, no
+setting, no default. This is one string in a report.
+
+### What the report was about, measured and left alone
+
+The whoop flies the five inch's plant in a room built MICRO_SCALE, 3.4289,
+times life size (Round 69), and the clock is not scaled, so every
+acceleration the picture shows is the plant's divided by 3.4289, thrust as
+well as gravity. Measured off dist/sim.wasm in Node against
+SIM_AIRFRAME_WHOOP65, the retired model of BetaFPV's Air65 II Champion, at
+1.0 g, with every length on the seated whoop divided by MICRO_SCALE. The
+method: angle mode, 2.5 s at the bisected hover, throttle cut until the
+trigger, then full stick until the climb rate is back to zero. The probe
+was a scratch file and is not committed.
+
+    on screen                       Air65 II model, 1 g   whoop, Weight 70
+    gravity                         1.00 g                0.41 g
+    hover                           33.7 % of stick       32.4 % of stick
+    punch, net up, first 300 ms     2.42 g                1.38 g
+    climb after 2 s at full stick   13.3 m/s              8.6 m/s
+    stop a 4 m/s descent            0.16 s and 0.43 m     0.23 s and 0.53 m
+    stop a 6 m/s descent            0.20 s and 0.74 m     0.33 s and 1.10 m
+    throttle cut, first metre       0.49 s                0.74 s
+
+So hover sits where an Air65's does and the ratio is higher, 5.7 to 1
+climbing against 4.95, but on screen the whoop punches at 57 percent of an
+Air65 and takes 40 to 60 percent longer to stop the same descent. It also
+falls slower than an Air65 at every weight the slider offers, so "float",
+read as hang time, is not what is missing. The Weight slider moves gravity
+only: across the whoop's 60 to 120 the punch reads 1.41 to 1.18 g and the
+6 m/s stop 0.31 to 0.36 s. The module's air scale, which the shell does not
+use, moved that stop from 0.33 to 0.31 s at 1.5. This is the Vdrone report
+of 2026-09-24 seen from the other side: that pilot found the fall floaty and
+the whoop's gravity went to 2.025, and the slider can only trade one of the
+two against the other.
+
+About 60 percent more thrust than the five inch's, estimated from the punch
+figures and not measured, would match an Air65 on screen. That was put to
+the owner and answered in the words quoted above.
+
+The pilot's radio also refreshed slowly: `stick.flight.padHzMax` 14 over
+398 s of flight, where 26 of the 30 Chrome and Edge radio reports counted in
+the P3.3 entry read 125 to 242 Hz. At 14 Hz a punch reaches the controller
+35 ms late on average and up to 71 ms, which at 6 m/s is 0.2 to 0.4 m more
+sink before the motors move. WebHID (plan P3.2) is Chrome and Edge only, so
+for this pilot the lever is the browser; whether this radio on this Mac
+reads faster in Chrome is untested.
+
+### RUN LOG
+
+    node, before and after      throttleSummary on five cases with the new
+                                arguments left out: identical strings
+    node                        throttleSummary({}, 'whoop65', 70, 4.2)
+                                reads "hover near 32.3 percent of stick",
+                                was 39.9
+    the real page, headless     bugSnapshot() booted as whoop65 at Weight 70
+                                on 4.2 V: throttle "hover near 32.3", weight
+                                70, gravityScale 1.417, keyHover 32.3. At
+                                Weight 100 it reads 39.9, as before. The
+                                five inch at Weight 100 on 3.8 V reads 38.8,
+                                where it read 35.0 before. The only page
+                                errors were the board's API refusing a
+                                connection from the container
+    npm run lint:input          all 160 passed, 166 s
+    npm run input:selftest      all 225 passed
+    npm run lint:preload        up to date, boot 120 modules, 229 served
+    npm run verify              not run: nothing here reaches the plant, the
+                                module, the input path or the build
