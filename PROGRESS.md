@@ -57668,3 +57668,291 @@ the owner has not made. Both went to the owner as questions instead.
                                  not claimed as a number; it is claimed as
                                  bytes and fragments that are no longer
                                  asked for.
+## 2026-09-28 | shell | The feel report quotes the pilot's own hover, and the whoop that felt underpowered
+
+### The report
+
+"Underpowered Whoop", anonymous, 2026-09-28: "The whoop model feels
+underpowered compared to my betafpv air 65", expecting it "Easier to float
+and level up from a dive". Firefox 156 on a Mac, a Radiomaster Pocket, the
+whoop at Weight 70 (gravityScale 1.417) on a charged pack, and the throttle
+flown through its whole travel, 0 to 1, so the channel was not clipped.
+
+### What was wrong in the report itself
+
+Its throttle line said "hover near 39.9 percent of stick", which is the
+whoop's figure at Weight 100. `throttleSummary` in configs/rates.js took the
+airframe alone, so `hoverStickPercent` fell back to its defaults, the
+shipped weight on a fresh pack, whatever the pilot flew. The same report
+said weight 70 and a keyboard hover of 32.3, and scripts/flightcheck.js at
+--gravity=1.417 measures 32.4. Read on its own, the line made the whoop
+sound heavier than it was flown, which is the wrong way round for exactly
+this complaint.
+
+### What changed
+
+- configs/rates.js: `throttleSummary(r, airframe, weight = 100, cellV = 4.2)`
+  passes both through to `hoverStickPercent`. Left out, they are the shipped
+  machine's, so a call without them reads exactly as before.
+- src/ui/ui.js, `bugSnapshot`: passes `clampWeight(s.weight, s.airframe)` and
+  `s.packVoltage`, the two the report prints below the line.
+
+Nothing else. Asked about the thrust question below, the owner said "lets
+not make large changes, just a incremental change, it feels ok now, lets not
+break that". So nothing that flies moved: no plant, no module, no tune, no
+setting, no default. This is one string in a report.
+
+### What the report was about, measured and left alone
+
+The whoop flies the five inch's plant in a room built MICRO_SCALE, 3.4289,
+times life size (Round 69), and the clock is not scaled, so every
+acceleration the picture shows is the plant's divided by 3.4289, thrust as
+well as gravity. Measured off dist/sim.wasm in Node against
+SIM_AIRFRAME_WHOOP65, the retired model of BetaFPV's Air65 II Champion, at
+1.0 g, with every length on the seated whoop divided by MICRO_SCALE. The
+method: angle mode, 2.5 s at the bisected hover, throttle cut until the
+trigger, then full stick until the climb rate is back to zero. The probe
+was a scratch file and is not committed.
+
+    on screen                       Air65 II model, 1 g   whoop, Weight 70
+    gravity                         1.00 g                0.41 g
+    hover                           33.7 % of stick       32.4 % of stick
+    punch, net up, first 300 ms     2.42 g                1.38 g
+    climb after 2 s at full stick   13.3 m/s              8.6 m/s
+    stop a 4 m/s descent            0.16 s and 0.43 m     0.23 s and 0.53 m
+    stop a 6 m/s descent            0.20 s and 0.74 m     0.33 s and 1.10 m
+    throttle cut, first metre       0.49 s                0.74 s
+
+So hover sits where an Air65's does and the ratio is higher, 5.7 to 1
+climbing against 4.95, but on screen the whoop punches at 57 percent of an
+Air65 and takes 40 to 60 percent longer to stop the same descent. It also
+falls slower than an Air65 at every weight the slider offers, so "float",
+read as hang time, is not what is missing. The Weight slider moves gravity
+only: across the whoop's 60 to 120 the punch reads 1.41 to 1.18 g and the
+6 m/s stop 0.31 to 0.36 s. The module's air scale, which the shell does not
+use, moved that stop from 0.33 to 0.31 s at 1.5. This is the Vdrone report
+of 2026-09-24 seen from the other side: that pilot found the fall floaty and
+the whoop's gravity went to 2.025, and the slider can only trade one of the
+two against the other.
+
+About 60 percent more thrust than the five inch's, estimated from the punch
+figures and not measured, would match an Air65 on screen. That was put to
+the owner and answered in the words quoted above.
+
+The pilot's radio also refreshed slowly: `stick.flight.padHzMax` 14 over
+398 s of flight, where 26 of the 30 Chrome and Edge radio reports counted in
+the P3.3 entry read 125 to 242 Hz. At 14 Hz a punch reaches the controller
+35 ms late on average and up to 71 ms, which at 6 m/s is 0.2 to 0.4 m more
+sink before the motors move. WebHID (plan P3.2) is Chrome and Edge only, so
+for this pilot the lever is the browser; whether this radio on this Mac
+reads faster in Chrome is untested.
+
+### RUN LOG
+
+    node, before and after      throttleSummary on five cases with the new
+                                arguments left out: identical strings
+    node                        throttleSummary({}, 'whoop65', 70, 4.2)
+                                reads "hover near 32.3 percent of stick",
+                                was 39.9
+    the real page, headless     bugSnapshot() booted as whoop65 at Weight 70
+                                on 4.2 V: throttle "hover near 32.3", weight
+                                70, gravityScale 1.417, keyHover 32.3. At
+                                Weight 100 it reads 39.9, as before. The
+                                five inch at Weight 100 on 3.8 V reads 38.8,
+                                where it read 35.0 before. The only page
+                                errors were the board's API refusing a
+                                connection from the container
+    npm run lint:input          all 160 passed, 166 s
+    npm run input:selftest      all 225 passed
+    npm run lint:preload        up to date, boot 120 modules, 229 served
+    npm run verify              not run: nothing here reaches the plant, the
+                                module, the input path or the build
+
+## 2026-09-28 | maps, builder | With no start pads the craft starts in the open, never in a pylon
+
+A pilot's report on the board, Hop, 28 September at 01:26, marked blocking,
+on a built map with no course id (the builder's own map, flown from the
+canvas): "it spawns me inside a pylon i can't get out". The owner: "fix
+this bug, make it so that no matter the map someone builds, the quad has
+to spawn in open space, unless they build launch pads then from the launch
+pads".
+
+### What was wrong
+
+A built map with no start pads started the craft at one fixed point, 8 m in
+from the plot's west edge on its middle line (defaultSpawn in
+src/maps/built/place.js), on whatever was laid there. Reproduced in Node
+with the map's own placement:
+
+    a 28 m pylon over the point   the craft seated in the middle of the
+                                  lattice, 3.26 m from its nearest member,
+                                  with the peak over it; the builder said
+                                  nothing but fs-no-start
+    a building over the point     the craft inside the building; fs-spawn
+                                  warned, and the simulator started it
+                                  there anyway
+    containers over the point     the same, inside the stack
+
+The pylon is the one nothing caught: fs-spawn measures from the craft to
+its nearest solid, and every leg and brace is more than its metre away.
+Flown in the module (below), a climb straight up from the point meets the
+pylon for 3390 steps and gets no higher than 27.6 m, under the peak.
+
+### What changed
+
+- src/maps/built/place.js: defaultSpawn is gone and openSpawn takes its
+  place. The point is where a search starts. Open is nothing solid within
+  OPEN_CLEAR (1 m) of the craft's centre in plan at any height, so open sky
+  over it and a metre of air round it; no road within a car's reach and a
+  metre more (the owner's rule for a crash set down, 2026-09-26); and on the
+  plot, a metre in from its edge. The search walks a half metre lattice,
+  nearest first by whole steps squared (integers, exact), a tie east then
+  north, and takes the first open spot. A plot with none starts the craft at
+  its edge, the nearest open ground up to 32 m off it, facing into it; with
+  none there either, the point as before, and fs-spawn says what it is
+  inside. The point is asked first against every solid, so a map that
+  leaves it open pays one walk of the list and starts exactly where it
+  always did, to the bit. Arithmetic only: distances compared squared, road
+  lines from road.js, which keeps the same rule, and the heading a quarter
+  turn as a constant. The spawn carries `from` ('pads', 'point', 'open',
+  'off', 'blocked') for the builder. Pads are untouched: spawnFrom, wherever
+  the author put them.
+- The car's reach is half the diagonal of the biggest of CAR_KINDS, taken
+  once at load, which is at least what roadtool.js roadReach finds on any
+  road, so the start the search picks is one rd-start never warns about.
+- src/trackbuilder/warnings.js: SPAWN_CLEAR is place.js's OPEN_CLEAR, one
+  number. fs-no-start says where the pilot actually starts: the point when
+  it is open, the plan position of the spot when it is not, the edge when
+  the plot has none. rd-start's no pads message no longer says "8 m in",
+  which it could not know.
+- src/trackbuilder/schema.md: the fs-no-start and fs-spawn rows.
+- src/maps/preload.js regenerated (node scripts/gen-preload.js): place.js
+  now reaches road.js, so road.js moved up the built map's list. The same
+  35 modules.
+- Checks. The builder selftest had two checks that held the old start: "a
+  building on it is a warning" and "with no pads, a road through where the
+  pilot starts warns". They now hold the new one, because the owner changed
+  the behaviour they pinned, not a threshold: a building over the point
+  moves the start into the open with nothing warning and the note giving
+  the spot, and a road through the point moves the start a car's reach and
+  a metre off it with rd-start quiet. Added: a pylon over the point, and a
+  12 m plot a block covers, which starts the craft at its edge facing in.
+  scripts/props-check.js gained a scenario in its starter block: no pads, a
+  pylon over the point, a climb to 34 m flown in the module from the point
+  (meets the pylon, the trap seen) and from the start (touches nothing to
+  35.2 m, the same to the bit twice), then the usual lift off and hover.
+
+### What it costs
+
+Warm, in Node: the starter with its pads 1.20 ms a placement, without them
+1.48 ms (the point is open there, one walk). The worst case built for it, a
+160 m plot under warehouses with no open ground, 14 ms, the whole lattice
+and then the edge. A 5 m plot in a town of warehouses reaches the last
+fallback in 4.4 ms.
+
+### Behaviour that changed for a map with no pads
+
+A map whose point was already open and clear of roads starts where it did.
+One with a solid within a metre of the point, anything overhead, or a road
+near it, now starts at the nearest open spot, facing east as before, and
+its builder note says where. The STF mark and the partners' marks are
+chosen relative to the start, so on such a map they may choose again; the
+egg's fifty random maps, 15 per cent of them padless, still keep every
+rule. The starter and the showpiece have pads and did not move; the world
+golden flies both and is unchanged. Race tracks were not touched: with no
+pads a race track parks the quad behind its first gate (trackdoc.js), which
+is where its lap starts, and race mode offers no pylons or buildings.
+
+### What went wrong
+
+- The obvious test for "can't get out", a lift off and a hover at the
+  start, cannot see this bug: both stay under 2.3 m, and inside a pylon
+  there is air to 27 m. Only a climb to the peak shows the trap, so that is
+  the scenario props-check flies.
+- lint:preload went stale with the new import and was regenerated; it was
+  up to date before the change.
+
+### RUN LOG
+
+    node src/trackbuilder/selftest.js   951 passed, 0 failed (948 and 0
+                                 on 8066e62 before the change; with the
+                                 fix and the old checks, 946 and 2, the
+                                 two that pinned the old start)
+    node scripts/props-check.js  all passed, the physics block flown in
+                                 dist/sim.wasm; the new scenario: 3390
+                                 steps in contact up to 27.631 m from the
+                                 point, 0 steps up to 35.217 m from the
+                                 start
+    node scripts/roads-check.js  all passed (11.4 s)
+    node scripts/counter-check.js  all passed
+    node scripts/world-golden.js all passed (6.0 s)
+    npm run lint:preload         STALE after the import, regenerated, then
+                                 up to date, 229 served
+    npm run verify               not run: nothing in the plant, the module
+                                 ABI, the build or the input path changed.
+                                 The start seats the plant's frame on a
+                                 padless built map only, and props-check
+                                 flew that in the module
+    no review workflow           not directed
+
+### For the owner, when flying
+
+In the builder, a map with no start pads and a pylon (or a building) over
+the spot 8 m in from the left edge, halfway up. The builder's fs-no-start
+note says where the pilot starts now. Fly it: the craft should be on
+open paving beside the pylon, a metre or more clear of it with nothing
+overhead, facing right. Wrong would be the craft inside or under anything,
+on a road, or off the plot while the plot has open ground.
+
+## 2026-09-28 | git | The open start merged onto main, for the owner to fly
+
+The owner: "merge it to main so i can fly it". Main had moved while the
+branch waited: 5eed2d8, another session's "The feel report quotes the
+pilot's own hover", landed at 03:12, so the fast-forward push of 3cc870d
+was refused, as it should be. The merge base was 8066e62, which new main
+still held, so append only was kept. Main was merged into the branch as
+b4b7edd rather than the branch rebased onto it, so nothing anywhere
+needed a force push. The two changes share no file but PROGRESS.md, where
+each appended an entry; both are kept, in the order they were written.
+Main then fast-forwarded from 5eed2d8 to b4b7edd, append only, at 03:22 UTC.
+
+### RUN LOG (on b4b7edd, the commit main points at)
+
+    node --check                 the seven js files either side changed,
+                                 none failed
+    node src/trackbuilder/selftest.js   951 passed, 0 failed
+    node scripts/props-check.js  all passed, the pylon climb among them:
+                                 3390 steps in contact up to 27.631 m from
+                                 the point, none up to 35.217 m from the
+                                 start
+    node scripts/roads-check.js  all passed
+    node scripts/counter-check.js  all passed
+    node scripts/world-golden.js all passed
+    npm run lint:preload         up to date, 229 served
+    npm run input:selftest       all 225 passed (the feel report's check)
+    npm run lint:input           all 160 passed, 196 s: the builder's Fly
+                                 this map into the starter in a real page,
+                                 place.js with its new imports, and no
+                                 uncaught exception on any page
+    npm run verify               not run: nothing either side changed
+                                 reaches the plant, the module ABI, the
+                                 build or the input path
+
+### The site, once it was live
+
+webfpv.org/sim served the new deploy at 03:23 UTC, its files stamped
+03:23:17, about a minute after the push. Read off the live site with a
+cache busting query and hashed against b4b7edd: src/maps/built/place.js,
+src/trackbuilder/warnings.js and selftest.js, src/maps/preload.js,
+index.html and src/main.js, and the feel report's src/ui/ui.js and
+configs/rates.js all match byte for byte.
+
+### For the owner, when flying
+
+Reload the page once, so src/fresh.js loads this deploy whole. Then, in
+the builder, a map with no start pads and a pylon (or a building) over the
+spot 8 m in from the left edge, halfway up, and Fly this map. The craft
+should be on open paving beside it, a metre or more clear with nothing
+overhead, facing right, and the builder's fs-no-start note says where.
+Wrong would be the craft inside or under anything, on a road, or off the
+plot while the plot has open ground.

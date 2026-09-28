@@ -39,7 +39,7 @@ import { ELEMENTS, KIND, TUNING, trackClassOf, tuningFor, docModeOf } from './el
 /* A map is checked against the world it builds, not against a racing line:
  * the same placed solids the simulator hands the physics. All pure, no
  * Three.js, so the checks run in Node too. */
-import { placeDocument, topUnder } from '../maps/built/place.js';
+import { placeDocument, topUnder, OPEN_CLEAR, OPEN_POINT_IN } from '../maps/built/place.js';
 import { placeSolids } from '../props/solids.js';
 import { sincos, turnY } from '../props/trig.js';
 import { GAP_MIN } from '../props/parts.js';
@@ -767,7 +767,11 @@ function label(el) {
  * D/2), y up), and every test below is in that frame. Nothing here is the
  * physics and nothing here reaches it, so plain Math is fine.
  *
- *   fs-no-start      info  no start pads: says where the pilot will start
+ *   fs-no-start      info  no start pads: says where the pilot will start,
+ *                          which is in the open (openSpawn in
+ *                          src/maps/built/place.js), so a map with no pads
+ *                          raises fs-spawn only when nowhere near the plot
+ *                          is open at all
  *   fs-spawn         warn  the start is inside a solid or within a metre of
  *                          one, so the craft cannot take off cleanly. Measured
  *                          where the simulator seats the craft: on the mat
@@ -824,13 +828,38 @@ export const FREESTYLE_SOLIDS_MAX = 20000;
  * against another is closed, which the gap rule allows. */
 export const SLOT_FLOOR = 0.05;
 
-/* The air the craft needs round the start to take off. */
-export const SPAWN_CLEAR = 1.0;
+/* The air the craft needs round the start to take off. The simulator keeps
+ * a start with no pads this far off everything (openSpawn in
+ * src/maps/built/place.js), so it is one number, owned there. */
+export const SPAWN_CLEAR = OPEN_CLEAR;
 
 /* How far the pads' Base may be from their seat before the builder says
  * so: more than a mat's thickness and less than anything that reads as a
  * step when the pads are drawn on the seat. */
 const SEAT_SLACK = 0.05;
+
+/*
+ * Where the pilot starts with no start pads, in the builder's words, for
+ * fs-no-start: the point OPEN_POINT_IN in from the left edge when it is in
+ * the open, and when it is not, the open ground src/maps/built/place.js
+ * openSpawn found instead, in the plan's metres from the plot's near left
+ * corner, the frame the author places in. When openSpawn found nowhere
+ * open it is the point, and fs-spawn says what it is inside.
+ */
+function noStartNote(placed) {
+  const sp = placed.spawn;
+  const press = 'Press S and click where they should start.';
+  if (sp.from === 'open') {
+    const x = (sp.x + placed.W / 2).toFixed(1);
+    const y = (placed.D / 2 - sp.z).toFixed(1);
+    return `No start pads, and ${OPEN_POINT_IN} m in from the left edge of the plot, halfway up it, is not in the open, so the pilot starts at the nearest spot that is: ${x} m in from the left edge and ${y} m up, facing right. In the open is ${OPEN_CLEAR} m clear of everything, with nothing overhead and no road beside it. ${press}`;
+  }
+  if (sp.from === 'off') {
+    const edge = sp.yaw === -Math.PI / 2 ? 'left' : sp.yaw === Math.PI / 2 ? 'right' : sp.yaw === 0 ? 'bottom' : 'top';
+    return `No start pads, and nowhere on the plot is in the open, ${OPEN_CLEAR} m clear of everything with nothing overhead and no road beside it, so the pilot starts at its ${edge} edge, facing into it. ${press}`;
+  }
+  return `No start pads, so the pilot starts ${OPEN_POINT_IN} m in from the left edge of the plot, halfway up it, facing right. ${press}`;
+}
 
 /* How far two solids have to run into each other before it is an overlap
  * rather than two faces that meet. */
@@ -880,7 +909,7 @@ export function freestyleReport(doc) {
 
   const pads = startPadsOf(doc);
   if (!pads) {
-    out.push(note('fs-no-start', 'No start pads, so the pilot starts 8 m in from the left edge of the plot, halfway up it, facing right. Press S and click where they should start.'));
+    out.push(note('fs-no-start', noStartNote(placed)));
   }
   {
     /*
@@ -1234,7 +1263,7 @@ function roadWarnings(doc, placed, bodies, names, out) {
     } else if (lineShapeDist(pts, line.closed, { point: spawn }, [spawn[0], spawn[1], spawn[0], spawn[1]], reach + SPAWN_CLEAR) < reach + SPAWN_CLEAR) {
       out.push(warn('rd-start', pads
         ? `${cap(names(road))} passes within a metre of where the craft starts, so a car on it clips the craft before it has left the pad. Move the road or the pads.`
-        : `${cap(names(road))} runs through where the pilot starts, 8 m in from the left edge of the plot with no start pads, so a car on it drives through the craft. Move the road, or press S and put the start pads clear of it.`, {
+        : `${cap(names(road))} runs through where the pilot starts with no start pads, so a car on it drives through the craft. Move the road, or press S and put the start pads clear of it.`, {
         elementId: road.id,
         ...(pads ? { otherId: pads.id } : {}),
       }));

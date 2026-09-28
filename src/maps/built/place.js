@@ -47,7 +47,9 @@ import { ELEMENTS, KIND } from '../../trackbuilder/elements.js';
 import { assetOf, partsOf } from '../../props/catalog.js';
 import { placeSolids, placedYaw } from '../../props/solids.js';
 import { sincos, turnY } from '../../props/trig.js';
+import { CAR_KINDS } from '../../props/street.js';
 import { startBlockLaneOffset } from '../../art/startblock.js';
+import { roadOf } from './road.js';
 
 const HALF_PI = Math.PI / 2;
 const TAU = Math.PI * 2;
@@ -275,13 +277,312 @@ export function groundUnder(src, x, z, fromY, cgY) {
 }
 
 /*
- * Where a pilot with no start pads starts: eight metres in from the plot's
- * west edge, on its middle line, facing across it, on whatever is laid
- * there.
+ * WHERE A PILOT WITH NO START PADS STARTS: in the open, as near as the map
+ * allows to the point eight metres in from the plot's west edge on its
+ * middle line, facing across the plot.
+ *
+ * That point used to be the start whatever stood on it. A pilot, on 28
+ * September 2026: "it spawns me inside a pylon i can't get out". A pylon
+ * over the point is the case nothing caught, because the builder's metre
+ * of air (fs-spawn in src/trackbuilder/warnings.js) is measured from the
+ * craft to its nearest solid, and a pylon's legs and braces are all further
+ * off than that: the craft sat in the middle of the lattice, 3.26 m from
+ * its nearest member, with the peak over it, and the builder said nothing.
+ * A building or a stack of containers over the point started the craft
+ * inside the solid, which the builder did warn about, and the simulator
+ * started it there anyway. The owner, the same day: "no matter the map
+ * someone builds, the quad has to spawn in open space, unless they build
+ * launch pads then from the launch pads". So the point is only where the
+ * search starts, and pads are spawnFrom's, below, wherever they stand.
+ *
+ * OPEN is three things, all measured in plan:
+ *
+ *   nothing solid within OPEN_CLEAR of the craft's centre across the
+ *     ground, at ANY height over the paving. That is a metre of air round
+ *     the craft and open sky over it, so a craft that climbs straight up
+ *     meets nothing: under a pylon's peak, a crane's jib, a tree's canopy
+ *     or a footbridge's deck is not open, however much air there is at the
+ *     craft's own height. It also puts the craft on the paving, since a
+ *     spot a metre clear of every box has no box under it;
+ *   no road within a car's reach of it and OPEN_CLEAR more, because a car
+ *     would drive through a craft waiting there, which is the owner's rule
+ *     for where a crash is set down (findRestSpot in src/game/collide.js,
+ *     2026-09-26) and rd-start's in the builder;
+ *   on the plot, OPEN_CLEAR in from its edge.
+ *
+ * THE SEARCH walks a lattice OPEN_STEP apart round the point, nearest
+ * first, and the first open spot is the start. Nearest is counted in whole
+ * lattice steps squared, which are integers and so exact, and a tie goes
+ * east, the way the craft faces, then north. The point itself is asked
+ * first, against every solid in turn, because most maps leave it open and
+ * those pay for one walk of the list and nothing else: the start is then
+ * the one this function always gave, to the bit. When the plot has no open
+ * ground at all (a small plot with a big thing on it), the start is the
+ * nearest open ground off its edge, up to OPEN_OFF out, facing into it.
+ * When there is none there either, it is the point, on whatever is laid
+ * there, as it always was, and fs-spawn says what that is inside.
+ *
+ * ARITHMETIC ONLY, like the rest of this file: every distance is compared
+ * squared, the roads are ./road.js's lines, which keep the same rule, and
+ * the heading is a quarter turn written as the constant. So the start the
+ * plant's frame is seated at is the same bits in every engine.
+ *
+ * `from` on the spawn says which start it is, for the builder's note
+ * (fs-no-start): 'pads' (spawnFrom), 'point', 'open', 'off' or 'blocked'.
  */
-function defaultSpawn(W, tops) {
-  const x = -W / 2 + 8;
-  return { x, y: topUnder(tops, x, 0, 0), z: 0, yaw: -HALF_PI, base: 0 };
+
+/* The air round the start and the sky over it: the builder's SPAWN_CLEAR,
+ * which is this, "the air the craft needs round the start to take off". */
+export const OPEN_CLEAR = 1.0;
+/* Where the search starts, in from the plot's west edge, m. */
+export const OPEN_POINT_IN = 8;
+/* The lattice, m: fine enough to find a spot between two things a couple
+ * of metres apart, coarse enough that a whole plot is a few hundred
+ * thousand spots at worst. */
+const OPEN_STEP = 0.5;
+/* How far past the plot's edge the search looks when the plot has none, m. */
+const OPEN_OFF = 32;
+/* The plan cell the blockers are filed in once the point is not open, m. */
+const OPEN_CELL = 4;
+/* A cell's key is its column times this plus its row: one key per cell for
+ * any row within 2^25 cells of the origin. Past that, on a plot no builder
+ * makes, two cells may share a list, which costs a spot a few more tests
+ * and never changes its answer: every blocker in a list is measured. */
+const OPEN_KEY = 67108864;
+
+/*
+ * The furthest any car reaches from the line it drives: half the diagonal
+ * of the biggest of the town's cars, which a drift car's corners sweep as
+ * it slides. roadReach in src/trackbuilder/roadtool.js measures a road by
+ * the cars actually on it and never finds more than this, so a start held
+ * this far off every lane is one rd-start never warns about. Taken once,
+ * when the module loads, with a square root, which IEEE 754 rounds the same
+ * in every engine.
+ */
+const CAR_REACH = Object.values(CAR_KINDS).reduce(
+  (m, k) => Math.max(m, Math.sqrt(k.L * k.L + k.W * k.W) / 2), 0);
+
+/*
+ * Everything that keeps the start away, flat, six numbers each: a kind (0,
+ * a box's plan rectangle x0, z0, x1, z1; 1, a segment's two ends), the four
+ * plan numbers and how near the craft's centre may not come. A box or a
+ * capsule counts when any of it is over the paving, a road when it has a
+ * line to drive; one whose numbers are not finite is a layout bug that
+ * scripts/props-check.js fails, and is left out rather than filed.
+ */
+const ROAD_AT = { x: 0, y: 0, z: 0 };
+
+function openBlockers(solids, roads, W, D) {
+  const out = [];
+  const add = (kind, x0, z0, x1, z1, keep) => {
+    if (Number.isFinite(x0) && Number.isFinite(z0) && Number.isFinite(x1) && Number.isFinite(z1)
+      && Number.isFinite(keep)) {
+      out.push(kind, x0, z0, x1, z1, keep);
+    }
+  };
+  for (const s of solids) {
+    if (s.box) {
+      const b = s.box;
+      if (b[4] > 0) {
+        add(0, b[0], b[2], b[3], b[5], OPEN_CLEAR);
+      }
+    } else if (s.cap) {
+      const c = s.cap;
+      if ((c[1] > c[4] ? c[1] : c[4]) + c[6] > 0) {
+        add(1, c[0], c[2], c[3], c[5], c[6] + OPEN_CLEAR);
+      }
+    }
+  }
+  for (const el of roads) {
+    const r = roadOf(el);
+    const pts = r.centre.points;
+    const n = pts.length;
+    if (n < 2) {
+      continue;
+    }
+    const keep = r.laneOffset + CAR_REACH + OPEN_CLEAR;
+    const segs = r.centre.closed ? n : n - 1;
+    for (let i = 0; i < segs; i += 1) {
+      const a = pts[i];
+      const b = pts[(i + 1) % n];
+      docToWorld(W, D, a.x, a.y, 0, ROAD_AT);
+      const ax = ROAD_AT.x;
+      const az = ROAD_AT.z;
+      docToWorld(W, D, b.x, b.y, 0, ROAD_AT);
+      add(1, ax, az, ROAD_AT.x, ROAD_AT.z, keep);
+    }
+  }
+  return out;
+}
+
+/* Whether the blocker at offset i keeps the craft's centre off (x, z): its
+ * plan distance, squared, under its keep squared. On the keep is open. */
+function blocks(B, i, x, z) {
+  const x0 = B[i + 1];
+  const z0 = B[i + 2];
+  const x1 = B[i + 3];
+  const z1 = B[i + 4];
+  let dx;
+  let dz;
+  if (B[i] === 0) {
+    dx = x < x0 ? x0 - x : (x > x1 ? x - x1 : 0);
+    dz = z < z0 ? z0 - z : (z > z1 ? z - z1 : 0);
+  } else {
+    const ux = x1 - x0;
+    const uz = z1 - z0;
+    const ll = ux * ux + uz * uz;
+    let t = ll > 0 ? ((x - x0) * ux + (z - z0) * uz) / ll : 0;
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    dx = x0 + ux * t - x;
+    dz = z0 + uz * t - z;
+  }
+  const keep = B[i + 5];
+  return dx * dx + dz * dz < keep * keep;
+}
+
+/*
+ * The blockers filed by plan cell, each in every OPEN_CELL square its
+ * footprint grown by its keep reaches, so a spot reads only its own cell.
+ * Only cells within the search's reach are filed: a road can run a hundred
+ * kilometres off the plot, and the search never looks there.
+ */
+function indexBlockers(B, W, D) {
+  const cells = new Map();
+  const lx = Math.floor((-W / 2 - OPEN_OFF) / OPEN_CELL);
+  const hx = Math.floor((W / 2 + OPEN_OFF) / OPEN_CELL);
+  const lz = Math.floor((-D / 2 - OPEN_OFF) / OPEN_CELL);
+  const hz = Math.floor((D / 2 + OPEN_OFF) / OPEN_CELL);
+  for (let i = 0; i < B.length; i += 6) {
+    const keep = B[i + 5];
+    const cx0 = Math.max(lx, Math.floor(((B[i + 1] < B[i + 3] ? B[i + 1] : B[i + 3]) - keep) / OPEN_CELL));
+    const cx1 = Math.min(hx, Math.floor(((B[i + 1] > B[i + 3] ? B[i + 1] : B[i + 3]) + keep) / OPEN_CELL));
+    const cz0 = Math.max(lz, Math.floor(((B[i + 2] < B[i + 4] ? B[i + 2] : B[i + 4]) - keep) / OPEN_CELL));
+    const cz1 = Math.min(hz, Math.floor(((B[i + 2] > B[i + 4] ? B[i + 2] : B[i + 4]) + keep) / OPEN_CELL));
+    for (let cx = cx0; cx <= cx1; cx += 1) {
+      for (let cz = cz0; cz <= cz1; cz += 1) {
+        const key = cx * OPEN_KEY + cz;
+        const list = cells.get(key);
+        if (list) {
+          list.push(i);
+        } else {
+          cells.set(key, [i]);
+        }
+      }
+    }
+  }
+  return cells;
+}
+
+/* Whether (x, z) is open of every blocker: all of them walked when there
+ * is no index, the ones filed in its cell when there is. The same answer
+ * either way, for any spot the search asks about. */
+function openAt(B, cells, x, z) {
+  if (!cells) {
+    for (let i = 0; i < B.length; i += 6) {
+      if (blocks(B, i, x, z)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  const list = cells.get(Math.floor(x / OPEN_CELL) * OPEN_KEY + Math.floor(z / OPEN_CELL));
+  if (list) {
+    for (const i of list) {
+      if (blocks(B, i, x, z)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/*
+ * The lattice spot nearest the point that `take(i, k)` accepts, i whole
+ * steps east and k south, looking no more than `rings` steps out along
+ * either axis: { i, k }, or null. Ring r is every spot whose larger step
+ * is r, and every spot in it is at least r steps off, so once a spot d
+ * steps squared off is taken no ring past the root of d can hold a nearer
+ * one and the walk stops. A spot that could not win is never asked about.
+ */
+function nearestTaken(rings, take) {
+  let bi = 0;
+  let bk = 0;
+  let bd = -1;
+  for (let r = 0; r <= rings; r += 1) {
+    if (bd >= 0 && r * r > bd) {
+      break;
+    }
+    for (let i = -r; i <= r; i += 1) {
+      const edge = i === -r || i === r;
+      for (let k = -r; k <= r; k += edge ? 1 : 2 * r) {
+        const d = i * i + k * k;
+        if (bd >= 0 && (d > bd || (d === bd && !(i > bi || (i === bi && k < bk))))) {
+          continue;
+        }
+        if (take(i, k)) {
+          bi = i;
+          bk = k;
+          bd = d;
+        }
+      }
+    }
+  }
+  return bd < 0 ? null : { i: bi, k: bk };
+}
+
+/*
+ * Off the plot, facing into it: away from whichever edge the spot is
+ * furthest past. The plan's north is the world's -z. Quarter turns in the
+ * shell's convention, a pads yaw less a quarter (spawnFrom), wrapped.
+ */
+function facingIn(W, D, x, z) {
+  const west = -W / 2 + OPEN_CLEAR - x;
+  const east = x - (W / 2 - OPEN_CLEAR);
+  const north = -D / 2 + OPEN_CLEAR - z;
+  const south = z - (D / 2 - OPEN_CLEAR);
+  const most = Math.max(west, east, north, south);
+  if (most === west) {
+    return -HALF_PI;
+  }
+  if (most === east) {
+    return HALF_PI;
+  }
+  return most === north ? Math.PI : 0;
+}
+
+function openSpawn(W, D, solids, roads, tops) {
+  const x0 = -W / 2 + OPEN_POINT_IN;
+  const B = openBlockers(solids, roads, W, D);
+  const onPlot = (x, z) => x >= -W / 2 + OPEN_CLEAR && x <= W / 2 - OPEN_CLEAR
+    && z >= -D / 2 + OPEN_CLEAR && z <= D / 2 - OPEN_CLEAR;
+  if (onPlot(x0, 0) && openAt(B, null, x0, 0)) {
+    return { x: x0, y: 0, z: 0, yaw: -HALF_PI, base: 0, from: 'point' };
+  }
+  const cells = indexBlockers(B, W, D);
+  const spotX = (i) => x0 + i * OPEN_STEP;
+  const spotZ = (k) => k * OPEN_STEP;
+  /* Far enough along either axis to reach the plot's furthest edge. */
+  const across = Math.max(OPEN_POINT_IN, W - OPEN_POINT_IN, D / 2);
+  const on = nearestTaken(Math.ceil(across / OPEN_STEP), (i, k) => {
+    const x = spotX(i);
+    const z = spotZ(k);
+    return onPlot(x, z) && openAt(B, cells, x, z);
+  });
+  if (on) {
+    return { x: spotX(on.i), y: 0, z: spotZ(on.k), yaw: -HALF_PI, base: 0, from: 'open' };
+  }
+  const off = nearestTaken(Math.ceil((across + OPEN_OFF) / OPEN_STEP), (i, k) => {
+    const x = spotX(i);
+    const z = spotZ(k);
+    return !onPlot(x, z) && x >= -W / 2 - OPEN_OFF && x <= W / 2 + OPEN_OFF
+      && z >= -D / 2 - OPEN_OFF && z <= D / 2 + OPEN_OFF && openAt(B, cells, x, z);
+  });
+  if (off) {
+    const x = spotX(off.i);
+    const z = spotZ(off.k);
+    return { x, y: 0, z, yaw: facingIn(W, D, x, z), base: 0, from: 'off' };
+  }
+  return { x: x0, y: topUnder(tops, x0, 0, 0), z: 0, yaw: -HALF_PI, base: 0, from: 'blocked' };
 }
 
 /*
@@ -336,6 +637,7 @@ function spawnFrom(el, yaw, W, D, tops) {
     z,
     yaw: wrap(el.yaw - HALF_PI),
     base,
+    from: 'pads',
   };
 }
 
@@ -354,8 +656,10 @@ function spawnFrom(el, yaw, W, D, tops) {
  *   solids  what src/props/solids.js placeSolids makes of every item
  *   tops    the box tops, indexed for topUnder
  *   zones   [{ el, x, y, z, yaw, w, h, name, points }] the named gaps
- *   spawn   { x, y, z, yaw, base } in the shell's convention: y is the
- *           seat and base the Base the author gave the pads (0 with none)
+ *   spawn   { x, y, z, yaw, base, from } in the shell's convention: y is
+ *           the seat, base the Base the author gave the pads (0 with
+ *           none), and from which start it is: the pads, or with none the
+ *           open ground openSpawn found
  */
 export function placeDocument(doc) {
   const W = doc.field.width;
@@ -363,11 +667,17 @@ export function placeDocument(doc) {
   const items = [];
   const solids = [];
   const zones = [];
+  const roads = [];
   const stats = { inflated: 0 };
   let start = null;
   for (const el of doc.elements) {
     const def = ELEMENTS[el.type];
     if (!def) {
+      continue;
+    }
+    /* Paint and nothing solid, but a start is kept off it: see openSpawn. */
+    if (def.kind === KIND.ROAD) {
+      roads.push(el);
       continue;
     }
     docToWorld(W, D, el.position.x, el.position.y, el.position.z || 0, AT);
@@ -410,7 +720,7 @@ export function placeDocument(doc) {
       pads.y = spawn.y;
     }
   } else {
-    spawn = defaultSpawn(W, tops);
+    spawn = openSpawn(W, D, solids, roads, tops);
   }
   return { W, D, items, solids, tops, zones, spawn, stats };
 }

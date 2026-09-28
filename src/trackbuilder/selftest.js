@@ -67,13 +67,14 @@ import { partsOf } from '../props/catalog.js';
 import { GAP_MIN } from '../props/parts.js';
 import { startBlockDims, startBlockHeight, startBlockLaneOffset } from '../art/startblock.js';
 import { padsLayout } from '../props/course.js';
-import { placeDocument, topUnder, groundUnder, SUPPORT_TIE } from '../maps/built/place.js';
+import { placeDocument, topUnder, groundUnder, SUPPORT_TIE, OPEN_CLEAR } from '../maps/built/place.js';
 import { addSolids } from '../props/solids.js';
 import { roadOf, nearestOn } from '../maps/built/road.js';
 import { trafficOf, DRIFT, roadKeepOut } from '../maps/built/traffic.js';
 import {
   addDraftNode, closesDraft, endsDraft, roadFromDraft, legCount, legMidpoints, insertNode, moveNode, deleteNode,
   pickNode, pickLeg, snapToRoad, vehiclePlace, PARK, bodiesOverlap, moduleRoad, laneXyz, lapTable, laneClashes,
+  roadReach,
 } from './roadtool.js';
 import { CLASH_HORIZON } from './warnings.js';
 import { clubhouseSolids } from '../art/clubhouse.js';
@@ -3196,6 +3197,42 @@ function codesOf(doc) {
 }
 
 /*
+ * The least distance in plan from (x, z) to any solid over the paving, the
+ * way openSpawn in src/maps/built/place.js measures open ground: under zero
+ * when one is over the spot, at whatever height. Plain Math, because this
+ * is the reference, and a nanometre short of a metre is a metre: the
+ * search compares squares, and the two roundings may differ in the last
+ * place.
+ */
+function planClearance(placed, x, z) {
+  let best = Infinity;
+  for (const s of placed.solids) {
+    let d;
+    if (s.box) {
+      const b = s.box;
+      if (!(b[4] > 0)) {
+        continue;
+      }
+      const dx = Math.max(b[0] - x, 0, x - b[3]);
+      const dz = Math.max(b[2] - z, 0, z - b[5]);
+      d = dx > 0 || dz > 0 ? Math.hypot(dx, dz) : -Math.min(x - b[0], b[3] - x, z - b[2], b[5] - z);
+    } else {
+      const c = s.cap;
+      if (!(Math.max(c[1], c[4]) + c[6] > 0)) {
+        continue;
+      }
+      const ux = c[3] - c[0];
+      const uz = c[5] - c[2];
+      const ll = ux * ux + uz * uz;
+      const t = ll > 0 ? Math.min(1, Math.max(0, ((x - c[0]) * ux + (z - c[2]) * uz) / ll)) : 0;
+      d = Math.hypot(c[0] + ux * t - x, c[2] + uz * t - z) - c[6];
+    }
+    best = Math.min(best, d);
+  }
+  return best + 1e-9;
+}
+
+/*
  * THE DRAWING ON A PUBLISHED MAP'S CARD.
  *
  * boardPlanOf in ./view2d.js measures it, and the board checks it with
@@ -3494,10 +3531,63 @@ function suiteFreestyle() {
   {
     const d = fresh();
     freestylePlace(d, 'building', 40, 40);
-    check('no start pads: a note that says where the pilot starts', codesOf(d).includes('fs-no-start'));
+    const note = () => freestyleReport(d).warnings.find((x) => x.code === 'fs-no-start');
+    check('no start pads: a note that says where the pilot starts, the point 8 m in when it is open',
+      Boolean(note()) && placeDocument(d).spawn.from === 'point' && note().message.includes('8 m in from the left edge'),
+      note() ? note().message : 'no fs-no-start');
+    /*
+     * WITH NO PADS THE START IS IN THE OPEN (openSpawn in
+     * src/maps/built/place.js). A building over the point started the
+     * craft inside it, with fs-spawn saying so and the simulator doing it
+     * anyway; now the start is the nearest open ground, and the note says
+     * where.
+     */
     freestylePlace(d, 'building', 8, 80);
-    check('and the start it names is checked too: a building on it is a warning',
-      codesOf(d).includes('fs-spawn'));
+    const placed = placeDocument(d);
+    const sp = placed.spawn;
+    check('a building over the point moves the start into the open, clear of it, and nothing warns',
+      sp.from === 'open' && sp.y === 0 && planClearance(placed, sp.x, sp.z) >= OPEN_CLEAR && !codesOf(d).includes('fs-spawn'),
+      `${sp.from} at (${sp.x}, ${sp.z}), ${planClearance(placed, sp.x, sp.z).toFixed(3)} m clear: ${codesOf(d).join(', ')}`);
+    check('and the note says where, in the plan',
+      note().message.includes(`${(sp.x + d.field.width / 2).toFixed(1)} m in from the left edge and ${(d.field.depth / 2 - sp.z).toFixed(1)} m up`),
+      note().message);
+  }
+  {
+    /*
+     * A PYLON OVER THE POINT, which is the pilot's report of 28 September
+     * 2026: "it spawns me inside a pylon i can't get out". Every leg and
+     * brace is more than a metre off the pylon's middle, so fs-spawn never
+     * saw it, and the craft started inside the lattice with the peak over
+     * it. The start leaves the lattice for open sky.
+     */
+    const d = fresh();
+    freestylePlace(d, 'pylon', 8, 80);
+    const placed = placeDocument(d);
+    const sp = placed.spawn;
+    const it = placed.items.find((i) => i.el.type === 'pylon');
+    check('a pylon over the point: the start is out from under it, a metre clear of every member at any height',
+      sp.from === 'open' && planClearance(placed, sp.x, sp.z) >= OPEN_CLEAR && planClearance(placed, it.x, it.z) < 0
+      && !codesOf(d).includes('fs-spawn'),
+      `${sp.from} at (${sp.x}, ${sp.z}), ${planClearance(placed, sp.x, sp.z).toFixed(3)} m clear; the point ${planClearance(placed, it.x, it.z).toFixed(3)}`);
+  }
+  {
+    /*
+     * A PLOT WITH NO OPEN GROUND. A 12 m plot with a block on it that
+     * covers it: the start is off the plot's edge, the nearest open ground,
+     * facing back into it, and the note says so.
+     */
+    const d = fresh();
+    d.field.width = 12;
+    d.field.depth = 12;
+    freestylePlace(d, 'building', 6, 6);
+    const placed = placeDocument(d);
+    const sp = placed.spawn;
+    const w = freestyleReport(d).warnings.find((x) => x.code === 'fs-no-start');
+    const into = sp.yaw === -Math.PI / 2 ? sp.x < 0 : sp.yaw === Math.PI / 2 ? sp.x > 0 : sp.yaw === 0 ? sp.z > 0 : sp.z < 0;
+    check('a plot with no open ground starts the craft at its edge, in the open, facing into it',
+      sp.from === 'off' && into && planClearance(placed, sp.x, sp.z) >= OPEN_CLEAR && !codesOf(d).includes('fs-spawn')
+      && Boolean(w) && /starts at its (left|right|top|bottom) edge, facing into it/.test(w.message),
+      `${sp.from} at (${sp.x}, ${sp.z}) facing ${sp.yaw}: ${w ? w.message : 'no fs-no-start'}`);
   }
   {
     const d = fresh();
@@ -4258,14 +4348,22 @@ function suiteRoadTool() {
     m.d.elements.find((e) => e.type === 'startPads').position = { x: 80, y: 50, z: 0 };
     const w = roadCodes(m.d).find((x) => x.code === 'rd-start');
     check('a road over the start pads warns', w && w.elementId === m.road.id && w.message.includes('start pads'));
+    /* With no pads the start keeps a car's reach and a metre off every
+     * road (openSpawn in src/maps/built/place.js), so a road through the
+     * point moves the start, and rd-start has nothing to say. */
     const bare = createTrack(undefined, 'full', 'freestyle');
     const through = createElement(bare, 'road', { x: 2, y: 80 });
     through.nodes = [{ x: 0, y: 0 }, { x: 30, y: 0 }];
     bare.elements.push(through);
-    check('with no pads, a road through where the pilot starts warns',
-      roadCodes(bare).some((x) => x.code === 'rd-start' && x.message.includes('8 m in')));
+    const sp = placeDocument(bare).spawn;
+    const off = nearestOn(roadOf(through).centre, sp.x + bare.field.width / 2, bare.field.depth / 2 - sp.z).d;
+    const keep = roadReach(bare, through).reach + OPEN_CLEAR;
+    check('with no pads, a road through the point moves the start a car’s reach and a metre off it, and rd-start stays quiet',
+      sp.from === 'open' && off >= keep && !roadCodes(bare).some((x) => x.code === 'rd-start'),
+      `${sp.from} at (${sp.x}, ${sp.z}), ${off.toFixed(3)} m off the road against ${keep.toFixed(3)}`);
     through.position.y = 100;
-    check('and one clear of it does not', !roadCodes(bare).some((x) => x.code === 'rd-start'));
+    check('and one clear of it leaves the start on the point', placeDocument(bare).spawn.from === 'point'
+      && !roadCodes(bare).some((x) => x.code === 'rd-start'));
   }
   {
     const m = roadMap();

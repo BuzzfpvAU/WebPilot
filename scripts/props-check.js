@@ -37,7 +37,10 @@
  *                  has nothing to warn about, and the craft takes off from
  *                  the pads, and on the starter from the same pads raised
  *                  onto the office roof, seated where the shell seats it,
- *                  on the map's own ground
+ *                  on the map's own ground; and a map with no pads and a
+ *                  pylon over the point it starts from, where the start
+ *                  is moved into the open and a climb straight up from it
+ *                  clears the peak, which a climb from the point does not
  *   6. scene       a map's time of day and ground change paint and light
  *                  and never a solid
  *   7. egg         where the STF mark goes (src/maps/built/egg.js): on a
@@ -1934,6 +1937,7 @@ async function starterBlock() {
   for (const map of SHIPPED) {
     await mapBlock(map);
   }
+  await openStartScenario();
 }
 
 async function mapBlock(map) {
@@ -2081,6 +2085,61 @@ async function officeRoofPads(mod, ranges) {
     } catch (e) {
       fail('the starter, pads on the office roof, in the module', e.message);
     }
+  }
+}
+
+/*
+ * THE START IN THE OPEN (openSpawn in src/maps/built/place.js). A map with
+ * no start pads and a pylon over the point 8 m in from the plot's west
+ * edge, which is the pilot's report of 28 September 2026: "it spawns me
+ * inside a pylon i can't get out". Every leg and brace is more than the
+ * builder's metre off the pylon's middle, so nothing warned, and the lift
+ * off and the hover above never reach the peak, so none of them could see
+ * it: a climb straight up can. It is flown twice. From the point, inside
+ * the lattice, it meets the pylon, which is the trap, seen. From where the
+ * map now starts the craft, it clears the peak and touches nothing, and so
+ * do the lift off and the hover.
+ */
+const OPEN_CLIMB = 34;
+
+async function openStartScenario() {
+  console.log('\n5. a start with no pads: in the open, whatever stands on the point');
+  const raw = createTrack('Open start', 'full', 'freestyle');
+  raw.elements.push(createElement(raw, 'pylon', { x: 8, y: raw.field.depth / 2, z: 0 }, 0));
+  const { doc } = normalize(raw);
+  const placed = placeDocument(doc);
+  const sp = placed.spawn;
+  const pylon = placed.items.find((it) => it.el.type === 'pylon');
+  check('no pads and a 28 m pylon over the point: the start is moved into the open, on the paving',
+    sp.from === 'open' && sp.y === 0 && pylon.x === -doc.field.width / 2 + 8 && pylon.z === 0,
+    `${sp.from} at (${r3(sp.x)}, ${r3(sp.z)}), the pylon at (${r3(pylon.x)}, ${r3(pylon.z)})`);
+  if (!(await loadModule())) {
+    fail('the open start in the module', 'dist/sim.wasm does not exist');
+    return;
+  }
+  try {
+    const colliders = buildColliders(placed);
+    const height = (x, z, fromY, cgY) => groundUnder(placed.tops, x, z, fromY, cgY);
+    const world = { placed, colliders, height };
+    const climb = {
+      ms: 9000,
+      p: [0, 0, 0],
+      sticks: (ms, st, ctx) => [0, 0, 0, heightHold(ctx, st, Math.min(OPEN_CLIMB, 1.5 + 5 * (ms / 1000)))],
+    };
+    const inside = await fly(world, frameOf({ x: pylon.x, y: 0, z: pylon.z, yaw: sp.yaw }), climb);
+    const open = await fly(world, builtFrame(placed), climb);
+    const open2 = await fly(world, builtFrame(placed), climb);
+    const top = (run) => Math.max(...run.rows.map((row) => row.p[2]));
+    const touched = (run) => run.rows.filter((row) => row.touching).length;
+    check('from the point, inside the lattice, a climb straight up meets the pylon: the trap, seen',
+      touched(inside) > 0 && top(inside) < OPEN_CLIMB - 1,
+      `${touched(inside)} steps in contact, up to ${r3(top(inside))} m`);
+    check(`from the start, a climb straight up to ${OPEN_CLIMB} m, over the peak, touches nothing, the same to the bit twice`,
+      touched(open) === 0 && top(open) > OPEN_CLIMB - 1 && open.hash === open2.hash,
+      `${touched(open)} steps in contact, up to ${r3(top(open))} m`);
+    await spawnScenario(world, builtFrame(placed), 'the open start');
+  } catch (e) {
+    fail('the open start in the module', e.stack);
   }
 }
 

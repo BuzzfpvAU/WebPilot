@@ -5697,9 +5697,10 @@ export class Ui {
        * The throttle curve, spelled out. "Flight feel: throttle is touchy"
        * arrived with a rates line that says nothing about the throttle
        * unless a cap is already on, so the one setting that answers the
-       * complaint was the one thing the report could not carry.
+       * complaint was the one thing the report could not carry. Its hover
+       * is at the weight and pack below, so the three agree.
        */
-      throttle: throttleSummary(s.rates || {}, s.airframe),
+      throttle: throttleSummary(s.rates || {}, s.airframe, clampWeight(s.weight, s.airframe), s.packVoltage),
       /*
        * THE SLIDER'S POSITION, and it belongs in the report for the same
        * reason the throttle curve does: this is the one field that tells the

@@ -563,10 +563,18 @@ export function ratesShort(r) {
  * Hover comes along because the number a pilot feels is where hover sits on
  * their stick, not what percentage is in the config, and it is measured per
  * airframe. See HOVER_STICK_PERCENT.
+ *
+ * AT THE PILOT'S OWN WEIGHT AND PACK, which the report passes. This took the
+ * airframe alone, so it quoted the shipped machine on a fresh pack whatever
+ * the pilot flew: "Underpowered Whoop", 2026-09-28, was a whoop at Weight 70
+ * and read "hover near 39.9 percent", which is Weight 100's figure, beside a
+ * weight of 70 and a keyboard hover of 32.3 in the same report. A hover that
+ * makes the quad sound heavier than it was flown points the reader at the
+ * wrong answer. Left out, both are the shipped machine's, as the menu quotes.
  */
-export function throttleSummary(r, airframe = '5inch') {
+export function throttleSummary(r, airframe = '5inch', weight = 100, cellV = 4.2) {
   const p = normaliseRates(r);
-  const hover = hoverStickPercent(p.throttleCap, airframe);
+  const hover = hoverStickPercent(p.throttleCap, airframe, weight, cellV);
   const curve = p.thrExpo > 0 ? `, mid ${p.thrMid} expo ${p.thrExpo}` : ', no expo';
   return `cap ${p.throttleCap}${curve}, hover near ${hover.toFixed(1)} percent of stick`;
 }
