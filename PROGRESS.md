@@ -58732,3 +58732,203 @@ For the owner's flight: reload once, then Settings, HUD, Crosshairs, and
 try each shape. What would count as wrong: the mark off the centre of
 the picture, lost against the sky or the ground, covering the gate
 you aim through, showing over a menu, or still drawn on Off.
+
+## 2026-09-28 | ui, settings | Manga and scoring: one switch for the manga look and the score's readouts
+
+### The ask
+
+The owner: "add a toggle in the menus wher eit makes sense to toggle off
+all manga grahical features and scoring (just keep i simple and toggle off
+the graphics, don't change the underlying calcs etc." So one row, and what
+it takes away is pictures and nothing else. Not put to the owner first: it
+is the shell and its stylesheet, and nothing in the physics model, the
+module ABI or the build moved. Nothing under src/game, src/native, vendor,
+patches or dist changed, which is the "underlying calcs" half of the ask.
+
+### Where it went, and why there
+
+Settings, Screen, as "Manga and scoring", On by default, directly above
+Clean FPV and the Impact frame. Those two are finer parts of the same look,
+so the three sit together with the switch over them first, and a pilot
+looking for the manga look's switch finds all three in one place. Not under
+HUD, which is what is drawn over the picture in flight: this reaches the
+menus as well. One row in one room; the Freestyle room's Scoring row points
+at it rather than repeating it.
+
+### What off does
+
+- **In flight.** `ui.manga` is false on every map, so the speed lines, the
+  impact frame and the screentone are off: src/main.js's mangaFrame and
+  impactFrameOn already read it. The score overlay (the total, the combo
+  line, the tier badge, the names, the verdict and the skim meter) and the
+  chase overlay (the Tail meter and its callouts) are down: syncScoreVisible
+  and syncChaseVisible ask the setting as well as the mode and the screen.
+  setScore and scoreEvents hand the hidden score overlay nothing, so no
+  callout is lettered into a box that is display none; the chase's feed
+  already hands a hidden overlay nothing.
+- **A found mark** (a partner's, and the STF mark's if MARK_FINDS comes
+  back). Clean FPV's plain type and no ray fan, and plainer: the panel loses
+  its dot tone, its tilt and its second frame, and the word and the panel
+  stand still and fade the way reduced motion has them rather than
+  slamming in. It still comes, because what was found is the news, and the
+  partners' marks are theirs.
+- **The menus.** `.no-manga` on the UI root. letterHeading gives every
+  lettered title (the wordmark, every room's title, Paused and the results
+  head) its own text back: the canvas and the probe removed, and the class
+  that made the words transparent, so the heading's own rule draws it
+  (unletterHeading). The screen that is up is redone at once, so the
+  Settings title changes as the switch is thrown; every other screen
+  follows on its next show(). The menu panel loses the ink frame, the gutter
+  and the drop and is what it was before polish item 19, a 4 px radius and
+  the hairline inside, taken from the lines a9f1c56 removed.
+- **The results** after a scored run: the list, never the page, because
+  `ui.manga` is false (Clean FPV's path, counter rows first), and the head in
+  text.
+- **The words.** The takeoff banner's second line on a freestyle map stops
+  promising "Gaps and close calls count as you fly them" and says "No clock
+  and no gates." A scored run keeps its two minutes sentence, because its
+  clock is the OSD's and the OSD stays. The Freestyle room's Scoring row
+  leads with "Counted and not drawn, because Manga and scoring is off in
+  Settings." in place of the trick names warning, which is about names on
+  the screen, and loses its amber for the same reason. Clean FPV and the
+  Impact frame say they have nothing to do while it is off.
+
+### What off does not do
+
+Nothing that counts changes. The scorer, the counter, the chase, a scored
+run's clock and its end, the results, the local bests and Post this run all
+run as they do with it on: the probe below lands a trick with it off and
+reads the combo off the scorer, then turns it back on and sees the overlay
+show what was counted meanwhile. The OSD, the crosshairs and a race track's
+HUD are unchanged. The world's own look (the toon materials, the ink pass,
+the cel smoke and the billboards' manga adverts) is the map's art, not a
+layer over it, and stays. Save share card on the results still makes the
+manga card when pressed: it is a picture the pilot asks for, the rule Clean
+FPV already keeps for it (runCardBytes).
+
+### The baseline, and the argument
+
+tests/shell-baseline.json: the Settings (pilot) overflow 1138 to 1183 px,
+the new row, by hand. The argument of the Crosshairs, Frame pacing, Impact
+frame and Clean FPV rows: the file is today's overflow and not a target,
+the row is deliberate, and lint:devices reaching every row and every note
+on every device is the condition. It was run twice below, once as it
+ships and once with the switch seeded off, so the notes that only show
+while it is off were measured too. The fc and tricks improvement notes
+are on the base commit as well and are left for whoever owns them.
+
+### What went wrong
+
+- The first lint:shell, on an export of the base commit, died before its
+  first page with "no DevTools endpoint". Browser profiles were going into
+  a TMPDIR in the session's scratchpad, as earlier entries kept them, and
+  that path is long enough to put Chromium's singleton socket at 122
+  bytes, past the 107 a Unix socket path may have: Chromium made its
+  `.org.chromium.Chromium.*` folder there and never listened. Launched by
+  hand with the same TMPDIR it hung the same way; without it, it listened
+  in a second. Every browser run after that used the default temp folder,
+  and the `/tmp/sim-page-*` profiles tests/lib/page.js leaves behind were
+  deleted at the end.
+- The probe's first draft landed 'Power Loop', which is not the catalogue's
+  name ('Powerloop'), and on Lines only a landed trick goes to the board's
+  scorer and not to the counter's run, so the combo it read would never
+  have moved. It flies on Free flight now, set through the Scoring row's
+  own path.
+
+### Found, not fixed
+
+- The results list, when there is no manga page, is longer than its
+  column. The device check's results case, run with the switch seeded off,
+  draws 8 rows where it expects three and a more line, puts a trick row
+  under the menu, and leaves the best line 140 px (1280 by 720) and 110 px
+  (1600 by 900) below the fold of the copy. The same case on the base
+  commit with Clean FPV seeded on fails with the same six lines, word for
+  word: it is the list Clean FPV has always shown (the counter's bests as
+  rows, then the tricks), and this switch reaches it by the same path.
+  Only a scored run ends on a results screen, so a pilot on Lines only or
+  Free flight never sees it. Not fixed here, because the ask was to keep
+  this simple and the fix is a decision about what that list carries; put
+  to the owner.
+- A stored Scoring value seeded before the first load goes back to Lines
+  only on that load (the one time scoring reset in loadSettings). Not a
+  defect, and older than this: noted because the scratch pictures seeded
+  Free flight and got Lines only.
+
+### RUN LOG
+
+    node --check                 src/ui/ui.js and src/main.js clean
+    npm run lint:shell, base     (an export of f496be3 in the scratchpad)
+                                 PASS, pilot 1138 px, 31 of 31 stops; the
+                                 fc and tricks improvement notes
+    npm run lint:shell           first run FAIL, "pilot: overflow grew from
+                                 1138 to 1183 px", 32 of 32 stops reached,
+                                 ids 315 rows all named, unique and stable;
+                                 after the baseline edit PASS
+    npm run lint:devices         PASS as it ships, the switch on: every row
+                                 and note on five devices, the builder
+                                 bars, the results page, the flight OSD on
+                                 phones clear of the centre third
+    lint:devices, switch off     (a scratch copy of the check seeding
+                                 mangaAndScoring false, not in the
+                                 repository) every row and every note on
+                                 all five devices, the builder bars and the
+                                 flight OSD clear; the results case FAIL,
+                                 six problems, the same six as the base
+                                 with Clean FPV on (Found, not fixed)
+    npm run lint:preload         up to date, boot 120 modules, city 75,
+                                 built 35; 229 served
+    scratch probe (tests/lib/page.js, the real shell at 1280x720, not in
+      the repository)            42 of 42: on by default with the ink
+                                 frame and a lettered wordmark; the row
+                                 under Screen directly above Clean FPV and
+                                 the Impact frame; Enter turns it off and
+                                 it is saved; .no-manga on the root; the
+                                 Settings title its own text at once (no
+                                 canvas, no probe, its fill back); the
+                                 panel at 4 px with the hairline only; the
+                                 three notes, each on screen above the
+                                 bottom bar; the Scoring note leading with
+                                 the undrawn sentence and no amber on Free
+                                 flight; on Hibari Yard the banner "No
+                                 clock and no gates.", the score and chase
+                                 overlays down (the yard has cars), the
+                                 OSD up, ui.manga false, an impact frame
+                                 asked for starting nothing; a Powerloop
+                                 landed through the scorer shows in its
+                                 combo (200) and the hidden overlay was
+                                 handed nothing; a partner's find in plain
+                                 type, the panel fading with no tilt and no
+                                 tone; Paused in text; Right from the pause
+                                 menu's Settings turns it on and letters
+                                 the title again at once, the ink frame
+                                 back; in flight the overlay up in the
+                                 manga hand showing the combo counted while
+                                 it was off, ui.manga true; off again, the
+                                 run finished: the results a list, no page,
+                                 the head in text; no page errors
+    scratch pictures             1600x900, the real shell: the gate, the
+                                 Settings row on and off, the title, the
+                                 Freestyle room, Hibari Yard on the pads
+                                 off and on, a partner's find, Paused on
+                                 and off. Looked at, every one; in the
+                                 session's scratchpad, not committed
+    dash scan                    none in any added line, by code point
+    npm run verify               not run: nothing in the plant, the module,
+                                 the input path or the build moved, and no
+                                 file under src/game. Put to the owner
+                                 with the other scales
+    node scripts/shots.js        not run; put to the owner
+
+Every browser run above was on the committed tree less one CSS comment in
+index.html, reworded after them (the found moment's; no rule changed).
+
+### For the owner
+
+Settings, Screen, Manga and scoring. Off, then fly Hibari Yard: no score,
+combo or Tail meter, no speed lines, no impact frame on a crash, the
+titles in plain type and the menu panels without the ink frame. Back on,
+and everything is where it was, the score already holding what was counted
+while it was off. What would count as wrong: anything lettered, inked or
+scored on the screen with it off, a title drawn twice or left transparent,
+a note under the bottom bar, or a score that differs with it on from the
+same flight with it off.

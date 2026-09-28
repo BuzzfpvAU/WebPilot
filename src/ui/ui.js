@@ -640,6 +640,17 @@ const SCORING_BOARD = 'Scored run: two minutes from the first thing you score. T
   + ' goes to the high score board, and the whole count is kept as your best here.';
 
 /*
+ * WITH MANGA AND SCORING OFF IN SETTINGS nothing this row decides is drawn
+ * in flight, and the row says so first, where a pilot who picked Free
+ * flight and saw no trick names would look for why. It stands in for the
+ * warning, which is about trick names on the screen, and there are none:
+ * the row loses its amber for the same reason. What the row decides still
+ * happens underneath (DEFAULTS.mangaAndScoring), which is the second half
+ * of the sentence.
+ */
+const SCORING_UNDRAWN = 'Counted and not drawn, because Manga and scoring is off in Settings.';
+
+/*
  * Your map is a different place for every pilot who has built one, so the
  * board will not take a run flown on it (see BUILT_OFF_BOARD). The Scored
  * run line says so while it is seated, rather than promising a board the
@@ -662,13 +673,13 @@ const scoringBoardBuilt = (where) => 'Scored run: two minutes from the first thi
  * leaves out why to choose it: with it the town's note still ended 14 px
  * under the bar, where it is the longest.
  */
-function scoringNote(mode, mapId, fromBoard = false) {
+function scoringNote(mode, mapId, fromBoard = false, drawn = true) {
   const built = mapId === 'built';
   const where = built ? (fromBoard ? 'this map' : 'Your map') : 'the town';
   if (mode === 'off') {
-    return `${scoringOff(where)} ${built ? scoringMoreBuilt(where) : SCORING_MORE}`;
+    return `${drawn ? '' : `${SCORING_UNDRAWN} `}${scoringOff(where)} ${built ? scoringMoreBuilt(where) : SCORING_MORE}`;
   }
-  return `${SCORING_WARNING} ${mode === 'free' ? SCORING_FREE_ON : (built ? scoringBoardBuilt(where) : SCORING_BOARD)}`;
+  return `${drawn ? SCORING_WARNING : SCORING_UNDRAWN} ${mode === 'free' ? SCORING_FREE_ON : (built ? scoringBoardBuilt(where) : SCORING_BOARD)}`;
 }
 
 /*
@@ -1011,6 +1022,21 @@ const DEFAULTS = {
   cameraFov: CAMERA_FOV_DEFAULT,
   renderScale: 100,
   fpsCap: 0,
+  /*
+   * MANGA AND SCORING, the one switch over both (the owner, 2026-09-28: a
+   * toggle for all the manga graphics and the scoring, the graphics only,
+   * and none of the calculations under them). On by default, which is the
+   * game as it was. Off, nothing of the manga look is drawn anywhere and no
+   * score is drawn in flight: no speed lines, impact frame or screentone
+   * (ui.manga is false), no score, combo or chase overlay, the menus' titles
+   * in the system's own type and their panels without the ink frame, the
+   * results as a list, and a found mark's moment in plain clothes. It is
+   * the pictures and nothing else: the scorer, the counter, the chase, a
+   * scored run's clock and its results, the bests and the board run exactly
+   * as they do with it on. Clean FPV and the Impact frame are finer switches
+   * inside it. See syncManga.
+   */
+  mangaAndScoring: true,
   /*
    * CLEAN FPV: the manga layer off (FREESTYLE-MAPS-PLAN.md sections 3.2 and
    * 3.3, decision 4). Off by default, because the layer is for freestyle
@@ -1954,7 +1980,10 @@ function wordmark() {
  *
  * THE MENUS USE THE HAND WHATEVER CLEAN FPV SAYS. Clean FPV is about
  * flight: nothing drawn over the picture while flying. A menu is not
- * flying, and a title is looked at, not read at 100 km/h.
+ * flying, and a title is looked at, not read at 100 km/h. Manga and scoring
+ * off is the switch that takes the hand off the menus too: under the
+ * root's .no-manga a heading is its own text, as it was before any of this
+ * (unletterHeading).
  *
  * PAINTED ONCE. A heading is painted when its screen is shown and again
  * only if what it says, its colour, its size or its room has changed
@@ -1998,6 +2027,10 @@ function headingRuns(h, cs) {
  */
 function letterHeading(h) {
   if (!h || typeof window === 'undefined' || !h.isConnected) {
+    return;
+  }
+  if (h.closest('.no-manga')) {
+    unletterHeading(h);
     return;
   }
   const cs = getComputedStyle(h);
@@ -2064,6 +2097,19 @@ function letterHeading(h) {
   art.style.left = `${Math.round(x)}px`;
   art.style.top = `${Math.round(top)}px`;
   h.letterKey = key;
+}
+
+/* The lettering off a heading: its canvas and its probe out, and the class
+ * that made its words transparent, so the heading's own rule draws it
+ * again, text shadow and all. What a heading is with Manga and scoring
+ * off, and what it was before it was lettered. Nothing to do on one that
+ * never was. */
+function unletterHeading(h) {
+  for (const n of h.querySelectorAll(`:scope > .${LETTER_ART}, :scope > .${LETTER_PROBE}`)) {
+    n.remove();
+  }
+  h.classList.remove('is-lettered');
+  h.letterKey = '';
 }
 
 /* Set a lettered heading's words: textContent takes the lettering with it,
@@ -6952,18 +6998,20 @@ export class Ui {
          * unfinished scorer is exactly that. It is on the ROW rather than
          * in a popup because a popup is dismissed once and then the pilot
          * flies for an hour: this stays amber for as long as the thing it
-         * is warning about is on, and goes quiet the moment it is off.
+         * is warning about is on, and goes quiet the moment it is off. So
+         * it is quiet with Manga and scoring off too, when no trick name is
+         * drawn at all: see SCORING_UNDRAWN.
          */
         {
           ...choice(
             'Scoring',
-            scoringNote(s.freestyleScoring, s.map, Boolean(this.sharedMap)),
+            scoringNote(s.freestyleScoring, s.map, Boolean(this.sharedMap), s.mangaAndScoring),
             FREESTYLE_SCORING,
             s.freestyleScoring,
             (id) => FREESTYLE_SCORING_LABEL[id],
             (id) => { s.freestyleScoring = id; },
           ),
-          rowClass: s.freestyleScoring === 'off' ? undefined : 'row-warn',
+          rowClass: s.freestyleScoring === 'off' || !s.mangaAndScoring ? undefined : 'row-warn',
           /* Enter opens the list rather than stepping it: this row is the
            * first thing the cursor lands on in this room, and switching an
            * unfinished feature on is a pick, not a nudge. See select(). */
@@ -7349,16 +7397,34 @@ export class Ui {
          * src/render/latency.js. Read only, like the GPU row. */
         latencyItem(this.latencyProbe ? this.latencyProbe() : null),
         /*
-         * THE MANGA LAYER'S ONE SWITCH (FREESTYLE-MAPS-PLAN.md section 3.3:
-         * "a Clean FPV setting turns all of it off in one row"). The note
-         * says everything it turns off, the picture's half (Stage F) as
-         * well as the lettering's.
+         * THE SWITCH OVER ALL OF IT: the manga look everywhere and the
+         * score's readouts in flight, and never the counting under them
+         * (DEFAULTS.mangaAndScoring). First of the three, because the two
+         * after it are finer parts of it, and while it is off their notes
+         * say they are waiting on it rather than describing a look that is
+         * not there.
+         */
+        toggle(
+          'Manga and scoring',
+          s.mangaAndScoring
+            ? 'On: the game\'s manga look and its score. The menus\' titles are lettered in the manga hand, and on a freestyle map the score, its combos and the chase are drawn as you fly them. Clean FPV and the Impact frame below trim parts of it.'
+            : 'Off: no manga look anywhere, and no score while you fly. No speed lines, impact frame or lettering, menus in plain type, and no score, combo or chase meter over the picture. The counting goes on underneath, so a scored run still runs its two minutes and ends on its results.',
+          s.mangaAndScoring,
+          (v) => { s.mangaAndScoring = v; },
+        ),
+        /*
+         * THE MANGA LAYER'S SWITCH IN FLIGHT (FREESTYLE-MAPS-PLAN.md section
+         * 3.3: "a Clean FPV setting turns all of it off in one row"). The
+         * note says everything it turns off, the picture's half (Stage F)
+         * as well as the lettering's.
          */
         toggle(
           'Clean FPV',
-          s.cleanFpv
-            ? 'On: freestyle maps look and read the way a race track does. No speed lines and no impact frame; callouts are words and numbers, and the results are a list.'
-            : 'Off: on a freestyle map, ink speed lines gather at the edges of the picture above about 20 m/s, a crash lands as an impact frame, tricks, gaps and combos are hand lettered like a manga with a small katakana sound effect beside the big ones, and the results come back as a page of panels. Race tracks are always clean.',
+          !s.mangaAndScoring
+            ? 'Nothing to do while Manga and scoring is off: every map is already clean. Turn that on and this keeps the score and the chase as plain words and numbers, with no manga look in flight.'
+            : (s.cleanFpv
+              ? 'On: freestyle maps look and read the way a race track does. No speed lines and no impact frame; callouts are words and numbers, and the results are a list.'
+              : 'Off: on a freestyle map, ink speed lines gather at the edges of the picture above about 20 m/s, a crash lands as an impact frame, tricks, gaps and combos are hand lettered like a manga with a small katakana sound effect beside the big ones, and the results come back as a page of panels. Race tracks are always clean.'),
           s.cleanFpv,
           (v) => { s.cleanFpv = v; },
         ),
@@ -7370,9 +7436,11 @@ export class Ui {
          */
         toggle(
           'Impact frame',
-          s.impactFrame
-            ? 'On: a crash on a freestyle map holds the moment for a beat as a high contrast ink panel with impact lines, then lets go. Never a white flash, at most one every two seconds. Off under Clean FPV, and whenever your system asks for reduced motion.'
-            : 'Off: a crash cuts straight to where you are set down, with no held frame. The rest of the manga look stays.',
+          !s.mangaAndScoring
+            ? 'Nothing to do while Manga and scoring is off: a crash cuts straight to where you are set down. Turn that on and this decides whether a crash holds the moment as an ink panel.'
+            : (s.impactFrame
+              ? 'On: a crash on a freestyle map holds the moment for a beat as a high contrast ink panel with impact lines, then lets go. Never a white flash, at most one every two seconds. Off under Clean FPV, and whenever your system asks for reduced motion.'
+              : 'Off: a crash cuts straight to where you are set down, with no held frame. The rest of the manga look stays.'),
           s.impactFrame,
           (v) => { s.impactFrame = v; },
         ),
@@ -12483,22 +12551,31 @@ export class Ui {
      * (FREESTYLE-MAPS-PLAN.md decision 2) the lines are counted in every
      * position, so the overlay always has something it can count, and the
      * switch decides trick names, not the overlay.
+     *
+     * AND DOWN WITH MANGA AND SCORING OFF, the one thing that takes it off a
+     * freestyle map: the pilot asked for no score on the screen. The scorer
+     * under it counts on regardless (DEFAULTS.mangaAndScoring).
      */
     this.scoreHud.setVisible(
-      this.osdMode === 'freestyle'
+      this.settings.mangaAndScoring
+      && this.osdMode === 'freestyle'
       && (this.screen === 'flight' || this.screen === 'paused'),
     );
   }
 
+  /* Neither is handed on with Manga and scoring off. The overlay is down,
+   * and a callout lettered into a hidden overlay is work for nobody; what
+   * it would have shown is still counted, by the scorer, and the total is
+   * written on the first frame after the overlay comes back. */
   setScore(view) {
-    if (this.letterHold) {
+    if (this.letterHold || !this.settings.mangaAndScoring) {
       return;
     }
     this.scoreHud.update(view);
   }
 
   scoreEvents(list) {
-    if (this.letterHold) {
+    if (this.letterHold || !this.settings.mangaAndScoring) {
       return;
     }
     this.scoreHud.events(list);
@@ -12516,9 +12593,13 @@ export class Ui {
    * callouts, the found mark's ray fans, the results page, and Stage F's
    * speed lines, impact frame and screentone, which src/main.js's
    * mangaFrame reads from `this.manga` every frame.
+   *
+   * MANGA AND SCORING OFF is off for all of it, on every map, whatever
+   * Clean FPV says (DEFAULTS.mangaAndScoring).
    */
   syncManga() {
-    this.manga = this.osdMode === 'freestyle' && !this.settings.cleanFpv;
+    const look = Boolean(this.settings.mangaAndScoring);
+    this.manga = look && this.osdMode === 'freestyle' && !this.settings.cleanFpv;
     if (this.scoreHud) {
       this.scoreHud.setManga(this.manga);
     }
@@ -12527,6 +12608,20 @@ export class Ui {
     }
     if (this.stfLayer) {
       Ui.klass(this.stfLayer, this.manga ? 'stf-found' : 'stf-found is-clean');
+    }
+    /*
+     * The rest of the look is not flight's, and follows Manga and scoring
+     * alone: .no-manga on the root takes the ink frame off the menu panels
+     * and the tone and the tilt off a found mark's panel (index.html), and
+     * letterHeading reads it to give a heading its own text back. The
+     * screen that is up is lettered again at once, so the switch thrown in
+     * Settings changes the Settings title while the pilot is looking at
+     * it; every other screen follows when it is next shown.
+     */
+    if (this.root && look !== this.lookShown) {
+      this.lookShown = look;
+      this.root.classList.toggle('no-manga', !look);
+      this.letterScreen(this.screen);
     }
   }
 
@@ -12604,6 +12699,8 @@ export class Ui {
    *
    * Up only on a freestyle map with cars, in flight or paused, as the score
    * is; not behind the Scoring switch, for the reason at chaseHud in build().
+   * Behind Manga and scoring, as the score is: off, the meter and the
+   * callouts are not drawn and the chase counts on under them.
    */
   setChaseCars(n) {
     this.chaseCarsOn = n > 0;
@@ -12616,6 +12713,7 @@ export class Ui {
     }
     this.chaseHud.setVisible(
       this.chaseCarsOn
+      && this.settings.mangaAndScoring
       && this.osdMode === 'freestyle'
       && (this.screen === 'flight' || this.screen === 'paused'),
     );

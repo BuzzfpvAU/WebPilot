@@ -9243,12 +9243,19 @@ export async function boot({ loading, bootStart, mapId }) {
         : '\nThe green gate starts your lap';
       if (race.freestyle) {
         /* The counter counts the lines in every position (decision 2), so
-         * even Lines only has something to promise now. */
-        second = scoredRun()
-          ? '\nTwo minutes. The clock starts on the first thing you score.'
-          : (scoringWanted()
+         * even Lines only has something to promise now. With Manga and
+         * scoring off none of that count is drawn, so the line promises
+         * none of it; a scored run's clock is in the OSD, which stays, so
+         * its sentence stands. See DEFAULTS.mangaAndScoring in ui.js. */
+        if (scoredRun()) {
+          second = '\nTwo minutes. The clock starts on the first thing you score.';
+        } else if (!ui.settings.mangaAndScoring) {
+          second = '\nNo clock and no gates.';
+        } else {
+          second = scoringWanted()
             ? '\nNo clock and no gates. Lines and tricks count as you fly them.'
-            : '\nNo clock and no gates. Gaps and close calls count as you fly them.');
+            : '\nNo clock and no gates. Gaps and close calls count as you fly them.';
+        }
       }
       ui.setBanner(`${start}${second}`);
     } else if (guidedText) {
