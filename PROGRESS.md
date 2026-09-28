@@ -59207,3 +59207,12 @@ deploy's scripts whole.
 For the owner's flight: reload once, then Settings, Screen, Manga and
 scoring, Off, and fly Hibari Yard; then On again. What would count as
 wrong is written under "For the owner" above.
+
+### Flown by the owner, 2026-09-28
+
+"Tested by flying it work". The owner flew the live build with the switch
+and it works: that is the verification scale they chose, the pilot's own
+flight, on top of the checks above. Nothing was changed after it. Still
+open, and still the owner's: whether Save share card goes with the switch
+off, and the results list running under the menu after a scored run, which
+Clean FPV shares (Found, not fixed, above).
