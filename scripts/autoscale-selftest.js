@@ -100,7 +100,7 @@ function fakeGpu() {
  * the GPU working through them in order (a queue), polled every `pollMs` as
  * the sticks' timer does. Returns the draws the guard held.
  */
-function runFrames(gate, rig, { frames, intervalMs, gpuMs, pollMs = 4, drawMs = 1, targetMs = undefined }) {
+function runFrames(gate, rig, { frames, intervalMs, gpuMs, pollMs = 4, drawMs = 1, targetMs = undefined, queueBound = false }) {
   const { gl, clock } = rig;
   let gpuFree = clock.now;
   let held = 0;
@@ -112,7 +112,7 @@ function runFrames(gate, rig, { frames, intervalMs, gpuMs, pollMs = 4, drawMs = 
      * function of the frame for jitter). The main thread is busy then, so
      * nothing polls, and main.js asks the guard right before the draw. */
     clock.now = frameAt + (typeof drawMs === 'function' ? drawMs(i) : drawMs);
-    const skip = gate.shouldSkip(clock.now, true, targetMs);
+    const skip = gate.shouldSkip(clock.now, true, targetMs, queueBound);
     if (skip) {
       held += 1;
       if (lastHeld) {
@@ -132,7 +132,9 @@ function runFrames(gate, rig, { frames, intervalMs, gpuMs, pollMs = 4, drawMs = 
     }
     clock.now = next;
   }
-  return { held, heldTwice };
+  /* backlogMs is how far the fake GPU is behind the wall clock at the end:
+   * the queue's depth in time, which the timer loop's rule exists to bound. */
+  return { held, heldTwice, backlogMs: gpuFree - clock.now, live: gl.live };
 }
 
 /* ------------------------------------------------------------------------ */
@@ -234,6 +236,53 @@ section('F3: time that was not GPU time does not reach the average');
     threw = true;
   }
   check('a lost context does not throw out of the frame loop', !threw);
+}
+
+section('the queue rule the timer loop passes: the pending age bounds the queue');
+{
+  /*
+   * The runaway that hung the battery on 2026-09-28, replayed: a 60 Hz
+   * cadence into a GPU that takes 120 ms a frame, which is the timer loop
+   * on a software rasteriser. Without the rule, never-twice-in-a-row
+   * cannot drain what it admits: half the draws go in, each 120 ms of
+   * work every 33 ms of wall, and the queue grows without bound. Two
+   * seconds of that is the disease the browser could not close through.
+   */
+  const rig = fakeGpu();
+  const gate = createGpuGate(rig.gl);
+  const sick = runFrames(gate, rig, { frames: 120, intervalMs: 1000 / 60, gpuMs: 120 });
+  check('without it, a timer cadence outruns a slow GPU without bound',
+    sick.backlogMs > 1000, `${sick.backlogMs.toFixed(0)} ms behind after two seconds`);
+}
+{
+  const rig = fakeGpu();
+  const gate = createGpuGate(rig.gl);
+  const cured = runFrames(gate, rig, { frames: 120, intervalMs: 1000 / 60, gpuMs: 120, queueBound: true });
+  check('with it, the queue stays about a frame of GPU deep',
+    cured.backlogMs < 300, `${cured.backlogMs.toFixed(0)} ms behind after two seconds`);
+  check('by holding as often as it takes, which this rule alone may',
+    cured.held > 90 && cured.heldTwice > 0, `${cured.held} held, ${cured.heldTwice} in a row`);
+}
+{
+  /* And it never fires on a machine whose GPU keeps the cadence: the
+   * pending age stays under two frames, so the potato the setting shipped
+   * for sees exactly the loop the owner flew. */
+  const rig = fakeGpu();
+  const gate = createGpuGate(rig.gl);
+  const healthy = runFrames(gate, rig, { frames: 240, intervalMs: 1000 / 60, gpuMs: 8, queueBound: true });
+  check('and it never fires while the GPU keeps the cadence',
+    healthy.held === 0, `${healthy.held} held`);
+}
+{
+  const rig = fakeGpu();
+  const gate = createGpuGate(rig.gl);
+  check('pendingMs is zero with nothing pending', gate.pendingMs(rig.clock.now) === 0);
+  rig.gl.nextDoneAt = rig.clock.now + 500;
+  gate.submitted(rig.clock.now);
+  rig.clock.now += 80;
+  gate.poll(rig.clock.now);
+  check('and reads the oldest unsignalled fence\'s age, past what time() would keep',
+    Math.abs(gate.pendingMs(rig.clock.now) - 80) < 1e-9, `${gate.pendingMs(rig.clock.now)} ms`);
 }
 
 /* ------------------------------------------------------------------------

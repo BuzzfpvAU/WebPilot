@@ -58158,3 +58158,171 @@ drift into.
     no code changed              this entry and the plan's P3.4 note
                                  record the owner's A against B; nothing
                                  to run, and no check was run
+
+## 2026-09-28 | render, ui | Frame pacing is a Settings row, and Low defaults to the timer (plan P3.4 promoted)
+
+### The ask
+
+The owner, after flying the A against B that kept the flag: "make it a
+settings and default it on for low and then auto detects and sets low."
+So: the timer loop stops being a URL only experiment and becomes Settings,
+Screen, Frame pacing; its default follows the graphics preset, the timer
+exactly on Low; and the existing detection chain that lands a weak machine
+on Low (the boot guess for a software rasteriser, Auto demoting Medium to
+Low on evidence, or the pilot's own hand) now ends with the timer pacing
+that machine with no hand on it.
+
+### What changed
+
+- `src/ui/ui.js`: `pacing` in DEFAULTS, 'auto', with the decision and the
+  costs written at the setting; PACING_MODES and `pacingTimerOn(s)`, the
+  one derivation (timer on 'timer', display on 'display', and on 'auto'
+  the timer exactly when the preset is Low), which main.js, the row and
+  lint:quality all ask; the loadSettings whitelist takes the new key; and
+  the row itself, a three way choice under Screen after Predicted view
+  (Timer with Low, Timer always, Display always), whose note says per
+  state what is pacing this machine now and what the timer trades: more
+  GPU work a second, heat and battery, and Auto graphics holding still
+  while it runs.
+- `src/main.js`: the boot constant became live state. applyLoopMode sets
+  `timerLoop` from the URL force or the setting, at boot and at the top of
+  applySettings, which every settings change and every preset move comes
+  through, Auto's own included. THE LOOP SWAPS LIVE: frame() re-arms rAF
+  only while the display paces and hands to the timer otherwise, and
+  frameTimer() the mirror, so a swap happens at the running loop's own
+  next tick and there is never a moment with two schedulers pending. The
+  declarations sit above applySettings because that is the first code the
+  boot sequence runs that asks for them; the first draft left them beside
+  the loop and the bare applySettings call at boot would have hit their
+  temporal dead zone. `?loop=timer` and `?loop=display` (or `raf`) force a
+  session either way, over the row, so an A against B stays one address
+  away. The feel report now carries `perf.pacing` beside `perf.loop`. A
+  `window.__loopNow` hook says which loop paces, for the probes.
+- `scripts/quality-check.js`: three rows pin the derivation, auto is the
+  timer exactly on Low, the explicit choice outranks the preset both
+  ways, and the modes list itself.
+- `tests/shell-baseline.json`: Settings overflow 1012 to 1059 px, one row,
+  by hand, the same argument as the Predicted view row of yesterday: the
+  file is today's overflow and not a target, the row is deliberate, and
+  lint:devices reaching every row is the condition, run below.
+
+What the default costs, stated rather than implied: every Low machine now
+paces with the timer unless its pilot says Display, including handhelds,
+where the extra frames are battery; the row is one press away and says so.
+And while the timer paces, Auto graphics holds still, so a machine Auto
+took to Low stops gathering promote evidence there: accepted, there is
+nothing below Low to demote to, and the Render scale slider stays live.
+
+### What went wrong, four times, and what each bought
+
+The first battery hung its replay check for twenty minutes with the
+SwiftShader GPU process at 369 percent, and node could not even close the
+browser. The chain, each link fine alone: a headless page boots with
+default settings; the boot guess reads a software rasteriser and sets Low
+(review F5's own table); Low now paces with the timer; and the timer fed
+a GPU that takes over a hundred milliseconds a frame a new frame every
+sixteen. Under rAF the compositor's pipeline is the back pressure, so
+this could never happen; a timer has none. The guard could not hold it,
+twice over: never-twice-in-a-row admits half the draws, five times what
+that GPU drains, and once the queue passed 250 ms every fence aged past
+GATE_FREEZE_MS and was discarded untimed, so the average went blind
+exactly when it mattered. Not only a test's disease: a real Low machine
+whose GPU spikes past the freeze cap mid flight would blind the guard
+the same way while the timer kept feeding it.
+
+So the gate grew the rule the timer loop was missing, and only the timer
+loop uses it: shouldSkip(now, enabled, targetMs, queueBound) holds the
+draw whenever the OLDEST PENDING fence is older than two frames, as often
+as it takes, because a loop with no display to owe frames to has nothing
+to lose by holding and a queue to lose by not. The pending age cannot go
+blind the way the timed average can. The rAF path passes false and keeps
+the reviewed behaviour to the byte. scripts/autoscale-selftest.js replays
+the disease and the cure, printed from the same rig outside the suite:
+6,041 ms behind after two seconds of wall clock without the rule (53 of
+120 draws admitted, 6.4 seconds of work) against 104 ms with it (17
+admitted, 103 held, 95 back to back, which this rule alone may), and a
+GPU that keeps the cadence never sees it fire, so the laptop the setting
+shipped for flies exactly the loop the owner felt.
+
+The second run still crawled, and it was the delay formula: with the
+queue bounded, fences signal inside the freeze cap again, the guard
+learns gpuMs is 120, and period minus gpu goes negative, so the 4 ms
+floor had the timer spinning physics and the OSD at 250 Hz for draws
+that could not exist. A GPU that takes the whole period cannot be raced:
+timerDelay now falls back to the period itself in that case, the cadence
+a display loop would have had, and keeps period minus gpu with the 4 ms
+floor where the GPU is faster (the potato: 16.7 less 7.8 is an 8.9 ms
+tick, exactly what the owner flew).
+
+The third crawl was the browser's own animation clock. The replay check
+awaits two requestAnimationFrame callbacks per captured frame of a whole
+lap, and under the bare timer a single rAF await measured 202 ms: with no
+rAF client at all, headless lets its frame scheduler idle, and every
+await pays an idle wakeup. Under the display loop it was our own standing
+rAF request keeping that scheduler hot for everyone else. So the timer
+keeps one no-op rAF pending while it paces (rafKeepAlive in main.js),
+which is the honest statement that the timer replaces the draw's clock
+and not the page's; the same await then measured 50 ms, one software
+frame. Any page code awaiting a frame callback would have starved the
+same way on a real machine whose compositor idles.
+
+And the fourth taught the scope. The sponsor lap captures run under
+__replayStep, whose frames must ALL be drawn, so the draw deliberately
+bypasses the gate there, the timer's queue rule with it: the flood came
+straight back, 367 percent of GPU, for exactly those pages. Scoping the
+timer off stepped replays cured that, and the very next run showed two
+real time replay checks reading duplicate and late clock samples, because
+the harness samples frames by requestAnimationFrame and under the timer
+the ticks and the callbacks are decoupled. Both said the same thing from
+different sides: THE TIMER PACES LIVE FLYING ONLY (timerPacesNow in
+main.js, read at every tick). A replay or the freestyle room's film has
+no sticks, so there is no latency to cut, their all-drawn frames are
+exactly what the display loop paces, and the harness's own sampling rides
+it. Entering a replay or the film hands the loop over; leaving hands it
+back. After that scoping, replay:test passed 9 of 9 in 290 s, the pace it
+had before any of this.
+
+### RUN LOG
+
+    npm run autoscale:selftest   all 52 passed: the six new checks are the
+                                 runaway, the bound, held-as-often-as-it-
+                                 takes, never on a healthy cadence, and
+                                 pendingMs itself
+    probes (scripts/shots.js, headless, expect: steps fail the run)
+      boot Low, no URL           __loopNow() 'timer': the default the ask
+                                 names, no frame fault
+      live swap at Low           pacing 'display' then 'auto' through
+                                 ui.onSettings: 'raf' then 'timer', the
+                                 handover both ways, no fault
+      boot High, no URL          'raf'; then graphics dropped to low by
+                                 hand: world rebuilt and 'timer', the
+                                 preset route through applySettings
+      boot High, ?loop=timer     'timer', the force still wins
+      boot Low, ?loop=display    'raf', the force wins the other way
+    npm run lint:quality         71 of 71 checks clean, the three pacing
+                                 rows included
+    the whole battery, on the tree with every fix above
+      npm run input:selftest     all 225 passed
+      npm run autoscale:selftest all 52 passed, the queue rule's six
+      npm run predict:selftest   all 11 passed
+      npm run lint:frame         34 passed, 0 failed
+      npm run lint:quality       71 of 71 checks clean
+      npm run lint:preload       up to date, 229 served
+      npm run check:fresh        18 passed, 0 failed
+      npm run lint:shell         PASS against the 1059 px baseline
+      npm run replay:test        9 tests: 9 pass, 290 s when run alone,
+                                 the pace it had before any of this
+      npm run lint:devices       PASS, every row and note reachable on
+                                 every device, the Frame pacing row
+                                 included, which is the baseline hand
+                                 edit's condition
+      npm run lint:input         all 160 passed, 192 s
+      npm run verify             17 of 17 checks passing, check 1 SKIP
+                                 (no emcc here); the trace hash
+                                 de0401cd4266 in checks 2 and 3,
+                                 UNCHANGED, hover 0.2793, punch 80.0 m,
+                                 motor 26 ms, 671.7 deg/s, world golden
+                                 35 of 35, crash pacing 48 of 48, every
+                                 value as before
+    raf await probe (scratch)    at Low under the bare timer 202 ms; with
+                                 rafKeepAlive 50 ms, one software frame

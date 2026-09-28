@@ -42,6 +42,7 @@
  */
 
 import { GRAPHICS_IDS, autoMinPixels, bootGuessGraphics, qualityFor, pixelRatioFor, internalScale } from '../src/render/quality.js';
+import { PACING_MODES, pacingTimerOn } from '../src/ui/ui.js';
 import { isIntegratedGpu } from '../src/render/gpuinfo.js';
 
 const rows = [];
@@ -283,6 +284,26 @@ for (const raw of NOT_INTEGRATED) {
     qualityFor('low').field.clouds === false
     && qualityFor('medium').field.clouds !== false
     && qualityFor('high').field.clouds !== false, got);
+}
+
+/*
+ * Frame pacing follows the preset: the timer exactly on Low, the owner's
+ * ask of 2026-09-28 after flying the A against B (bug-c7fb5247), and the
+ * pilot's explicit choice outranks the preset both ways. The derivation is
+ * ui.js's pacingTimerOn, which main.js, the Settings row and this check
+ * all ask, so the rule cannot drift apart from the row that describes it.
+ */
+{
+  const t = (pacing, graphics) => pacingTimerOn({ pacing, graphics });
+  check('pacing: auto is the timer exactly on Low',
+    t('auto', 'low') === true && t('auto', 'medium') === false && t('auto', 'high') === false,
+    `low ${t('auto', 'low')}, medium ${t('auto', 'medium')}, high ${t('auto', 'high')}`);
+  check('pacing: the pilot\'s explicit choice outranks the preset',
+    t('timer', 'high') === true && t('display', 'low') === false,
+    `timer on High ${t('timer', 'high')}, display on Low ${t('display', 'low')}`);
+  check('pacing: the modes are auto, timer, display',
+    PACING_MODES.length === 3 && PACING_MODES[0] === 'auto' && PACING_MODES.includes('timer') && PACING_MODES.includes('display'),
+    PACING_MODES.join(', '));
 }
 
 /*

@@ -150,19 +150,56 @@ export function createGpuGate(gl) {
     }
   }
 
+  /* How long the oldest fence still pending has been pending, 0 when none:
+   * the queue's own age, readable whatever the timing average knows, since
+   * a fence the freeze cap will later discard still has a measurable age
+   * while it hangs. */
+  function pendingMs(now) {
+    let worst = 0;
+    for (let i = 0; i < RING; i += 1) {
+      if (fences[i] !== null && now - at[i] > worst) {
+        worst = now - at[i];
+      }
+    }
+    return worst;
+  }
+
   /*
    * Should this frame's draw wait? True only when the GPU is saturated on
    * average AND the previous frame is still on it AND the last draw was not
    * already skipped. `enabled` is the caller's switch (Low latency view),
    * `targetMs` the frame to measure saturation against (see GATE_FRAME_MS).
+   *
+   * `queueBound` is the timer loop's rule, never the display loop's: hold
+   * the draw whenever the oldest pending fence is older than two frames,
+   * as often as it takes. Under requestAnimationFrame the compositor's own
+   * pipeline is the back pressure, and the never-twice-in-a-row rule below
+   * only trims the worst of a saturated queue without halving a healthy
+   * display's rate. A timer has no compositor pacing it: found on
+   * 2026-09-28, the day Frame pacing shipped, when the battery's replay
+   * check hung its whole browser. Its page boots on a software rasteriser,
+   * so the boot guess put it on Low, Low now paces with the timer, and the
+   * timer fed a GPU that takes over a hundred milliseconds a frame a new
+   * frame every sixteen: the queue grew without bound, every fence aged
+   * past the freeze cap and was discarded untimed, so the average went
+   * blind exactly when it was needed, and the browser could not drain the
+   * queue even to close. The queue's AGE cannot go blind, holding as often
+   * as it takes is correct for a loop with no display to owe frames to,
+   * and the physics and the menus tick on through a held draw. On a
+   * machine whose GPU keeps the timer's cadence the rule never fires.
    */
-  function shouldSkip(now, enabled, targetMs = GATE_FRAME_MS) {
+  function shouldSkip(now, enabled, targetMs = GATE_FRAME_MS, queueBound = false) {
     if (!ok || !enabled) {
       s.lastSkipped = false;
       return false;
     }
     poll(now);
     const frame = targetMs > GATE_FRAME_MS ? targetMs : GATE_FRAME_MS;
+    if (queueBound && pendingMs(now) > 2 * frame) {
+      s.lastSkipped = true;
+      s.skipped += 1;
+      return true;
+    }
     const saturated = s.samples >= 10 && s.gpuMs > GATE_SATURATED * frame;
     if (saturated && fences[head] !== null && !s.lastSkipped) {
       s.lastSkipped = true;
@@ -219,5 +256,5 @@ export function createGpuGate(gl) {
     }
   }
 
-  return { state: s, poll, shouldSkip, submitted, reset };
+  return { state: s, poll, shouldSkip, submitted, reset, pendingMs };
 }

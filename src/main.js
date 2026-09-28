@@ -82,7 +82,7 @@ import { uploadWorld, setWorldFrame, setMover, setBoxHeight, kindOf, setVehicleC
 import { Chase, CHASE_EVERY, pays } from './game/chase.js';
 import { sincos } from './props/trig.js';
 import { setCraftAirframe, CRAFT_R, CRAFT_WORLD_R, CRAFT_V_UP, CRAFT_V_DOWN, craftVerticalHalf, craftVerticalOffset, canPerch, shouldScorePass, shouldEnterTurtle, uprightPlantQuat, turtleFlipEase, turtleFlipLift, turtleSlerpQuat, TURTLE_STICK_MIN, TURTLE_SPEED, TURTLE_RATE, TURTLE_FLIP_MS, TURTLE_INVERT_UPZ, TURTLE_EXIT_UPZ, turtleClearance, findRestSpot, PROP_PLANE_MAX_UP_DOT, GRAZE_SPEED_MAX, BOUNCE_SPEED_MAX, BOUNCE_COOLDOWN_MS, LAND_DESCENT_MAX, LAND_HORIZONTAL_MAX, LAND_TILT_MAX_DEG, LAND_TILT_HARD_DEG, LAND_TIP_SPEED_MAX, GROUND_MU, GROUND_E, CLIP_SPAWN_GRACE_MS, CrashJudge, emptyWorldReport, foldWorldReport } from './game/collide.js';
-import { Ui, formatTime, WEIGHT_STOCK, clampWeight, gravityScaleFor, loadSettings } from './ui/ui.js';
+import { Ui, formatTime, WEIGHT_STOCK, clampWeight, gravityScaleFor, loadSettings, pacingTimerOn } from './ui/ui.js';
 import {
   adoptMapFromLocation, adoptMostFlownTrack, adoptShareFromLocation, boardPageUrl, fetchGhost,
   fetchMapDocument, fetchTrackDocument, fetchTrackTimes, postFreestyleRun, postTime,
@@ -5110,7 +5110,56 @@ export async function boot({ loading, bootStart, mapId }) {
     ) / 100);
   }
 
+  /*
+   * Frame pacing's state, declared here because applySettings just below is
+   * the first code the boot sequence runs that asks for it; the loop these
+   * flags steer, and the whole story of why it exists, is frame() and
+   * frameTimer() further down (THE LOOP SWAPS LIVE). The URL force is read
+   * once: a session opened as ?loop=timer or ?loop=display flies that loop
+   * whatever the row says, so an A against B stays one address away.
+   */
+  const loopParam = new URLSearchParams(window.location.search).get('loop');
+  const loopForce = loopParam === 'timer' ? true : (loopParam === 'display' || loopParam === 'raf' ? false : null);
+  let timerLoop = false;
+  /* The pending timeout, 0 when none, and whether boot started the loop at
+   * all, so a visibility flicker before boot cannot start it early. */
+  let timerId = 0;
+  let timerOn = false;
+  /* Whether the last frame was the freestyle room's film, mirrored out of
+   * frameBody (film there is a per frame const) for timerPacesNow below:
+   * the loop hands over at tick boundaries, so the last tick's answer is
+   * exactly the one the next tick's scheduling needs. */
+  let filmNow = false;
+
+  function applyLoopMode() {
+    timerLoop = loopForce !== null ? loopForce : pacingTimerOn(ui.settings);
+  }
+
+  /* Whether the timer paces THIS tick: only live flying. The timer exists
+   * to cut the time between the sticks and the glass, and a replay or the
+   * freestyle room's film has no sticks, so there is nothing to cut and
+   * the display loop is the right pacer for footage. It is also the safe
+   * one: those modes' frames must ALL be drawn, so the draw bypasses the
+   * gate for them, the timer's queue rule with it, and a timer feeding an
+   * ungated draw flooded a slow GPU without bound (the battery found it,
+   * twice). The compositor pacing all-drawn frames is precisely what
+   * requestAnimationFrame is. The harness's frame sampling also rides
+   * rAF, so a mode it drives tick by tick reads coherently only when the
+   * loop is the rAF loop. Checked at every tick, so entering a replay or
+   * the film hands the loop over and leaving hands it back. */
+  function timerPacesNow() {
+    return timerLoop && !replayMode && !replayStepMode && !filmNow;
+  }
+
   function applySettings(s) {
+    /* Which clock draws the frames, from the Frame pacing row and the
+     * graphics preset together (pacingTimerOn in ui.js), unless the ?loop=
+     * URL is forcing one for the session. Every route a preset changes by
+     * comes through here, Auto's own moves included, so a machine Auto
+     * lands on Low picks the timer up between runs with no hand on it. The
+     * running loop reads the flag at its next tick: see THE LOOP SWAPS
+     * LIVE at frameTimer. */
+    applyLoopMode();
     /*
      * The pilot's stick mode, first, because everything below it that draws
      * a stick wants to know. input.setStickMode forwards to the thumb
@@ -7110,25 +7159,30 @@ export async function boot({ loading, bootStart, mapId }) {
    * above this one and reset() is reachable from several of them.
    */
   function frame(nowWall) {
-    requestAnimationFrame(frame);
+    /* The timer takes over here the moment the mode says so: see THE LOOP
+     * SWAPS LIVE below. */
+    if (timerPacesNow()) {
+      timerId = setTimeout(frameTimer, timerDelay());
+    } else {
+      requestAnimationFrame(frame);
+    }
     runFrame(nowWall);
   }
 
   /*
-   * THE LOOP WITHOUT VSYNC, ?loop=timer: plan P3.4, on the owner's ask of
-   * 2026-09-28 ("do 3 now"). An experiment, never the default, and the URL
-   * flag is the whole of how it is reached.
-   *
-   * What it probes. With the canvas desynchronized, a frame MAY reach the
-   * glass when it is finished instead of at the next vsync; whether this
-   * Chrome on this desktop actually does that cannot be read from any API
-   * and could not be tested in the container the code was written in. A
-   * loop driven by a timer rather than requestAnimationFrame draws frames
-   * the display did not ask for, so if the browser presents them on
-   * finish, the picture stops waiting for vsync, the way a native sim
-   * with vsync off behaves, tearing included. If it does not, the flag
-   * changes nothing a pilot can feel, and the plan's own condition says
-   * the code comes out again. Say which it was after flying it.
+   * THE LOOP WITHOUT VSYNC: plan P3.4, shipped behind ?loop=timer on the
+   * owner's ask of 2026-09-28 ("do 3 now") and, the same day, flown on the
+   * owner's 60 Hz Iris Xe laptop against the plain URL (bug-c7fb5247): key
+   * to screen went 80 to 64 ms at the median and 144 to 80 at the 90th,
+   * with no tearing. So the win here is the humble mechanism: this Chrome
+   * still presents at vsync, but a loop drawing every 8 or 10 ms hands
+   * each refresh a picture milliseconds old instead of up to a whole
+   * refresh old. On that result the owner made it a setting ("make it a
+   * settings and default it on for low"): Settings, Screen, Frame pacing,
+   * whose default follows the graphics preset, the timer exactly on Low
+   * (pacingTimerOn in ui.js, where the reasons live with the setting).
+   * The ?loop= URL flag still forces either loop for a session, over the
+   * setting, so an A against B stays one address away.
    *
    * The delay aims the next frame at the display's period less what the
    * GPU takes (the plan's formula), floored at the 4 ms a nested timeout
@@ -7136,38 +7190,83 @@ export async function boot({ loading, bootStart, mapId }) {
    * cadence. The GPU guard stays on watch exactly as under rAF, so a GPU
    * that cannot keep the cadence holds draws rather than queueing them.
    *
-   * What stands down under it, because its frames say nothing about the
-   * display: the display period learner (latency.js would learn the
-   * timer's own cadence and report a refresh rate that does not exist)
-   * and Auto graphics (its evidence is dt against the display's period).
-   * Both are flagged at their call sites below. The predicted view keeps
-   * the learner's held period as its horizon, which under present on
-   * finish is a small over lead, accepted for an experiment. And the
-   * physics contract holds as it does under rAF: the accumulator takes
-   * this loop's capped dt, and no delta reaches the integrator.
+   * What stands down while the timer paces, because its frames say
+   * nothing about the display: the display period learner (latency.js
+   * would learn the timer's own cadence and report a refresh rate that
+   * does not exist) and Auto graphics (its evidence is dt against the
+   * display's period). Both are gated at their call sites below on the
+   * live flag, so they resume the moment the display paces again. On Low
+   * that parks Auto's levers while the timer runs, which is accepted:
+   * there is no preset below Low for it to move to, and the Render scale
+   * slider stays the pilot's. The predicted view keeps the learner's held
+   * period as its horizon, a small over lead under the timer, accepted.
+   * And the physics contract holds as it does under rAF: the accumulator
+   * takes this loop's capped dt, and no delta reaches the integrator.
+   *
+   * THE LOOP SWAPS LIVE. timerLoop is set by applyLoopMode, from the URL
+   * force or the setting, on boot and on every settings change, the
+   * preset moves Auto makes included. Each loop hands over to the other
+   * from inside its own next tick, so there is never a moment with two
+   * schedulers pending: frame() re-arms rAF only while the display paces,
+   * and frameTimer() re-arms the timeout only while the timer does.
    *
    * rAF stops with a hidden page; a timer does not, and Chrome throttles
    * it toward one fire a second, which would step the physics 100 ms at a
    * time while nobody watched. So the visibility listener below stops the
    * timer outright when the page hides and restarts it when it shows, and
-   * the first frame back reads the same capped dt an rAF return does.
+   * the first frame back reads the same capped dt an rAF return does. The
+   * mode cannot change while hidden, because every change runs through
+   * applySettings, which runs from a frame or from the visible page's own
+   * events.
    */
-  const timerLoop = new URLSearchParams(window.location.search).get('loop') === 'timer';
-  /* The pending timeout, 0 when none, and whether boot started the loop at
-   * all, so a visibility flicker before boot cannot start it early. */
-  let timerId = 0;
-  let timerOn = false;
-
   function timerDelay() {
+    const period = latency.displayPeriodMs();
     const gpu = gpuGate.state.samples >= 10 ? gpuGate.state.gpuMs : 0;
-    const d = latency.displayPeriodMs() - gpu;
-    return d < 4 ? 4 : d;
+    const d = period - gpu;
+    if (d >= 4) {
+      return d;
+    }
+    /* The formula assumes the GPU beats the display's period. A GPU that
+     * takes the whole period or more cannot be raced: the guard is holding
+     * the draws anyway (its queue rule), and a 4 ms tick would only spin
+     * the physics and the OSD flat out for frames that cannot exist, which
+     * on a software rasteriser starved the whole page. Tick at the period
+     * instead, exactly the cadence a display loop would have had. */
+    return gpu >= period ? period : 4;
   }
+
+  /*
+   * One no-op rAF kept pending while the timer paces. The timer replaces
+   * the DRAW's clock, not the page's animation clock: under the display
+   * loop, the loop's own standing rAF request is what keeps the browser's
+   * frame scheduler serving every other requestAnimationFrame client, and
+   * with no client at all the scheduler idles and a lone request costs an
+   * idle wakeup. Measured on this container's headless build: a single
+   * rAF await took 202 ms under the bare timer, which turned the replay
+   * check's two-rAF-per-frame lap captures from minutes into twenty. Any
+   * page code awaiting a frame callback would starve the same way. The
+   * callback does nothing; frameTimer re-arms it while the timer paces,
+   * so the display loop never inherits a stray one. Hoisted, P8.
+   */
+  let rafKeep = false;
+  const rafKeepAlive = () => {
+    rafKeep = false;
+  };
 
   function frameTimer() {
     /* Scheduled first, exactly as frame() does, so a thrown body does not
-     * stop the loop. */
-    timerId = setTimeout(frameTimer, timerDelay());
+     * stop the loop; the display's loop takes over here the moment the
+     * mode says so. */
+    if (timerPacesNow()) {
+      timerId = setTimeout(frameTimer, timerDelay());
+      if (!rafKeep) {
+        rafKeep = true;
+        requestAnimationFrame(rafKeepAlive);
+      }
+    } else {
+      timerId = 0;
+      requestAnimationFrame(frame);
+    }
     runFrame(performance.now());
   }
 
@@ -8157,6 +8256,10 @@ export async function boot({ loading, bootStart, mapId }) {
       && worldClipKey && ui.reelFilm.key === worldClipKey
       ? ui.reelFilm
       : null;
+    /* For timerPacesNow: the film's frames are all drawn past the gate, so
+     * the timer must not pace them (the declaration above frame() says
+     * why). */
+    filmNow = Boolean(film);
     const worldLive = !freezeWorld && (
       Boolean(finishLoadingOnFrame)
       || mode === 'flight'
@@ -8646,10 +8749,15 @@ export async function boot({ loading, bootStart, mapId }) {
      * the cap above: input and physics have already run. Never for the film
      * or a replay step capture, whose frames must all be drawn, and only
      * while Low latency view is on. See gpugate.js for why it waits for the
-     * GPU to be saturated on average before it believes one late fence.
+     * GPU to be saturated on average before it believes one late fence, and
+     * for the timer loop's own stricter rule, passed as the last argument:
+     * a timer has no compositor pacing it, so without a bound on the
+     * pending fences' age a GPU slower than the cadence is fed a queue
+     * that grows without limit (the day Frame pacing shipped, that hung a
+     * whole browser on the battery's software rasteriser).
      */
     if (worldLive && drawThis && !film && !replayStepMode
-      && gpuGate.shouldSkip(renderStart, ui.settings.lowLatency !== false, latency.targetMs())) {
+      && gpuGate.shouldSkip(renderStart, ui.settings.lowLatency !== false, latency.targetMs(), timerLoop)) {
       drawThis = false;
     }
     if (worldLive) {
@@ -9373,7 +9481,7 @@ export async function boot({ loading, bootStart, mapId }) {
       /* The experimental timer loop was stopped below when the page hid;
        * back on screen it resumes, and its first frame reads the same
        * capped dt an rAF return does, because prevWall was left alone. */
-      if (timerLoop && timerOn && timerId === 0) {
+      if (timerPacesNow() && timerOn && timerId === 0) {
         frameTimer();
       }
       return;
@@ -10627,9 +10735,10 @@ export async function boot({ loading, bootStart, mapId }) {
     keyToScreen: latency.report(),
     hz: latency.refreshHz(),
     fullscreen: Boolean(document.fullscreenElement),
-    /* Which loop drove the frames, so a report flown under ?loop=timer
-     * says so: the flag changes the meaning of fps, hz and keyToScreen. */
+    /* Which loop paces the frames now and what the Frame pacing row says,
+     * because the loop changes the meaning of fps, hz and keyToScreen. */
     loop: timerLoop ? 'timer' : 'raf',
+    pacing: ui.settings.pacing,
     /* The predicted view's setting and the horizon it last looked ahead in
      * flight: see predictView before the draw. */
     predict: ui.settings.predictView !== false ? Math.round(predictLastMs * 10) / 10 : 0,
@@ -11154,8 +11263,12 @@ export async function boot({ loading, bootStart, mapId }) {
     return { map: view.id, kind: probe.kind, periodMs: period, samples: out };
   };
   window.__budget = (name) => measureBudget(shell, view, { view: name });
-  if (timerLoop) {
-    timerOn = true;
+  /* Which loop paces the frames now, for the probes that check the Frame
+   * pacing setting and the URL force against the loop actually running. */
+  window.__loopNow = () => (timerLoop ? 'timer' : 'raf');
+  applyLoopMode();
+  timerOn = true;
+  if (timerPacesNow()) {
     frameTimer();
   } else {
     requestAnimationFrame(frame);

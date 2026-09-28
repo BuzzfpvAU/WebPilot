@@ -455,6 +455,25 @@ export const FPS_CAPS = [0, 90, 60, 30];
 export const FLIGHT_STYLES = ['expert', 'arcade'];
 
 /*
+ * Frame pacing's three answers, and where the timer actually runs. 'auto'
+ * follows the graphics preset (see the note at DEFAULTS.pacing); the other
+ * two are the pilot overruling it either way. The derivation lives here
+ * beside the setting so main.js, the row and the checks all ask the same
+ * function, and the ?loop= URL flag in main.js outranks it for a session.
+ */
+export const PACING_MODES = ['auto', 'timer', 'display'];
+
+export function pacingTimerOn(s) {
+  if (s.pacing === 'timer') {
+    return true;
+  }
+  if (s.pacing === 'display') {
+    return false;
+  }
+  return normalizeGraphics(s.graphics) === 'low';
+}
+
+/*
  * WEIGHT: the pilot's answer to "floaty", as a percentage of the weight the
  * airframe is flown at. 100 is normal, and normal is configs/airframes.js
  * gravityBase, 1.62 times 9.80665 on the five inch, which is what the shell
@@ -1093,6 +1112,28 @@ const DEFAULTS = {
    */
   predictView: true,
   /*
+   * FRAME PACING: which clock draws the frames. 'display' is the browser's
+   * own beat, requestAnimationFrame. 'timer' draws on a timer at the
+   * display's period less the GPU's measured frame, without asking the
+   * display: each refresh then picks up a picture milliseconds old instead
+   * of up to a whole refresh old, which the laptop it was built for
+   * measured as 16 ms less key to screen and half the worst case
+   * (bug-c7fb5247, plan P3.4). What it costs: more frames a second is
+   * more GPU work a second, heat and battery, and Auto graphics holds
+   * still while it runs because a timer's cadence says nothing about the
+   * display. 'auto', the default, is the owner's ask of 2026-09-28: the
+   * timer exactly when the graphics preset is Low, the preset for the
+   * machines where the trade wins, however Low was reached, by hand, by
+   * the boot guess or by Auto demoting. The ?loop= URL flag still forces
+   * either loop for a session, over this. The derivation is
+   * pacingTimerOn below; main.js swaps the loop live when this or the
+   * preset changes, and paces LIVE FLYING only: a replay or the room's
+   * film has no sticks to answer, so their frames keep the display's
+   * beat whatever this row says (timerPacesNow in main.js, and the
+   * battery day it was learned is in PROGRESS.md).
+   */
+  pacing: 'auto',
+  /*
    * FULLSCREEN IN FLIGHT: Fly, Restart and Resume take the page fullscreen,
    * and the title gives the window back. A window in a desktop is composited
    * by the desktop, which on many a Linux laptop is one more frame between
@@ -1272,6 +1313,7 @@ export function loadSettings() {
   for (const [key, allowed] of [
     ['tune', tuneChoices(s.airframe)],
     ['link', Object.keys(LINK_PRESETS)],
+    ['pacing', PACING_MODES],
     ['cameraFov', CAMERA_FOVS],
     ['renderScale', RENDER_SCALES],
     ['fpsCap', FPS_CAPS],
@@ -2463,6 +2505,27 @@ function choice(label, note, choices, current, format, set) {
  * one value row where Enter changing something is the idiom rather than
  * the accident. See select().
  */
+/*
+ * The Frame pacing row's note: what is pacing the frames right now and what
+ * that trades. The timer redraws without waiting for the display's beat, so
+ * every refresh picks up a picture milliseconds old instead of up to a
+ * whole refresh old; the price is more GPU work a second, which is heat and
+ * battery, and Auto graphics holding still while it runs. Worded per state
+ * so the row always says what THIS machine is doing.
+ */
+function pacingNote(s) {
+  const on = pacingTimerOn(s);
+  if (s.pacing === 'timer') {
+    return 'The timer draws the frames on every preset while you fly: the picture answers the sticks sooner, for more GPU work, heat and battery, and Auto graphics holds still while it runs. Replays and films keep the display\'s beat.';
+  }
+  if (s.pacing === 'display') {
+    return 'The display paces the frames on every preset, the browser\'s ordinary beat: easiest on the battery, and the picture waits for the next refresh.';
+  }
+  return on
+    ? 'On Low the timer draws the frames while you fly, so the picture answers the sticks sooner, for more GPU work, heat and battery; Auto graphics holds still while it runs, and replays and films keep the display\'s beat. On Medium and High the display paces everything.'
+    : 'The display paces the frames on this preset. On Low the timer would draw while you fly instead, so the picture answers the sticks sooner, for more GPU work, heat and battery.';
+}
+
 function toggle(label, note, on, set) {
   const current = Boolean(on);
   return {
@@ -7241,6 +7304,14 @@ export class Ui {
             : 'Off: the view is drawn where the quad was when the frame began, which the screen shows a frame later.',
           s.predictView,
           (v) => { s.predictView = v; },
+        ),
+        choice(
+          'Frame pacing',
+          pacingNote(s),
+          PACING_MODES,
+          s.pacing,
+          (id) => ({ auto: 'Timer with Low', timer: 'Timer, always', display: 'Display, always' }[id]),
+          (id) => { s.pacing = id; },
         ),
         toggle(
           'Fullscreen in flight',

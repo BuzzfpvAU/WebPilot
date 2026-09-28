@@ -545,6 +545,16 @@ tearing, which fits presents still landing on vsync with the compositor
 picking up a frame a few milliseconds old instead of a whole refresh old.
 PROGRESS.md, the follow up entry, has the reading.
 
+Promoted to a setting the same day, on the owner's ask ("make it a
+settings and default it on for low and then auto detects and sets low"):
+Settings, Screen, Frame pacing, whose default follows the graphics preset,
+the timer exactly on Low, however Low is reached, so the existing boot
+guess and Auto demotion chain ends with the timer on for exactly the
+machines this item was written for. The pilot's explicit Timer or Display
+outranks the preset, and the ?loop= URL still forces either loop for a
+session, over the row. The loop swaps live; pacingTimerOn in ui.js is the
+one derivation.
+
 ### P3.5. Hardware, which beats all of the above (for the owner)
 
 A 120 or 144 Hz display halves two terms of the chain at once, the wait
