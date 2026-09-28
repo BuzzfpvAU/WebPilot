@@ -14,12 +14,15 @@
  * world.
  *
  * THE LEVER is a factor on the Render scale slider, from FLOOR to 1: the same
- * path the slider takes (renderScaleOf and the guarded resize in main.js), so
- * every map follows it and nothing new touches a pipeline. The city's and the
- * built map's pipelines clamp it again to their own floors; on High those are
- * the rubric's 1,200,000 pixels (prompts/bando-perf-loop.md, F4), so Auto
- * cannot pace a High picture into 720p. On the race field the shell applies
- * the same absolute floor at High.
+ * path the slider takes (renderScaleOf and applyRenderScale in main.js). On
+ * the race field it is the canvas's pixel ratio, and on High the shell never
+ * takes it under the rubric's 1,200,000 pixels (prompts/bando-perf-loop.md,
+ * F4), so Auto cannot pace a High picture into 720p. The town's and a built
+ * map's pipelines take it on their own targets (userScale there) and never
+ * under their preset's minScale, 0.55, 0.85 and 1.0 of the CSS size on Low,
+ * Medium and High; each reports where that floor is (autoFloor), so Auto
+ * counts its time at the floor there. Until 2026-09-28 neither pipeline
+ * read the factor at all (review finding F1).
  *
  * THE SIGNALS, per frame, allocation free:
  *   dt       the frame interval: is the page holding sixty

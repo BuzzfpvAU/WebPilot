@@ -57052,3 +57052,106 @@ On the working tree over 2afe26c, one check at a time, 00:47 to 00:54 UTC.
                                  after a city round trip; world golden 35 of
                                  35; crash pacing 48 of 48. Every value as
                                  on 6928650.
+
+## 2026-09-28 | render, maps | The town and a built map follow Render scale and Auto (review F1)
+
+### Why
+
+Phase 1, item 7 of the review plan, last because it touches the pipelines
+the budgets pin. The Render scale slider, and since 2026-09-27 Auto
+graphics' factor on it, reached the race field only. On the town and a
+built map, the worlds the owner calls the point of the product:
+
+- `loadMap` was handed `renderScale` and nothing under `src/maps/` read it;
+- main.js wrote the factor into `view.post.userScale` only when the post
+  object had one, and none did;
+- both pipelines sized their targets with their own math, and put back on
+  every resize the pixel ratio they had captured at construction, so the
+  shell's own record (`shell.pixelRatio`) and the renderer disagreed until
+  the next map swap;
+- lint:quality's "the Render scale slider reaches the internal buffer"
+  checked the formula, `internalScale`, and passed throughout.
+
+So on those worlds Auto walked its factor to the floor with no effect on a
+pixel, and a pilot moving the slider on a built map had been moving
+nothing since the slider shipped.
+
+### What changed
+
+- `src/maps/city/index.js` and `src/maps/built/index.js`: both pipelines
+  take a `userScale` (the slider times Auto's factor, passed in from
+  loadMap's options and written by main.js on every change). setSize
+  computes the scale exactly as before, multiplies it by `userScale`, and
+  never goes under the preset's `minScale` (0.55, 0.85 and 1.0 of the CSS
+  size on Low, Medium and High), so at 1 it is the scale the budgets were
+  measured at. The shell's pixel ratio is read when it resizes, not when
+  it was built. `autoFloor()` reports the factor under which the targets
+  stop shrinking.
+- `src/main.js`: `canvasScaleOf`: the canvas takes the scale on the race
+  field and stays at the preset's own ratio where a pipeline takes it,
+  since taking it in both would lower the picture twice. Used by
+  applyRenderScale and the resize path; the boot load settles the canvas
+  directly (applyRenderScale's state is declared further down and would
+  throw there) and a swap settles it once the new world is ready.
+  `autoFloorFor` uses the pipeline's floor over the slider, and is set at
+  boot too. `__scaleAt` reports what the pipeline actually uses beside the
+  formula.
+- `src/render/autoscale.js`: its header described the pipelines' floors as
+  the rubric's 1.2 Mpx; they are `minScale`, and it now says so.
+- `scripts/scale-check.js`, new, `npm run lint:scale`: the running page,
+  asked there and back, on the race field at High, a built map at High and
+  at Low, and the town at Low. This is the check that was missing. Run
+  against the code before this change (a throwaway worktree with only the
+  hook patched so it could report): 12 problems, the targets not moving at
+  55 (1920 by 1080 stayed 1920 by 1080 on High, 1088 by 612 on Low) and the
+  shell's ratio reading 0.550 and 0.500 while the renderer's had been put
+  back. The first version of the check crashed on the old code instead of
+  failing (a missing floor read with toFixed); it reports it now.
+
+### RUN LOG
+
+On the working tree over 869425e, one check at a time, 00:56 to 01:20 UTC.
+`npm run verify` was run on 869425e (the F7 entry) as the before, and here
+as the after.
+
+    npm run lint:scale           PASS: the race field's canvas 1.000 to
+                                 0.550 and back; a built map at High
+                                 1920x1080 to 1280x720 (its floor, 1.0 of
+                                 the CSS size) and back, the canvas at 1.000
+                                 throughout, Auto's floor 0.6667; a built
+                                 map and the town at Low 1088x612 to 704x396
+                                 and back, the canvas at 0.850, Auto's floor
+                                 0.6471; no page errors. On the code before
+                                 this change: 12 problems, above.
+    Auto probe (scratch)         a built map on Low with Auto, flying: the
+                                 factor 1, 0.7 at 10 s, 0.65 (the floor
+                                 0.647) at 15 s; the pipeline's targets
+                                 1088x612, 761x428, 704x396; the canvas at
+                                 0.85 throughout; the ask for a lower preset
+                                 at 20 s, three seconds at the real floor
+    npm run input:selftest       all 225 passed
+    npm run autoscale:selftest   all 46 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         64 of 64 checks clean
+    npm run lint:preload         up to date, 228 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           all 160 passed, 197 s
+    npm run lint:memory          PASS, every world is lazy and freed
+    npm run lint:attract         no world flies the title camera through
+                                 anything solid
+    npm run lint:devices         PASS
+    npm run lint:boot            9 of 9 checks clean
+    npm run replay:test          9 tests: 9 pass, 0 fail
+    npm run verify               17 of 17 passing, 1 SKIP (check 1, no
+                                 emcc and no vendor/betaflight here). Every
+                                 value as before this change: de0401cd4266
+                                 in both processes and one hash across 4
+                                 rates; hover 0.2793, punch 80.0 m, terminal
+                                 31.0 m/s, motor step 26 ms, 671.7 deg/s,
+                                 yaw -0.10, sag 11.14%, ratio 1.2472;
+                                 console clean; map isolation: field P1
+                                 116, P2 928277, P5 69.8 MB, P10 30.4 MB,
+                                 499 meshes, the same after a city round
+                                 trip; world golden 35 of 35; crash pacing
+                                 48 of 48.

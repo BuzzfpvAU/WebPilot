@@ -990,9 +990,9 @@ export async function boot({ loading, bootStart, mapId }) {
      * the ratio depends on the window's area through the field's pixel
      * budget, which by definition changes when the window does.
      */
-    const wantPr = pixelRatioFor(ui.settings.graphics, renderScaleOf(ui.settings));
+    const wantPr = pixelRatioFor(ui.settings.graphics, canvasScaleOf(ui.settings));
     if (Math.abs(wantPr - shell.pixelRatio) > 0.001) {
-      applyPixelRatio(shell, ui.settings.graphics, renderScaleOf(ui.settings));
+      applyPixelRatio(shell, ui.settings.graphics, canvasScaleOf(ui.settings));
     }
     /* mapReady as well as view: a swap disposes the old pipeline before it
      * builds the new one, and a resize landing in that window used to call
@@ -1272,6 +1272,21 @@ export async function boot({ loading, bootStart, mapId }) {
      * share adoption above reports a boot failure. */
     ui.setBanner(`${failed} could not be loaded.\nThe track was loaded instead.`, true);
   }
+  /* A world whose pipeline scales its own targets (the town, a built map)
+   * took the render scale there, so the canvas goes back to the preset's
+   * own ratio, set above with the scale in it for the race field. Direct,
+   * not applyRenderScale, whose state is declared further down. See
+   * canvasScaleOf. */
+  if (view.post && view.post.userScale != null) {
+    const wantPr = pixelRatioFor(ui.settings.graphics, 1);
+    if (Math.abs(wantPr - shell.pixelRatio) > 0.001) {
+      applyPixelRatio(shell, ui.settings.graphics, 1);
+      const d = shell.resize();
+      view.post.setSize(d.w, d.h);
+    }
+  }
+  /* Auto's floor for this world and window: see autoFloorFor. */
+  autoScale.setFloor(autoFloorFor(ui.settings));
   ui.setShare(view.share || null);
   /*
    * THE CLIP KEY OF THE WORLD AS IT WAS BUILT, taken now rather than when a
@@ -4443,6 +4458,9 @@ export async function boot({ loading, bootStart, mapId }) {
      * it. Once per map, never per run: it scans every collider. */
     rebuildObstacles();
     mapReady = true;
+    /* The swap set the canvas ratio before it knew whether the new world's
+     * pipeline scales its own targets: settled now. See canvasScaleOf. */
+    applyRenderScale(ui.settings);
   }
 
   /* Custom is one map id and many courses. A second pick from the board
@@ -4887,13 +4905,25 @@ export async function boot({ loading, bootStart, mapId }) {
   }
 
   /*
+   * The scale the CANVAS takes. The race field renders at the canvas's own
+   * ratio, so it takes the render scale there. The town's and a built map's
+   * pipelines render into targets of their own and take the render scale
+   * as their userScale, so their canvas stays at the preset's ratio: taking
+   * it in both places would lower the picture twice. Review finding F1.
+   */
+  function canvasScaleOf(s) {
+    return view && view.post && view.post.userScale != null ? 1 : renderScaleOf(s);
+  }
+
+  /*
    * Set the ratio and walk the same guarded resize path a window resize
    * takes, so the composer and every prepass target follow in one place.
    * Shared by a Settings change and by Auto's resolution.
    */
   function applyRenderScale(s) {
     const userScale = renderScaleOf(s);
-    const wantPr = pixelRatioFor(s.graphics, userScale);
+    const canvasScale = canvasScaleOf(s);
+    const wantPr = pixelRatioFor(s.graphics, canvasScale);
     const userChanged = !!(view && view.post && view.post.userScale != null
       && view.post.userScale !== userScale);
     if (view && view.post && view.post.userScale != null) {
@@ -4901,7 +4931,7 @@ export async function boot({ loading, bootStart, mapId }) {
     }
     if (shell.pixelRatio !== wantPr || userChanged) {
       if (shell.pixelRatio !== wantPr) {
-        applyPixelRatio(shell, s.graphics, userScale);
+        applyPixelRatio(shell, s.graphics, canvasScale);
       }
       const d = shell.resize();
       if (view && view.post && mapReady) {
@@ -4923,6 +4953,13 @@ export async function boot({ loading, bootStart, mapId }) {
    * top of this.
    */
   function autoFloorFor(s) {
+    /* A pipeline that scales its own targets knows where they stop
+     * shrinking. Auto's factor multiplies the slider, so its floor is that
+     * over the slider (setFloor clamps it to the slider's lowest step and
+     * to 1). */
+    if (view && view.post && typeof view.post.autoFloor === 'function') {
+      return view.post.autoFloor() / ((Number(s.renderScale) || 100) / 100);
+    }
     if (normalizeGraphics(s.graphics) !== 'high') {
       return AUTO_FLOOR;
     }
@@ -9274,6 +9311,18 @@ export async function boot({ loading, bootStart, mapId }) {
       budget: mapQ.pixelBudget,
       map: id,
       graphics: q.id,
+      /* What the pipeline actually uses, beside the formula above: they
+       * are two things, and the formula passing while the pipeline ignored
+       * the slider is how review finding F1 went unseen. Null on the race
+       * field, whose scale is the canvas's (shell.pixelRatio). */
+      pipeline: view && view.post && view.post.userScale != null ? {
+        scale: view.post.scale,
+        rw: view.post.size.x,
+        rh: view.post.size.y,
+        userScale: view.post.userScale,
+        autoFloor: typeof view.post.autoFloor === 'function' ? view.post.autoFloor() : null,
+      } : null,
+      pixelRatio: shell.pixelRatio,
     };
   };
   /*

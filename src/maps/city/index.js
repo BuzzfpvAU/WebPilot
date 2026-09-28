@@ -463,15 +463,24 @@ const CASTER_MIN_RADIUS_INSTANCED = 0.8;
 class CityPipeline extends Pipeline {
   constructor(renderer, scene, camera, opts) {
     super(renderer, scene, camera, opts);
-    this.shellPixelRatio = renderer.getPixelRatio();
     this.minScale = opts && opts.minScale != null ? opts.minScale : 1;
     this.preferScale = opts && opts.preferScale != null ? opts.preferScale : null;
+    /* The Render scale slider times Auto graphics' factor (renderScaleOf in
+     * main.js), applied to these targets in setSize. main.js writes it on
+     * every change and keeps the canvas at the preset's own ratio, since
+     * this pipeline scales its own targets: see applyRenderScale there. */
+    this.userScale = opts && opts.userScale > 0 ? opts.userScale : 1;
+    this.scaleAtFull = 1;
     /* Stage F's manga layer, folded into the grade and the fxaa pass on
      * this pipeline's own materials: see src/render/manga.js. */
     this.manga = mangaPipeline(this);
   }
 
   setSize(w, h) {
+    /* The shell's pixel ratio as it is now, put back after the resize below.
+     * It used to be captured once at construction, which put the boot ratio
+     * back on every resize and undid any change the shell had made since. */
+    const shellPr = this.renderer.getPixelRatio();
     /* Own scale math, not super.setSize. The vendored walker pipeline
      * floors scale at 1.0 so a low-DPI screen supersamples for clean ink.
      * Low on a Deck has to go below 1.0 or the fill rate is the whole
@@ -482,6 +491,21 @@ class CityPipeline extends Pipeline {
       || (dpr < 1.5 ? 1.5 : Math.min(dpr, 2));
     if (w * h * scale * scale > this.pixelBudget) {
       scale = Math.max(this.minScale, Math.sqrt(this.pixelBudget / (w * h)));
+    }
+    /*
+     * THE RENDER SCALE AND AUTO, which never reached this pipeline: the
+     * slider and Auto's factor were written into a property nothing read,
+     * and every change of the shell's ratio was undone below (review
+     * finding F1, 2026-09-27). The factor now scales the scale above, never
+     * under this preset's minScale (Low 0.55, Medium 0.85, High 1.0 of the
+     * CSS size), and at 1 it is exactly the scale the budgets were measured
+     * at. scaleAtFull is kept for autoFloor.
+     */
+    this.scaleAtFull = scale;
+    const floor = this.minScale < scale ? this.minScale : scale;
+    scale *= this.userScale;
+    if (scale < floor) {
+      scale = floor;
     }
     this.scale = scale;
     const rw = Math.max(2, Math.floor(w * scale));
@@ -499,11 +523,20 @@ class CityPipeline extends Pipeline {
     this.ink.mat.uniforms.uFar.value = this.camera.far;
     this.ink.mat.uniforms.uThickness.value = 1.05 + 0.55 * scale;
 
-    this.renderer.setPixelRatio(this.shellPixelRatio);
+    this.renderer.setPixelRatio(shellPr);
     this.renderer.setSize(w, h, false);
     this.renderer.domElement.style.width = '';
     this.renderer.domElement.style.height = '';
     setOutlineResolution(this.size.x, this.size.y);
+  }
+
+  /* The render scale factor under which these targets stop shrinking,
+   * minScale over the scale at full, so Auto counts its time at the floor
+   * where the floor really is (autoFloorFor in main.js). 1 when a preset's
+   * floor leaves no room at all. */
+  autoFloor() {
+    const full = this.scaleAtFull > 0 ? this.scaleAtFull : 1;
+    return (this.minScale < full ? this.minScale : full) / full;
   }
 }
 
@@ -2374,6 +2407,8 @@ export async function buildMap(shell, onProgress, options) {
     pixelBudget: q.city.pixelBudget,
     minScale: q.city.minScale,
     preferScale: q.city.preferScale,
+    /* The Render scale slider and Auto's factor: see userScale there. */
+    userScale: options && options.renderScale,
   });
   pipeline.enabled.ink = q.city.ink;
   pipeline.enabled.fxaa = q.city.fxaa;

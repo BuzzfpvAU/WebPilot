@@ -77,6 +77,7 @@
     "lint:devices": "node scripts/device-check.js",
     "lint:arcade": "node scripts/arcade-check.js",
     "lint:responsive": "node scripts/responsive-check.js",
+    "lint:scale": "node scripts/scale-check.js",
     "lint:board": "node scripts/board-check.js",
     "lint:attract": "node scripts/attract-check.js",
     "park:fly": "node scripts/park-fly.js",
