@@ -57956,3 +57956,64 @@ should be on open paving beside it, a metre or more clear with nothing
 overhead, facing right, and the builder's fs-no-start note says where.
 Wrong would be the craft inside or under anything, on a road, or off the
 plot while the plot has open ground.
+
+## 2026-09-28 | render | Low is capped at one million pixels, the owner's call
+
+### The decision
+
+The Low GPU-cut entry above put two levers to the owner instead of pulling
+them: cap Low's field budget at 1.0 Mpx, and the Render scale slider on
+their own laptop. The owner, 2026-09-28: "do 1 and 2 first" (3, the vsync
+off experiment, waits). The slider is theirs to move on the machine; the
+cap is this change.
+
+### What changed
+
+`pixelBudget` in Low's field block, 1.5e6 to 1.0e6. The old number was
+1080p times the authored 0.85 squared, chosen so a 1080p window landed
+exactly on the authored ratio and only denser panels were clamped. The new
+one says Low never draws more than a million pixels, because on the
+integrated machines Low is for, GPU time is latency through the low
+latency canvas, and pixels are GPU time. What moves and what does not,
+all from pixelRatioFor's own arithmetic and confirmed on the running page
+by lint:scale and a shot:
+
+| window                    | was            | now            |
+|---------------------------|----------------|----------------|
+| the owner's 1896 by 909   | 0.850, 1.25 Mpx| 0.762, 1.00    |
+| 1920 by 1080              | 0.850, 1.50 Mpx| 0.694, 1.00    |
+| 1366 by 768 laptop        | 0.850, 0.76 Mpx| the same       |
+| Steam Deck 1280 by 800    | 0.850, 0.74 Mpx| the same       |
+
+Anything under about 1.38 Mpx of CSS keeps the authored frame, so the
+Deck, the preset's original audience, is untouched. The slider still
+multiplies underneath the cap (55 at the owner's window is 0.30 Mpx), and
+Auto's floor is unchanged. The ceiling sits below rubric F4's 1.2 Mpx
+floor on purpose: Low is the preset the owner exempted from F4 (review
+F6), and a ceiling under the floor is the same decision read the other
+way. The world text floor of 0.5 is still clear of the deepest the cap
+reaches at any window.
+
+scripts/quality-check.js: the "nothing at or below 1080p is touched" rows
+now expect the smaller of the authored ratio and the budget's, say which
+one they matched, and refuse a cap on Medium and High, whose budgets are
+still the measured 1080p frame; two new rows pin the cap's ends, a 1080p
+window at exactly 1.0 Mpx and the Deck at its authored 0.85. The first
+version called Medium and High "capped" at 1080p because 2.07e6 is a
+round number a thousandth under an exact 1080p; the capped test now asks
+for a real move (0.01) rather than a rounding.
+
+### RUN LOG
+
+    npm run lint:quality         68 of 68 checks clean, the rows above
+    npm run lint:scale           PASS: field at Low at the owner's 1896 by
+                                 943 reads 1.00 Mpx at full, ratio 0.748,
+                                 slider to 0.500 and back, Auto floor
+                                 0.5500 unchanged
+    shot at 1920x1080 Low        scripts/shots.js: ratio reads 0.6944, the
+                                 frame eyeballed, world softer as bought,
+                                 menu text sharp (DOM, not canvas);
+                                 console carries only the two board
+                                 fetches this container always refuses
+    npm run verify               not run: one number in the preset table,
+                                 render side, nothing reaches the module

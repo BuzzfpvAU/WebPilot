@@ -113,14 +113,29 @@ const PRESETS = {
        * low latency canvas.
        */
       clouds: false,
-      /* The Deck's own 1280x800 at the authored 0.85 is 0.74 Mpx, well
-       * inside this. The number is 1080p times this preset's own 0.85
-       * squared, so a 1080p screen at DPR 1 lands exactly on its authored
-       * ratio and is not clamped at all: the budget catches dense panels
-       * and nothing else, on this preset as on the other two. It is also
-       * comfortably above MIN_INTERNAL_PIXELS, the 1.2 Mpx floor the city's
-       * rubric F4 sets against pacing a 1080p panel into 720p. */
-      pixelBudget: 1.5e6,
+      /*
+       * LOW NEVER RENDERS MORE THAN A MILLION PIXELS. The owner's
+       * decision of 2026-09-28 ("do 1 and 2", the answer to
+       * bug-435f6aaa): on the integrated machines Low is for, GPU time is
+       * latency through the low latency canvas, and pixels are GPU time.
+       * The budget was 1.5e6, chosen as 1080p times 0.85 squared so a
+       * 1080p window landed exactly on the authored ratio; at 1.0e6 that
+       * window caps at 0.69 instead and draws 1.0 Mpx where it drew 1.5,
+       * and the laptop the decision was made on (1896 by 909, which drew
+       * 1.25 Mpx at 0.85) draws 1.0 at 0.76. Anything under about 1.38
+       * Mpx of CSS keeps the authored 0.85 untouched: the Deck's own
+       * 1280x800 is 0.74 Mpx, and a 1366x768 laptop 0.76. The Render
+       * scale slider still multiplies underneath the cap.
+       *
+       * This ceiling sits BELOW MIN_INTERNAL_PIXELS on purpose: rubric
+       * F4's 1.2 Mpx floor binds Medium and High, and Low is the one
+       * preset the owner exempted (autoMinPixels above, review F6),
+       * because on Low the only rescue left is fewer pixels. A ceiling
+       * under the floor is that same decision read the other way round.
+       * scripts/quality-check.js pins which screens keep their authored
+       * ratio and that a 1080p Low frame is now exactly this budget.
+       */
+      pixelBudget: 1.0e6,
     },
     city: {
       shadowMap: 0,

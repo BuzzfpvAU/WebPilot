@@ -123,12 +123,17 @@ function q0(id) {
 }
 
 /*
- * NOTHING AT OR BELOW 1080p IS TOUCHED.
+ * NOTHING AT OR BELOW 1080p IS TOUCHED, ON MEDIUM AND HIGH.
  *
- * The budgets are the 1080p pixel count the render target ceiling was
- * measured at, so every screen at or under it renders exactly what the table
- * authors. This is the check that says the fix for the dense panels did not
- * quietly change the frame everything else was measured on.
+ * Their budgets are the 1080p pixel count the render target ceiling was
+ * measured at, so every screen at or under it renders exactly what the
+ * table authors. This is the check that says the fix for the dense panels
+ * did not quietly change the frame everything else was measured on. Low
+ * left this club on 2026-09-28: the owner capped it at 1.0 Mpx outright
+ * (the note at its pixelBudget), so on Low the authored ratio holds only
+ * under the cap, and the expected ratio is the smaller of the two. The
+ * rows below assert exactly that, so the cap moving or vanishing fails
+ * here in a second.
  */
 for (const id of GRAPHICS_IDS) {
   const q = qualityFor(id);
@@ -138,12 +143,33 @@ for (const id of GRAPHICS_IDS) {
     /* Low authors its own 0.85 downscale, which is a choice in the table
      * rather than a budget clamping a screen. */
     const authored = Math.min(1, q.pixelRatioCap) * q.resolutionScale;
+    const want = Math.min(authored, Math.sqrt(q.field.pixelBudget / (s.w * s.h)));
+    /* "Capped" means the budget really moved the ratio, not that a budget
+     * written as a round 2.07e6 sits a thousandth under an exact 1080p:
+     * Low's cap moves its 1080p ratio by 0.155, and the tolerance above
+     * already holds every ratio to 0.001 either way. */
+    const capped = want < authored - 0.01;
     check(
-      `${id}: ${s.name} keeps its authored ratio`,
-      Math.abs(pr - authored) < 0.001,
-      `${pr.toFixed(3)} against the table's ${authored.toFixed(3)}`,
+      `${id}: ${s.name} ${capped ? 'caps at its field budget' : 'keeps its authored ratio'}`,
+      Math.abs(pr - want) < 0.001 && (id === 'low' || !capped),
+      `${pr.toFixed(3)} against ${capped ? `the budget's ${want.toFixed(3)}` : `the table's ${authored.toFixed(3)}`}`,
     );
   }
+}
+
+/* The two ends of the owner's Low cap, pinned by number: a 1080p window
+ * draws exactly the budget, and the Deck keeps its authored frame. */
+{
+  global.window = { devicePixelRatio: 1, innerWidth: 1920, innerHeight: 1080 };
+  const pr = pixelRatioFor('low', 1);
+  const mpx = 1920 * 1080 * pr * pr;
+  check('low: a 1080p window draws exactly the 1.0 Mpx cap',
+    Math.abs(mpx - qualityFor('low').field.pixelBudget) < 1e3,
+    `ratio ${pr.toFixed(3)}, ${(mpx / 1e6).toFixed(3)} Mpx`);
+  global.window = { devicePixelRatio: 1, innerWidth: 1280, innerHeight: 800 };
+  const deck = pixelRatioFor('low', 1);
+  check('low: the Deck keeps its authored 0.85 under the cap',
+    Math.abs(deck - 0.85) < 0.001, `ratio ${deck.toFixed(3)}`);
 }
 
 /* The Render scale slider still multiplies through, at every preset. */
