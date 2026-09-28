@@ -59216,3 +59216,67 @@ flight, on top of the checks above. Nothing was changed after it. Still
 open, and still the owner's: whether Save share card goes with the switch
 off, and the results list running under the menu after a scored run, which
 Clean FPV shares (Found, not fixed, above).
+
+## Bug sweep, 2026-09-28 (read only, nothing fixed)
+
+Asked for: a full and comprehensive bug sweep. Method: seven reviewers each read one area (native C and build, input/fc/share/edge, game logic, main.js, ui.js twice, render/maps/props, trackbuilder/tests), plus the cheap lints. No code was changed. `npm run verify` was not run: nothing was changed, and a sweep by reading is the wrong instrument for it. Only the findings marked CONFIRMED were reproduced or re-read by me in the source; the rest are the reviewers' readings and are unproven until someone reproduces them. `vendor/betaflight` is an empty submodule in this container, so `lint:catalog` and `lint:preload`-style checks that need it could not run here, and the native review read upstream at the pinned commit.
+
+Before starting: `git fetch` printed "forced update" on main. Cause was a shallow clone (a stale tracking ref, 9ed8b9c, and no visible merge-base). After `git fetch --unshallow` there is one root, 45325de, and 9ed8b9c is an ancestor of main. History is intact.
+
+### Cheap checks
+
+    lint:fc          33 of 33 traces clean
+    lint:presets     4 of 4 clean
+    lint:partners    45 passed
+    lint:frame       34 passed
+    lint:input       170 of 170 passed
+    lint:quality     71 of 71 clean
+    lint:preload     up to date
+    lint:catalog     could not run, submodule empty (environment)
+    lint:boot        FAIL "a thrown frame is caught": stale check. main.js now wraps the
+                     frame in runFrame(), which does catch and set __frameFault; the
+                     regex in scripts/boot-check.js still expects the old frame() shape.
+    lint:nouns       FAIL: src/maps/built/showpiece.js:149 road named "Drift course".
+                     Real if that name is shown to the pilot; not checked.
+
+### Findings, by severity
+
+High
+1. CONFIRMED. src/trackbuilder/geometry.js:115 `wrapAngle` never terminates for |x| above about 1e16 (`wrapAngle(1e20)` hung past a 10 s timeout). Reached from model.js:905 `normalize` and app.js:1557, so an imported track with `"yaw": 1e20`, or typing it in the inspector, freezes the tab. Fix: `x - tau*Math.round(x/tau)`.
+2. Trackbuilder model.js ~770: `ELEMENTS[type]` on a plain object, so type `constructor`, `__proto__`, `toString` gives a truthy def with no dims and `normalize` throws, against its "never throws" contract. Same lookup in `isTrafficType`, `kindOf`. Also storage.js `lib[doc.id]` with id `__proto__`.
+3. CONFIRMED (code read). Security: src/share/board.js:99 `boardOrigin()` takes `?board=` with no allowlist, and it outranks the stored setting. listing.js:687 `syncOwnedIdentity` then POSTs every owned track's edit key to that origin. A crafted link therefore hands a pilot's edit keys to any host. A hostile board also chooses the imported track id (board.js:887, 439), which can collide with an owned track. Stats and bug reports follow the same origin, and windows.js:95 opens it without `noopener`. The `?board=` hatch is documented as deliberate, so this is the owner's call: allowlist webfpv.org and loopback, or require a confirm.
+4. Native, sim_reset is not a full reset: pid.c statics `previousGyroRateDterm` and `previousRawGyroRateDterm` carry over, so step 0 after a crash gets a D kick from the previous flight. mixer.c `lastDynLpfUpdateUs` and `dynLpfPreviousQuantizedThrottle` also persist while the sim clock restarts, so the dynamic LPFs can sit frozen for roughly the length of the previous flight. Both break "same input, same trace" across a reset. Needs a patch in the style of 0002, which is a module-shape change and so the owner's call.
+5. Native, sim_input (sim.c:272) has no finite check: a NaN axis poisons rcData, the I term and the motors until reset, and `t_seconds = Inf` reaches a UB cast. plant.c:1843 `while (half > 0.4)` and bf_glue.c `while (p > TWO_PI)` never end on Inf and would freeze the main thread.
+6. main.js:7682 the ground normal is sampled when `(i & 7) === 0`, where i is the step index within this frame, so on sloped terrain the trajectory depends on how steps batch into frames. Should key off the absolute step index. main.js:3385 `sim_prop_strike` fires once per frame on a wall-clock cooldown, so 30 fps and 144 fps give different rotor state after a hit. Both contradict "a dropped frame changes nothing".
+
+Medium
+7. CONFIRMED. src/ui/ui.js:1321 `loadSettings`: a stored `null` parses fine, then `stored.graphics` throws inside `new Ui()` and the shell never boots. One line: coerce non-objects to `{}`.
+8. ui.js:3962 and 3306 call `seatAirframe` with no stale-stock guard, so a `?craft=` link (the builder's Fly this track) overwrites the pilot's own camera tilt and fov. The same bug was fixed at ui.js:15368 and these two call sites were missed.
+9. main.js:6617 `wakeAudio` only starts audio when `audio.ctx` is null. After a `?fly=1` link (no gesture) the context is created suspended and never resumed. Turning Sound on by click also fires before the setting flips. Silent for the session.
+10. main.js:4325 `reset()` does not call `race.setRecordKey(recordKey())` after a mid-run pack voltage change, so laps file under the old voltage while the plant flies the new one. race.js:424 `setRecordKey` does not swap `recordAtStart` either.
+11. fc.js bench Search row has no `action`, so Enter or a click on the label ends in `act(undefined)` and `action.startsWith` throws (fc.js:499, ui.js:8690, 14705, 15291). Bench also reopens in stale search or "only what I changed" state (fc.js:302).
+12. ui.js:8206 loading a Rates preset never sets `ratesSplitPitch`, so a preset with a different pitch shows joined and the next roll edit overwrites its pitch.
+13. ui.js:11753 `openBoardCourse` (and the standings fly and ghost callbacks at 15229, 15255) has no screen check, so a late response yanks the pilot to the title or starts a run after Esc.
+14. Trackbuilder: model.js:1040 micro migration re-runs on every read, so a resized micro field snaps back and the elements move (round trip is not clean). history.js:52 with app.js:697/710 records a phantom undo step for every click on an element, because `touch()` moves `modifiedUtc`. app.js:2785 Import overwrites the canvas with no confirm and no undo. Zero dimensions are accepted (`clearW`, `clearH`, `levelPitch` of 0) and gave NaN radii in a probe.
+15. render/shell.js:58 `disposeSceneGraph` never disposes `InstancedMesh` buffers. CONFIRMED in source. The city map makes many; only blossom is freed, so each map swap leaks instance buffers that `__budget` cannot see. Fix: `if (obj.isInstancedMesh) obj.dispose();` (check the pinned three.js has it).
+16. game/collide.js:963 `Colliders.build` packs cell keys without the clamp the queries use, so a collider past +/-4096 m aliases into unrelated cells, and a huge box visits (extent/8)^2 cells. score.js:308 `FreestyleScore.land` has no end-of-run check, so a trick landing after the horn can score and post depending on whether `tick()` ran first that frame. trickdetect.js:2209 `PathTrack.reset` leaves `preGap`, `preX/Y/Z`, `preMs`, so a restart inherits the previous run's approach data.
+17. Native: build-wasm.sh:66 applies patches before installing the EXIT trap, so a patch that fails midway leaves vendor dirty and the next build fails. A refused `sim_init` leaves `g_initialised` at 1 with the parse half applied, so the next `sim_step` can call a NULL `readFn`.
+18. Multiple `profile N` / `rateprofile N` blocks in a `diff all` paste all land on profile 0 (bf_glue.c). dump.js filter is case and whitespace sensitive, so `set ROLL_RC_RATE = 999` bypasses keep-mine.
+
+Determinism rule, JS transcendentals in the physics path (CLAUDE.md forbids them)
+19. collide.js:2526 `Math.acos(upZ)` feeds `canPerch`. main.js:1374 and 4375 (`setFromAxisAngle`), 4810 (`Math.cos/sin` into `sim_set_launch_stand`), 7819 (`Math.acos`). Lower confidence: race.js:216, trackdoc.js:105/178/610, circuit.js:61 use sin/cos/atan2 for gates and spawn yaw. `sincos()` at main.js:1388 shows the fixed helper already exists. V8 in Node and Chrome likely agree, Firefox and Safari are the risk.
+
+Low
+20. CONFIRMED. fc.js:1195 `downloadCli` revokes the object URL synchronously after `click()`; Safari and older Firefox can drop the download. ui.js:13427 shows the right pattern (4 s delay).
+21. ui.js:1755 `formatTime` prints `1:60.00` at minute boundaries (floor before rounding). ui.js:5566 `askConfirm` lacks the `closeNameDialog` guard the other dialogs have, so a listener leaks and a promise is orphaned. Sound levels are not range validated on load. `toggleMusicMute` restores a stale level.
+22. Edge: preview.js:274 `String.replace` with a template string interprets `$&` and `` $` `` from the request query. router.js:208 forwards client `x-forwarded-for` and `x-real-ip` untouched (impact depends on the board's parsing).
+23. input.js:1485 a stored throttle map missing `low` or `high` gives NaN throttle. touchsticks.js:210 has no `lostpointercapture` release, so a lost pointerup latches a stick. ghost.js:256 `sample` with count under 2 is NaN. ghostdata.js does not validate float positions. flightlog.js:165 `rows.shift()` at the cap is O(n) per push.
+24. main.js: ghost fetch race checks the course key but not the requested id (2265); a failed tune load leaves `menuTune` stale (5353); no re-entrancy guard on publish and submit (5534, 5776, 5881); `adoptMostFlownTrack` can clobber a later map choice (5259); a double map load failure leaves `mapReady` false and the loop dead (4626).
+25. Tests: check 1 passes with `skipped` when there is no emcc; check 16 relies on a 250 entry resource timing buffer; check 5 `trimHover` accepts a bracket that never converged. gates.config.json P5.descent_terminal_m_s [15, 30] is disjoint from check 7's [30, 40].
+26. Track `?track=` is decoded twice (app.js:3661): a `%` in a name throws and the link silently fails.
+
+### Declined or not acted on
+Everything: this was a report only. Findings 4, 5, 17, 19 touch the physics model or the build, so under the owner rule they go to the owner before any change. Finding 3 is a product decision. The rest are unreviewed by the owner.
+
+### Not covered
+Reviewers did not read every line of trickdetect.js (5k), the collide.js `hit()` body, the vendored city world, catalog.js, plan.js, or the harness hooks after main.js:9950. The two ui.js halves and main.js were read in full; the first ui.js pass only grepped and was redone. Nothing here is a claim that unlisted code is clean.
