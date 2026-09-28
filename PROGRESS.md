@@ -57583,3 +57583,139 @@ one. Low latency view is read at load, so it takes effect on that reload.
   lands sooner without buzzing on small corrections. Wrong would be the
   view overshooting at the end of a flip, a wobble when a roll stops, a
   jump on landing, or a rough roll near centre stick with FF at 150.
+
+## 2026-09-28 | maps, builder | With no start pads the craft starts in the open, never in a pylon
+
+A pilot's report on the board, Hop, 28 September at 01:26, marked blocking,
+on a built map with no course id (the builder's own map, flown from the
+canvas): "it spawns me inside a pylon i can't get out". The owner: "fix
+this bug, make it so that no matter the map someone builds, the quad has
+to spawn in open space, unless they build launch pads then from the launch
+pads".
+
+### What was wrong
+
+A built map with no start pads started the craft at one fixed point, 8 m in
+from the plot's west edge on its middle line (defaultSpawn in
+src/maps/built/place.js), on whatever was laid there. Reproduced in Node
+with the map's own placement:
+
+    a 28 m pylon over the point   the craft seated in the middle of the
+                                  lattice, 3.26 m from its nearest member,
+                                  with the peak over it; the builder said
+                                  nothing but fs-no-start
+    a building over the point     the craft inside the building; fs-spawn
+                                  warned, and the simulator started it
+                                  there anyway
+    containers over the point     the same, inside the stack
+
+The pylon is the one nothing caught: fs-spawn measures from the craft to
+its nearest solid, and every leg and brace is more than its metre away.
+Flown in the module (below), a climb straight up from the point meets the
+pylon for 3390 steps and gets no higher than 27.6 m, under the peak.
+
+### What changed
+
+- src/maps/built/place.js: defaultSpawn is gone and openSpawn takes its
+  place. The point is where a search starts. Open is nothing solid within
+  OPEN_CLEAR (1 m) of the craft's centre in plan at any height, so open sky
+  over it and a metre of air round it; no road within a car's reach and a
+  metre more (the owner's rule for a crash set down, 2026-09-26); and on the
+  plot, a metre in from its edge. The search walks a half metre lattice,
+  nearest first by whole steps squared (integers, exact), a tie east then
+  north, and takes the first open spot. A plot with none starts the craft at
+  its edge, the nearest open ground up to 32 m off it, facing into it; with
+  none there either, the point as before, and fs-spawn says what it is
+  inside. The point is asked first against every solid, so a map that
+  leaves it open pays one walk of the list and starts exactly where it
+  always did, to the bit. Arithmetic only: distances compared squared, road
+  lines from road.js, which keeps the same rule, and the heading a quarter
+  turn as a constant. The spawn carries `from` ('pads', 'point', 'open',
+  'off', 'blocked') for the builder. Pads are untouched: spawnFrom, wherever
+  the author put them.
+- The car's reach is half the diagonal of the biggest of CAR_KINDS, taken
+  once at load, which is at least what roadtool.js roadReach finds on any
+  road, so the start the search picks is one rd-start never warns about.
+- src/trackbuilder/warnings.js: SPAWN_CLEAR is place.js's OPEN_CLEAR, one
+  number. fs-no-start says where the pilot actually starts: the point when
+  it is open, the plan position of the spot when it is not, the edge when
+  the plot has none. rd-start's no pads message no longer says "8 m in",
+  which it could not know.
+- src/trackbuilder/schema.md: the fs-no-start and fs-spawn rows.
+- src/maps/preload.js regenerated (node scripts/gen-preload.js): place.js
+  now reaches road.js, so road.js moved up the built map's list. The same
+  35 modules.
+- Checks. The builder selftest had two checks that held the old start: "a
+  building on it is a warning" and "with no pads, a road through where the
+  pilot starts warns". They now hold the new one, because the owner changed
+  the behaviour they pinned, not a threshold: a building over the point
+  moves the start into the open with nothing warning and the note giving
+  the spot, and a road through the point moves the start a car's reach and
+  a metre off it with rd-start quiet. Added: a pylon over the point, and a
+  12 m plot a block covers, which starts the craft at its edge facing in.
+  scripts/props-check.js gained a scenario in its starter block: no pads, a
+  pylon over the point, a climb to 34 m flown in the module from the point
+  (meets the pylon, the trap seen) and from the start (touches nothing to
+  35.2 m, the same to the bit twice), then the usual lift off and hover.
+
+### What it costs
+
+Warm, in Node: the starter with its pads 1.20 ms a placement, without them
+1.48 ms (the point is open there, one walk). The worst case built for it, a
+160 m plot under warehouses with no open ground, 14 ms, the whole lattice
+and then the edge. A 5 m plot in a town of warehouses reaches the last
+fallback in 4.4 ms.
+
+### Behaviour that changed for a map with no pads
+
+A map whose point was already open and clear of roads starts where it did.
+One with a solid within a metre of the point, anything overhead, or a road
+near it, now starts at the nearest open spot, facing east as before, and
+its builder note says where. The STF mark and the partners' marks are
+chosen relative to the start, so on such a map they may choose again; the
+egg's fifty random maps, 15 per cent of them padless, still keep every
+rule. The starter and the showpiece have pads and did not move; the world
+golden flies both and is unchanged. Race tracks were not touched: with no
+pads a race track parks the quad behind its first gate (trackdoc.js), which
+is where its lap starts, and race mode offers no pylons or buildings.
+
+### What went wrong
+
+- The obvious test for "can't get out", a lift off and a hover at the
+  start, cannot see this bug: both stay under 2.3 m, and inside a pylon
+  there is air to 27 m. Only a climb to the peak shows the trap, so that is
+  the scenario props-check flies.
+- lint:preload went stale with the new import and was regenerated; it was
+  up to date before the change.
+
+### RUN LOG
+
+    node src/trackbuilder/selftest.js   951 passed, 0 failed (948 and 0
+                                 on 8066e62 before the change; with the
+                                 fix and the old checks, 946 and 2, the
+                                 two that pinned the old start)
+    node scripts/props-check.js  all passed, the physics block flown in
+                                 dist/sim.wasm; the new scenario: 3390
+                                 steps in contact up to 27.631 m from the
+                                 point, 0 steps up to 35.217 m from the
+                                 start
+    node scripts/roads-check.js  all passed (11.4 s)
+    node scripts/counter-check.js  all passed
+    node scripts/world-golden.js all passed (6.0 s)
+    npm run lint:preload         STALE after the import, regenerated, then
+                                 up to date, 229 served
+    npm run verify               not run: nothing in the plant, the module
+                                 ABI, the build or the input path changed.
+                                 The start seats the plant's frame on a
+                                 padless built map only, and props-check
+                                 flew that in the module
+    no review workflow           not directed
+
+### For the owner, when flying
+
+In the builder, a map with no start pads and a pylon (or a building) over
+the spot 8 m in from the left edge, halfway up. The builder's fs-no-start
+note says where the pilot starts now. Fly it: the craft should be on
+open paving beside the pylon, a metre or more clear of it with nothing
+overhead, facing right. Wrong would be the craft inside or under anything,
+on a road, or off the plot while the plot has open ground.

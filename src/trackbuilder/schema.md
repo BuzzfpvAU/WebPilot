@@ -631,8 +631,8 @@ through is a trap, not a line.
 
 | code | level | meaning |
 | --- | --- | --- |
-| `fs-no-start` | info | no start pads, so the pilot starts 8 m in from the plot's left edge, halfway up it, facing right |
-| `fs-spawn` | warn | the start is inside a solid, or within 1 m of one (what it stands on, and anything wholly under that, left out) |
+| `fs-no-start` | info | no start pads, so the pilot starts in the open: 8 m in from the plot's left edge, halfway up it, facing right, when that is open, and otherwise the nearest spot that is, which the note gives. Open is 1 m clear of every solid at any height, so nothing is overhead, a car's reach and 1 m off every road, and on the plot; a plot with none starts the craft at its edge, facing into it (`openSpawn` in `src/maps/built/place.js`) |
+| `fs-spawn` | warn | the start is inside a solid, or within 1 m of one (what it stands on, and anything wholly under that, left out). With no start pads only when nowhere within 32 m of the plot is open |
 | `fs-pads-seat` | warn | the pads' Base is more than 5 cm from what the craft's mat stands on, or the row stands across two heights |
 | `fs-overlap` | warn | two elements' solids run into each other by more than a centimetre |
 | `fs-slot` | warn | a space between two elements' solids wider than 5 cm and narrower than 1.4 m |
