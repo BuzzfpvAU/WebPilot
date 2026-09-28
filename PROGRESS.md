@@ -58916,3 +58916,13 @@ are on main already and not this change's.
     scripts/shots.js                 not run; put to the owner
     board                            nothing written. bug-f532d90b is open
                                      and is this change's first reader
+
+### The owner's answer, 2026-09-28
+
+"Merge to main". It covered the merge; the verification scale was not
+chosen, so no pass beyond the RUN LOG above was run, and nobody has flown
+Stick help yet. main had not moved from f496be3, fetched and checked
+before the push, so it goes to main as a fast-forward of
+claude/funny-hamilton-k6vwfb, no merge commit and no force. Nothing was
+written to the board: whether to answer bug-f532d90b is still the
+owner's.
