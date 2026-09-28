@@ -21,6 +21,15 @@
  *                    the factor in both places lowers the picture twice
  * and each comes back exactly when the slider goes back to 100.
  *
+ * AND WHERE AUTO STOPS (review finding F6, the owner's decision of
+ * 2026-09-28). Auto graphics moves the same factor, and on Medium and High
+ * it may not take the picture under the rubric's 1,200,000 internal pixels
+ * (or under the preset's own full picture, where that is smaller), on any
+ * world; on Low it may go to the slider's lowest step. Each case reads the
+ * floor Auto actually holds and checks it against that rule worked out here
+ * from the page's own sizes, and the owner's own window is one of the cases,
+ * so the number the decision was argued with is the number checked.
+ *
  * Usage:
  *   npm run lint:scale
  *
@@ -44,15 +53,22 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openPage } from '../tests/lib/page.js';
 import { SETTINGS_KEY } from '../src/ui/ui.js';
-import { qualityFor } from '../src/render/quality.js';
+import { autoMinPixels, qualityFor } from '../src/render/quality.js';
+import { AUTO_FLOOR } from '../src/render/autoscale.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /* The worlds, each at a preset whose floor leaves the slider room to work
- * or shows it has none, and whether its pipeline scales its own targets. */
+ * or shows it has none, and whether its pipeline scales its own targets.
+ * 1896 by 943 is the owner's own window, the one review finding F6 was
+ * argued at: Medium there is where the rubric's floor bites, and Low is the
+ * exception. */
 const CASES = [
   { map: 'field', graphics: 'high', own: false },
+  { map: 'field', graphics: 'medium', own: false, width: 1896, height: 943 },
+  { map: 'field', graphics: 'low', own: false, width: 1896, height: 943 },
   { map: 'built', graphics: 'high', own: true },
+  { map: 'built', graphics: 'medium', own: true },
   { map: 'built', graphics: 'low', own: true },
   { map: 'city', graphics: 'low', own: true },
 ];
@@ -79,12 +95,44 @@ async function setSlider(page, pct) {
   await page.sleep(400);
 }
 
-async function runCase({ map, graphics, own }) {
-  const label = `${map} at ${graphics}`;
+/* Auto's factor where the rule puts it, at the slider's 100: the rubric's
+ * pixels over the pixels at full, or the pipeline's minScale where that is
+ * higher, never over 1 and never under the slider's lowest step. */
+function wantAutoFloor(graphics, read, own) {
+  const minPx = autoMinPixels(graphics);
+  let f;
+  if (own) {
+    const full = read.pipeline.scale;
+    let floor = qualityFor(graphics).city.minScale;
+    if (minPx > 0) {
+      const px = Math.sqrt(minPx / (read.w * read.h));
+      floor = px > floor ? px : floor;
+    }
+    f = (floor < full ? floor : full) / full;
+  } else {
+    f = minPx > 0 ? Math.sqrt(minPx / (read.w * read.h * read.pixelRatio * read.pixelRatio)) : AUTO_FLOOR;
+  }
+  return f > 1 ? 1 : (f < AUTO_FLOOR ? AUTO_FLOOR : f);
+}
+
+/* The pixels Auto can reach at that floor: the canvas's own on the race
+ * field (pixelRatioFor is linear in the factor under the budget, and the
+ * budget only raises it), the targets' own where a pipeline scales them. */
+function pixelsAtFloor(read, floor, own) {
+  if (own) {
+    const s = read.pipeline.scale * floor;
+    return read.w * read.h * s * s;
+  }
+  const pr = read.pixelRatio * floor;
+  return read.w * read.h * pr * pr;
+}
+
+async function runCase({ map, graphics, own, width = 1280, height = 720 }) {
+  const label = `${map} at ${graphics}${width !== 1280 ? ` ${width}x${height}` : ''}`;
   const page = await openPage({
     root,
-    width: 1280,
-    height: 720,
+    width,
+    height,
     url: `/index.html?map=${map}&craft=5inch`,
     seed: [`try {
       const k = ${JSON.stringify(SETTINGS_KEY)};
@@ -106,6 +154,7 @@ async function runCase({ map, graphics, own }) {
     const low = await readScale(page);
     await setSlider(page, 100);
     const back = await readScale(page);
+    checkAutoFloor(label, graphics, own, full, back);
     if (!own) {
       expect(`${label}: no pipeline of its own`, full.pipeline === null, JSON.stringify(full.pipeline));
       expect(`${label}: the canvas ratio falls with the slider`, low.pixelRatio < full.pixelRatio - 1e-6,
@@ -148,6 +197,34 @@ async function runCase({ map, graphics, own }) {
   }
 }
 
+/* Review finding F6: the floor Auto holds is the rule's, and on Medium and
+ * High it keeps the rubric's pixels. Read at the slider's 100, before and
+ * after the slider's trip, because every slider move sets it again. */
+function checkAutoFloor(label, graphics, own, full, back) {
+  if (!full.auto || typeof full.auto.floor !== 'number' || (own && !full.pipeline)) {
+    expect(`${label}: Auto's floor is reported`, false, JSON.stringify(full.auto));
+    return;
+  }
+  const want = wantAutoFloor(graphics, full, own);
+  expect(`${label}: Auto's floor is the preset's rule`, Math.abs(full.auto.floor - want) < 1e-6,
+    `floor ${full.auto.floor.toFixed(4)} (want ${want.toFixed(4)}), pixel floor ${full.auto.minPixels}`);
+  expect(`${label}: and the same after the slider's trip`, back.auto && Math.abs(back.auto.floor - full.auto.floor) < 1e-9,
+    `${back.auto ? back.auto.floor.toFixed(4) : 'not reported'}`);
+  const minPx = autoMinPixels(graphics);
+  const atFull = pixelsAtFloor(full, 1, own);
+  const atFloor = pixelsAtFloor(full, full.auto.floor, own);
+  if (minPx > 0) {
+    const keep = minPx < atFull ? minPx : atFull;
+    expect(`${label}: Auto never takes the picture under ${(keep / 1e6).toFixed(2)} Mpx`,
+      atFloor >= keep * (1 - 1e-9), `${(atFull / 1e6).toFixed(2)} Mpx at full, ${(atFloor / 1e6).toFixed(2)} at the floor`);
+  } else {
+    /* Low, the one exception: nothing to check beyond the rule above, so
+     * the numbers are printed for the record and not counted. */
+    rows.push(`  note  ${`${label}: no pixel floor on Low, the owner's exception`.padEnd(64)} `
+      + `${(atFull / 1e6).toFixed(2)} Mpx at full, ${(atFloor / 1e6).toFixed(2)} at the floor`);
+  }
+}
+
 async function main() {
   for (const c of CASES) {
     await runCase(c);
@@ -162,7 +239,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  console.log('PASS, the Render scale slider reaches the pixels on every world, and comes back');
+  console.log('PASS, the Render scale slider reaches the pixels on every world, and comes back, and Auto stops where the preset says');
 }
 
 main().catch((e) => {

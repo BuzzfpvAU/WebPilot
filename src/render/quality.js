@@ -399,6 +399,34 @@ export function applyPixelRatio(shell, id, scale = 1, viewport = null) {
  */
 const MIN_INTERNAL_PIXELS = 1200 * 1000;
 
+/*
+ * THE FLOOR AUTO GRAPHICS KEEPS ON EACH PRESET, in internal pixels: how far
+ * Auto's resolution factor (src/render/autoscale.js) may take the picture on
+ * its own. 0 means no pixel floor, only the Render scale slider's lowest
+ * step and a pipeline's minScale.
+ *
+ * AN EXCEPTION TO F4 ON LOW, AND ONLY THERE. THE OWNER'S DECISION OF
+ * 2026-09-28. Rubric F4 was written for High. Auto first shipped honouring
+ * it on High only and pacing Low and Medium to the slider's 55 percent, and
+ * review finding F6 (prompts/input-lag-review-2026-09-27.md) put the two
+ * options to the owner with the numbers. At the owner's 1896 by 943 window
+ * on Low (ratio 0.85) the full picture is 1.29 Mpx, so honouring F4 there
+ * would leave Auto four percent of room and nothing else to do, and Low has
+ * no preset under it to demote to: a blurrier sixty is the only rescue left.
+ * On Medium a demote exists, so a Medium picture that cannot hold sixty
+ * above 1.2 Mpx goes to Low rather than into 720p. The owner chose exactly
+ * that: the exception on Low, F4 honoured on Medium and High.
+ *
+ * "Unless the panel itself is smaller than that" reads as it always has
+ * here (internalScale below, and autoFloorFor in main.js on High since
+ * 2026-09-27): the floor is 1.2 Mpx or the preset's own full picture,
+ * whichever is smaller, so on a small window Auto has no room at all.
+ * The pilot's own slider is never bound by it: F4 is about a pacer.
+ */
+export function autoMinPixels(id) {
+  return normalizeGraphics(id) === 'low' ? 0 : MIN_INTERNAL_PIXELS;
+}
+
 export function internalScale(w, h, mapQ, forceScale, userScale) {
   const area = Math.max(1, w * h);
   const prefer = (mapQ.preferScale == null ? 1 : mapQ.preferScale)

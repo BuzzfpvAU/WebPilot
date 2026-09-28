@@ -41,7 +41,7 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { GRAPHICS_IDS, bootGuessGraphics, qualityFor, pixelRatioFor, internalScale } from '../src/render/quality.js';
+import { GRAPHICS_IDS, autoMinPixels, bootGuessGraphics, qualityFor, pixelRatioFor, internalScale } from '../src/render/quality.js';
 import { isIntegratedGpu } from '../src/render/gpuinfo.js';
 
 const rows = [];
@@ -240,6 +240,20 @@ for (const raw of NOT_INTEGRATED) {
     const got = bootGuessGraphics(info, s);
     check(`boot guess: ${what}`, got === want, `${got} (want ${want})`);
   }
+}
+
+/*
+ * Where Auto graphics may take the picture on its own: the owner's decision
+ * of 2026-09-28 (review finding F6), autoMinPixels in quality.js. Low is the
+ * one exception to the rubric's 1,200,000 pixels, because it has no preset
+ * under it to demote to; Medium and High keep them. lint:scale checks the
+ * running page against the same rule; this is the rule itself, so a change
+ * to it fails here in a second rather than there in minutes.
+ */
+{
+  const got = GRAPHICS_IDS.map((id) => `${id} ${autoMinPixels(id)}`).join(', ');
+  check('Auto: no pixel floor on Low, the rubric\'s 1.2 Mpx on Medium and High',
+    autoMinPixels('low') === 0 && autoMinPixels('medium') === 1.2e6 && autoMinPixels('high') === 1.2e6, got);
 }
 
 /*

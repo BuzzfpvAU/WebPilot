@@ -46,7 +46,7 @@
 
 import * as THREE from 'three';
 import { buildShell } from './render/shell.js';
-import { applyPixelRatio, bootGuessGraphics, graphicsLabel, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
+import { applyPixelRatio, autoMinPixels, bootGuessGraphics, graphicsLabel, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
 import { readGpuInfo } from './render/gpuinfo.js';
 import { makeAttractCamera } from './render/attract.js';
 import { MangaLayer } from './render/manga.js';
@@ -4956,29 +4956,34 @@ export async function boot({ loading, bootStart, mapId }) {
   }
 
   /*
-   * How far down Auto may take the resolution on this preset and window. The
-   * Render scale slider's lowest step on Low and Medium; on High, never under
-   * the rubric's 1,200,000 internal pixels (prompts/bando-perf-loop.md, F4),
-   * so Auto cannot pace a High picture into 720p on the race field either.
-   * The town's and the built map's pipelines clamp to their own floors on
-   * top of this.
+   * How far down Auto may take the resolution on this preset and window. On
+   * Medium and High never under the rubric's 1,200,000 internal pixels
+   * (prompts/bando-perf-loop.md, F4), so Auto cannot pace a 1080p picture
+   * into 720p; on Low, the Render scale slider's lowest step, the one
+   * exception, by the owner's decision of 2026-09-28 (autoMinPixels in
+   * src/render/quality.js, where the reasons are). Medium was paced to the
+   * slider's lowest step too until that decision, which is review finding
+   * F6. The town's and a built map's pipelines also stop at their own
+   * minScale, and say where both floors are.
    */
   function autoFloorFor(s) {
+    const slider = (Number(s.renderScale) || 100) / 100;
+    const minPixels = autoMinPixels(s.graphics);
     /* A pipeline that scales its own targets knows where they stop
-     * shrinking. Auto's factor multiplies the slider, so its floor is that
-     * over the slider (setFloor clamps it to the slider's lowest step and
-     * to 1). */
+     * shrinking and how big they are. Auto's factor multiplies the slider,
+     * so its floor is that over the slider (setFloor clamps it to the
+     * slider's lowest step and to 1). */
     if (view && view.post && typeof view.post.autoFloor === 'function') {
-      return view.post.autoFloor() / ((Number(s.renderScale) || 100) / 100);
+      return view.post.autoFloor(minPixels) / slider;
     }
-    if (normalizeGraphics(s.graphics) !== 'high') {
+    if (!(minPixels > 0)) {
       return AUTO_FLOOR;
     }
     const w = shell.cssSize.w;
     const h = shell.cssSize.h;
-    const pr = pixelRatioFor(s.graphics, (Number(s.renderScale) || 100) / 100);
+    const pr = pixelRatioFor(s.graphics, slider);
     const px = w * h * pr * pr;
-    return px > 0 ? Math.sqrt(1.2e6 / px) : 1;
+    return px > 0 ? Math.sqrt(minPixels / px) : 1;
   }
 
   /*
@@ -9380,6 +9385,10 @@ export async function boot({ loading, bootStart, mapId }) {
         autoFloor: typeof view.post.autoFloor === 'function' ? view.post.autoFloor() : null,
       } : null,
       pixelRatio: shell.pixelRatio,
+      /* The floor Auto actually holds, as set (autoFloorFor, clamped by
+       * setFloor), and the preset's pixel floor behind it: for
+       * scripts/scale-check.js, which checks review finding F6 with them. */
+      auto: { floor: autoScale.state.floor, minPixels: autoMinPixels(ui.settings.graphics) },
     };
   };
   /*

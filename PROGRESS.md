@@ -57301,3 +57301,98 @@ On 6a3a541's tree, 01:30 to 01:47 UTC, then the lint:shell rerun.
                                  screens' overflow improved (3613 to 3599,
                                  1649 to 1605), which is not this change's
                                  and is left for whoever re-records it
+
+## 2026-09-28 | render, maps | Auto keeps the rubric's 1.2 Mpx on Medium, and Low is the one exception (review F6, the owner's decision)
+
+### The decision
+
+Review finding F6 (prompts/input-lag-review-2026-09-27.md) was a decision
+and not a fix. Rubric F4 (prompts/bando-perf-loop.md) says internal pixels
+stay at or above 1,200,000 unless the panel itself is smaller, and an
+automatic pacer may not buy a frame by taking a 1080p picture into 720p.
+Auto shipped honouring it on High only and pacing Low and Medium down to
+the Render scale slider's 55 percent. The recommendation put to the owner:
+keep the exception on Low, where a blurrier sixty is the only rescue left
+and there is no preset under it to demote to (at the owner's 1896 by 943
+window on Low the full picture is 1.29 Mpx, so F4 would leave Auto four
+percent of room), and honour F4 on Medium, where a demote to Low exists.
+
+The owner's answer, 2026-09-28: "f6 yes follow recommendation". So: no
+pixel floor on Low, the rubric's 1.2 Mpx on Medium and High. Written
+beside MIN_INTERNAL_PIXELS in src/render/quality.js as well as here.
+
+### What changed
+
+- `src/render/quality.js`: `autoMinPixels(id)`, 0 on Low and
+  MIN_INTERNAL_PIXELS on Medium and High, with the decision and its
+  reasons. "Unless the panel is smaller" reads as it already did in
+  internalScale and on High: the floor is 1.2 Mpx or the preset's own full
+  picture, whichever is smaller, so a small window leaves Auto no room.
+- `src/main.js`, autoFloorFor: asks it on every world. On the race field
+  the floor is the rubric's pixels over the pixels at the slider's
+  setting, as High's was; Low keeps the slider's lowest step. Where a
+  pipeline scales its own targets it is the pipeline's autoFloor, over the
+  slider.
+- `src/maps/city/index.js`, `src/maps/built/index.js`: autoFloor takes the
+  pixel floor, max(minScale, the rubric's scale for this CSS size), never
+  above the full scale. Their setSize is unchanged, so the pilot's own
+  slider still reaches minScale: F4 is about a pacer, and the race field
+  never bound the slider by it either.
+- One consequence on High, stated rather than left to be found: the
+  pipelines on High had minScale 1.0 as Auto's only floor, so on a window
+  under 1.2 Mpx of CSS pixels, where a built map or the town supersamples,
+  Auto could take 2.07 Mpx down to 0.92 (1280 by 720). The race field on
+  High stopped at 1.2 already. They agree now.
+- The effect a pilot can see: a Medium machine that cannot hold sixty at
+  1.2 Mpx reaches the floor sooner, sets `demote` after three seconds
+  there, and goes to Low on the title between runs, rather than flying
+  Medium's shadows and ink at 720p.
+- `window.__scaleAt` reports `auto.floor`, the floor Auto actually holds,
+  and `auto.minPixels`.
+- `scripts/scale-check.js` (lint:scale): every case checks the floor Auto
+  holds against the rule worked out from the page's own sizes, before and
+  after the slider's trip, and that the picture at it keeps the smaller of
+  1.2 Mpx and the full picture. Three new cases: the race field at Medium
+  and at Low at the owner's own 1896 by 943, and a built map at Medium.
+- `scripts/quality-check.js` (lint:quality): one row pinning the rule
+  itself, so a change to it fails in a second rather than in minutes.
+
+### The numbers, from lint:scale
+
+The "before" column is the old rule's own answer, which the page still
+reports as the pipeline's minScale floor.
+
+| world, preset, window   | full     | Auto's floor before | after          |
+|-------------------------|----------|---------------------|----------------|
+| field, Medium, 1896x943 | 1.79 Mpx | 0.55, 0.54 Mpx      | 0.8192, 1.20   |
+| field, Low, 1896x943    | 1.29 Mpx | 0.55, 0.39 Mpx      | the same       |
+| built, Medium, 1280x720 | 1.55 Mpx | 0.6554, 0.67 Mpx    | 0.8799, 1.20   |
+| built, High, 1280x720   | 2.07 Mpx | 0.6667, 0.92 Mpx    | 0.7607, 1.20   |
+| field, High, 1280x720   | 0.92 Mpx | 1, no room          | the same       |
+| built, city, Low        | 0.67 Mpx | 0.6471, 0.28 Mpx    | the same       |
+
+### For the owner
+
+Nothing changes on Low, which is where your laptop has been. If Auto has
+you on Medium, the picture no longer goes soft under 1.2 Mpx; when Medium
+cannot hold sixty there, Auto moves you to Low on the title after the run.
+
+### RUN LOG
+
+    npm run lint:quality         65 of 65 checks clean; the new row reads
+                                 low 0, medium 1200000, high 1200000
+    npm run autoscale:selftest   all 46 passed
+    npm run lint:preload         up to date, boot 120 modules, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:scale           PASS, 7 cases, every row, the numbers
+                                 above; Low's three cases print their
+                                 numbers as notes, since the exception
+                                 has nothing further to check
+    npm run lint:shell           PASS
+    lint:devices, lint:attract   PASS, run with these edits in the tree
+                                 (previous entry)
+    npm run verify               not run for this: F6 moves only the floor
+                                 of Auto's resolution factor, render side,
+                                 and nothing in it reaches the input, the
+                                 plant, the trace or the module

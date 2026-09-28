@@ -291,6 +291,7 @@ export class BuiltPipeline extends Pipeline {
      * this pipeline scales its own targets: see applyRenderScale there. */
     this.userScale = opts && opts.userScale > 0 ? opts.userScale : 1;
     this.scaleAtFull = 1;
+    this.cssArea = 0;
     const frag = this.ink.mat.fragmentShader;
     this.inkPlanar = frag.includes(INK_LINEAR);
     if (this.inkPlanar) {
@@ -322,6 +323,7 @@ export class BuiltPipeline extends Pipeline {
      * at. scaleAtFull is kept for autoFloor.
      */
     this.scaleAtFull = scale;
+    this.cssArea = w * h;
     const floor = this.minScale < scale ? this.minScale : scale;
     scale *= this.userScale;
     if (scale < floor) {
@@ -350,13 +352,18 @@ export class BuiltPipeline extends Pipeline {
     setOutlineResolution(this.size.x, this.size.y);
   }
 
-  /* The render scale factor under which these targets stop shrinking,
-   * minScale over the scale at full, so Auto counts its time at the floor
-   * where the floor really is (autoFloorFor in main.js). 1 when a preset's
-   * floor leaves no room at all. */
-  autoFloor() {
+  /* The render scale factor under which Auto may not take these targets:
+   * see CityPipeline.autoFloor, restated for the reason above. */
+  autoFloor(minPixels = 0) {
     const full = this.scaleAtFull > 0 ? this.scaleAtFull : 1;
-    return (this.minScale < full ? this.minScale : full) / full;
+    let floor = this.minScale;
+    if (minPixels > 0 && this.cssArea > 0) {
+      const px = Math.sqrt(minPixels / this.cssArea);
+      if (px > floor) {
+        floor = px;
+      }
+    }
+    return (floor < full ? floor : full) / full;
   }
 }
 

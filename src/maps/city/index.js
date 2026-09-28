@@ -471,6 +471,7 @@ class CityPipeline extends Pipeline {
      * this pipeline scales its own targets: see applyRenderScale there. */
     this.userScale = opts && opts.userScale > 0 ? opts.userScale : 1;
     this.scaleAtFull = 1;
+    this.cssArea = 0;
     /* Stage F's manga layer, folded into the grade and the fxaa pass on
      * this pipeline's own materials: see src/render/manga.js. */
     this.manga = mangaPipeline(this);
@@ -502,6 +503,7 @@ class CityPipeline extends Pipeline {
      * at. scaleAtFull is kept for autoFloor.
      */
     this.scaleAtFull = scale;
+    this.cssArea = w * h;
     const floor = this.minScale < scale ? this.minScale : scale;
     scale *= this.userScale;
     if (scale < floor) {
@@ -530,13 +532,22 @@ class CityPipeline extends Pipeline {
     setOutlineResolution(this.size.x, this.size.y);
   }
 
-  /* The render scale factor under which these targets stop shrinking,
-   * minScale over the scale at full, so Auto counts its time at the floor
-   * where the floor really is (autoFloorFor in main.js). 1 when a preset's
-   * floor leaves no room at all. */
-  autoFloor() {
+  /* The render scale factor under which Auto may not take these targets,
+   * over the scale at full, so Auto counts its time at the floor where the
+   * floor really is (autoFloorFor in main.js): minScale, where they stop
+   * shrinking, or the preset's pixel floor if that is higher
+   * (autoMinPixels in src/render/quality.js, the owner's decision of
+   * 2026-09-28), never above the full scale. 1 when that leaves no room. */
+  autoFloor(minPixels = 0) {
     const full = this.scaleAtFull > 0 ? this.scaleAtFull : 1;
-    return (this.minScale < full ? this.minScale : full) / full;
+    let floor = this.minScale;
+    if (minPixels > 0 && this.cssArea > 0) {
+      const px = Math.sqrt(minPixels / this.cssArea);
+      if (px > floor) {
+        floor = px;
+      }
+    }
+    return (floor < full ? floor : full) / full;
   }
 }
 
