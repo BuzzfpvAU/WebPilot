@@ -58927,6 +58927,24 @@ claude/funny-hamilton-k6vwfb, no merge commit and no force. Nothing was
 written to the board: whether to answer bug-f532d90b is still the
 owner's.
 
+### Live on webfpv.org
+
+main moved f496be3..ca4bac0, and webfpv.org/sim served it at 22:47:24
+UTC, about 90 s after the push. src/ui/stickhelp.js, src/input/input.js,
+src/ui/ui.js, src/main.js, src/fresh.js and index.html, read off the live
+site with a cache busting query, each hash the same as the commit. The
+scripts carry four hours at the edge and src/fresh.js gives a reloaded
+page this deploy's scripts whole.
+
+For the owner's flight, with a radio: reload once. Settings, Stick help:
+every bar moves with its stick and names the channel under it. Then fly
+twenty seconds on throttle, roll and pitch without touching yaw: the
+banner "Yaw is not reaching the sim. Pause for Stick help." comes once,
+the pause menu carries the row, and one yaw takes it away. What would
+count as wrong: the banner while yaw is being flown, the banner twice, a
+stick walking the menu cursor on Stick help, or its Calibrate sticks not
+coming back to Stick help.
+
 ## 2026-09-28 | ui, settings | Manga and scoring: one switch for the manga look and the score's readouts
 
 ### The ask
@@ -59148,6 +59166,10 @@ and this row's 45. The argument is the one above, and lint:devices reaching
 every row on the merged tree is its condition. ui.js, main.js and
 index.html merged without a conflict, and this change's added and removed
 lines against main's base are the same, line for line, as against f496be3.
+main moved once more before the push, to 31ada68, which is Stick help's
+"Live on webfpv.org" note and nothing else. It was merged the same way,
+its note kept at the end of Stick help's entry, and every file but
+PROGRESS.md was then byte identical to the tree the checks below ran on.
 main then went forward to the merge as a fast-forward, fetched and checked
 just before the push.
 
