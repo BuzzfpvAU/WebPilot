@@ -58710,3 +58710,11 @@ not this change's to do.
                                  trace never sees. Put to the owner with
                                  the other scales.
     scripts/shots.js             not run; put to the owner
+
+### The owner's answer, 2026-09-28
+
+"merge it to main, I'll fly it". So the verification scale is the owner's
+own flight, and the change goes to main as a fast-forward of
+claude/awesome-fermi-ey79v1: main had not moved from bab410d, fetched and
+checked before the push. No check was re-run for the merge, because the
+merged tree is the tree the RUN LOG above was run on, plus this note.
