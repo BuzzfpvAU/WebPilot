@@ -56896,3 +56896,64 @@ On the working tree over 7748332, one check at a time, 00:12 to 00:37 UTC.
                                  after 98a5fc0, all 160 passed twice (193 s
                                  and 194 s)
     npm run verify               not run: F1 and F7 carry it in the plan
+
+## 2026-09-28 | render, ui | The boot guess stands down once Auto has measured, and a ceiling stops ping pong (review F5)
+
+### Why
+
+Phase 1, item 4 of the review plan. At boot, main.js lowered an Auto
+preset from the GPU's name: a software rasteriser to Low, an integrated
+GPU from High to Medium. Auto now stores the preset it moves to with Auto
+still on, so an Iris or UHD laptop Auto had promoted to High was put back
+to Medium at every boot and promoted again after 45 quiet seconds, a world
+rebuild on the title every session; and a machine where High did not hold
+was promoted and demoted again every session, because a session's moves
+were not remembered. Found by reading; the container's GPU is SwiftShader,
+which the guess always sends to Low, so the integrated branch cannot be
+probed here and is checked in Node instead, for every kind of GPU.
+
+### What changed
+
+- `bootGuessGraphics(info, settings)` in `src/render/quality.js` is the
+  boot guess as a decision; main.js applies its two answers where the two
+  branches were. A software rasteriser still always comes down to Low,
+  measured or not (a driver fallen back to the CPU is when that matters).
+  An integrated GPU comes down only while Auto has never measured the
+  machine.
+- `autoPresetMove(...)` in `src/render/autoscale.js` is where Auto moves
+  the preset, as a decision; `autoMovePreset` in main.js applies it. Down
+  whenever the evidence says so. Coming down from a preset Auto itself had
+  promoted into sets a ceiling there; up at most once a session, never in
+  one that came down, never above the ceiling. Coming down from a preset
+  the name guess chose sets none.
+- `src/ui/ui.js`: `graphicsAutoMeasured`, `graphicsAutoRaised` and
+  `graphicsAutoCeiling` in DEFAULTS, validated against the preset list on
+  load; a preset picked by hand clears all three; the Graphics row's Auto
+  note says when a preset was tried and did not hold. The plan named two
+  fields; there are three because the ceiling needs to know which preset
+  Auto raised to, across sessions, to tell a promotion that failed from a
+  guess that did.
+- `scripts/quality-check.js`: eight boot guess rows. `scripts/autoscale-
+  selftest.js`: ten preset move cases, the ceiling both ways.
+
+### RUN LOG
+
+On the working tree over 5a155e5, one check at a time, 00:37 to 00:56 UTC.
+
+    npm run lint:quality         64 of 64 checks clean (the eight new rows
+                                 among them)
+    npm run autoscale:selftest   all 46 passed
+    title probe (scratch)        from Medium with Auto: the floor at 55 s,
+                                 the preset to Low at 75 s through
+                                 autoPresetMove, stored measured true,
+                                 raised and ceiling empty (Medium was not a
+                                 preset Auto had raised to); the guard's
+                                 samples 0 after the swap (F3's new world);
+                                 no page errors
+    npm run input:selftest       all 225 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           all 160 passed, 198 s
+    npm run verify               not run: F1 and F7 carry it in the plan

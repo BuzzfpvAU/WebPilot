@@ -46,7 +46,7 @@
 
 import * as THREE from 'three';
 import { buildShell } from './render/shell.js';
-import { applyPixelRatio, graphicsLabel, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
+import { applyPixelRatio, bootGuessGraphics, graphicsLabel, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
 import { createPace, PACE_COOL } from './render/pace.js';
 import { readGpuInfo } from './render/gpuinfo.js';
 import { makeAttractCamera } from './render/attract.js';
@@ -54,7 +54,7 @@ import { MangaLayer } from './render/manga.js';
 import { measureBudget } from './render/budget.js';
 import { createFlightPerf } from './render/flightperf.js';
 import { createGpuGate } from './render/gpugate.js';
-import { AUTO_FLOOR, createAutoScale } from './render/autoscale.js';
+import { AUTO_FLOOR, autoPresetMove, createAutoScale } from './render/autoscale.js';
 import { createLatencyMeter } from './render/latency.js';
 import { simPosToThree, simQuatToThree, simLenToWorld, threePosToSim, threeDirToSim, WORLD_SCALE } from './render/frame.js';
 import { CAMERA_MOUNT_FORWARD, CAMERA_MOUNT_UP, cameraTiltRad, clampCameraAngle, makeLensShake, fpvLensClear } from './render/lens.js';
@@ -755,7 +755,12 @@ export async function boot({ loading, bootStart, mapId }) {
    * Only a DETECTED value is lowered. Someone who picked High on this
    * machine and meant it keeps it, however it runs.
    */
-  if (gpuInfo.software && ui.settings.graphicsAuto && ui.settings.graphics !== 'low') {
+  /* The decision itself is bootGuessGraphics in quality.js, where it can be
+   * checked for every kind of GPU; the two branches below are its two
+   * answers. An integrated GPU's guess stands down once Auto has measured
+   * the machine: see graphicsAutoMeasured. */
+  const bootGuess = bootGuessGraphics(gpuInfo, ui.settings);
+  if (bootGuess === 'low') {
     ui.settings.graphics = 'low';
     /* Still detected, not chosen, so this stays set. It costs nothing: the
      * value is already Low, so the test above short circuits on every later
@@ -763,7 +768,7 @@ export async function boot({ loading, bootStart, mapId }) {
      * machine back up if it turns out to have had a GPU all along. */
     ui.persistSettings();
     ui.renderMenu();
-  } else if (gpuInfo.integrated && ui.settings.graphicsAuto && ui.settings.graphics === 'high') {
+  } else if (bootGuess === 'medium') {
     /*
      * THE SAME BRANCH, ONE STEP SMALLER, FOR THE MACHINE MEDIUM IS NAMED
      * FOR.
@@ -4963,21 +4968,28 @@ export async function boot({ loading, bootStart, mapId }) {
   }
 
   function autoMovePreset() {
-    const order = ['low', 'medium', 'high'];
-    const at = order.indexOf(normalizeGraphics(ui.settings.graphics));
-    let next = null;
-    if (autoScale.state.demote && at > 0) {
-      next = order[at - 1];
-      autoDemoted = true;
-    } else if (autoScale.state.promote && !autoDemoted && !autoPromoted && at >= 0 && at < order.length - 1) {
-      next = order[at + 1];
-      autoPromoted = true;
-    }
+    /* Which way, if any, and what Auto remembers about this machine: see
+     * autoPresetMove in autoscale.js. */
+    const move = autoPresetMove(normalizeGraphics(ui.settings.graphics),
+      ui.settings.graphicsAutoRaised, ui.settings.graphicsAutoCeiling,
+      autoScale.state, { demoted: autoDemoted, promoted: autoPromoted });
     autoScale.resetEvidence();
-    if (!next) {
+    if (!move) {
       return;
     }
+    if (move.way === 'down') {
+      autoDemoted = true;
+    } else {
+      autoPromoted = true;
+    }
+    const next = move.next;
     ui.settings.graphics = next;
+    /* Measured now, so the boot guess from the GPU's name stands down, and
+     * the ceiling and the preset Auto raised to are kept for the next
+     * visit: see bootGuessGraphics and autoPresetMove. */
+    ui.settings.graphicsAutoMeasured = true;
+    ui.settings.graphicsAutoRaised = move.raised;
+    ui.settings.graphicsAutoCeiling = move.ceiling;
     autoFactor = 1;
     autoScale.applied(1);
     ui.setAutoScale(1);

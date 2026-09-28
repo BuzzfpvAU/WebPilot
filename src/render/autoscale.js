@@ -251,3 +251,50 @@ export function createAutoScale() {
 
   return { state: s, observe, applied, setFloor, resetEvidence };
 }
+
+/* The presets in the order Auto moves through them. */
+export const AUTO_PRESETS = ['low', 'medium', 'high'];
+
+/*
+ * WHERE AUTO MOVES THE PRESET, as a decision rather than a side effect, so
+ * the rules can be driven in Node (scripts/autoscale-selftest.js). main.js
+ * applies it on the title, between runs (autoMovePreset). `graphics` is the
+ * normalised preset, `raised` the preset Auto last promoted INTO (stored),
+ * `ceiling` the highest Auto may promote to ('' for none, stored), `ask`
+ * the controller's state and `session` whether this session has already
+ * come down or gone up. Returns null, or what to store: the next preset,
+ * which way, and the new raised and ceiling.
+ *
+ * Down a step whenever the evidence says so, because a machine the name
+ * guessed wrong may need two. Coming down from a preset Auto itself had
+ * promoted into sets the CEILING: that preset was tried on this machine and
+ * did not hold. Without it, the next session's forty five quiet seconds
+ * promoted it again, and it came down again, a world rebuild each way every
+ * session (review finding F5, 2026-09-27). Coming down from a preset the
+ * name guess chose sets none: the guess was wrong, not the preset tried.
+ * Up one step, at most once a session, never in a session that came down,
+ * and never above the ceiling.
+ */
+export function autoPresetMove(graphics, raised, ceiling, ask, session) {
+  const at = AUTO_PRESETS.indexOf(graphics);
+  if (at < 0 || !ask) {
+    return null;
+  }
+  const top = AUTO_PRESETS.indexOf(ceiling || '');
+  if (ask.demote && at > 0) {
+    const next = AUTO_PRESETS[at - 1];
+    const fromRaised = raised === graphics;
+    return {
+      next,
+      way: 'down',
+      raised: fromRaised ? '' : (raised || ''),
+      ceiling: fromRaised ? next : (ceiling || ''),
+    };
+  }
+  if (ask.promote && !session.demoted && !session.promoted
+    && at < AUTO_PRESETS.length - 1 && (top < 0 || at + 1 <= top)) {
+    const next = AUTO_PRESETS[at + 1];
+    return { next, way: 'up', raised: next, ceiling: ceiling || '' };
+  }
+  return null;
+}

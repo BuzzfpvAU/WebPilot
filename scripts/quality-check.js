@@ -41,7 +41,7 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { GRAPHICS_IDS, qualityFor, pixelRatioFor, internalScale } from '../src/render/quality.js';
+import { GRAPHICS_IDS, bootGuessGraphics, qualityFor, pixelRatioFor, internalScale } from '../src/render/quality.js';
 import { isIntegratedGpu } from '../src/render/gpuinfo.js';
 
 const rows = [];
@@ -212,6 +212,34 @@ for (const raw of INTEGRATED) {
 }
 for (const raw of NOT_INTEGRATED) {
   check(`discrete:   ${raw.slice(0, 54)}`, !isIntegratedGpu(raw), 'left alone, so it keeps the authored look');
+}
+
+/*
+ * The boot guess, as main.js applies it. Review finding F5 (2026-09-27):
+ * the guess from an integrated GPU's name used to undo, at every boot, the
+ * preset Auto had measured its way to, so a promoted iGPU rebuilt its world
+ * on the title every session. A software rasteriser still always comes
+ * down: nothing above Low runs there, whatever was measured another day.
+ */
+{
+  const soft = { software: true, integrated: false };
+  const igpu = { software: false, integrated: true };
+  const dgpu = { software: false, integrated: false };
+  const auto = (graphics, measured = false) => ({ graphics, graphicsAuto: true, graphicsAutoMeasured: measured });
+  const rows = [
+    ['software, High, never measured', soft, auto('high'), 'low'],
+    ['software, High, measured another day', soft, auto('high', true), 'low'],
+    ['software, already Low', soft, auto('low'), null],
+    ['integrated, High, never measured', igpu, auto('high'), 'medium'],
+    ['integrated, High that Auto measured its way to', igpu, auto('high', true), null],
+    ['integrated, Medium', igpu, auto('medium'), null],
+    ['discrete, High', dgpu, auto('high'), null],
+    ['integrated, High picked by hand', igpu, { graphics: 'high', graphicsAuto: false, graphicsAutoMeasured: false }, null],
+  ];
+  for (const [what, info, s, want] of rows) {
+    const got = bootGuessGraphics(info, s);
+    check(`boot guess: ${what}`, got === want, `${got} (want ${want})`);
+  }
 }
 
 /*

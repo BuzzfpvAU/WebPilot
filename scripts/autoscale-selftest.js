@@ -38,7 +38,7 @@
  */
 
 import { createGpuGate } from '../src/render/gpugate.js';
-import { AUTO_FLOOR, createAutoScale } from '../src/render/autoscale.js';
+import { AUTO_FLOOR, autoPresetMove, createAutoScale } from '../src/render/autoscale.js';
 import { createLatencyMeter } from '../src/render/latency.js';
 
 let passed = 0;
@@ -405,6 +405,35 @@ section('F2: the gate measures saturation against the display too');
   const r = runFrames(gate, rig, { frames: 240, intervalMs: 1000 / 60, gpuMs: 22, targetMs: 1000 / 60 });
   check('the same guard still holds draws for a GPU that cannot keep a 60 Hz display',
     r.held > 40 && r.heldTwice === 0, `${r.held} held, ${r.heldTwice} twice`);
+}
+
+section('F5: where Auto moves the preset, and what it remembers about the machine');
+{
+  const none = { demoted: false, promoted: false };
+  const up = autoPresetMove('medium', '', '', { promote: true }, none);
+  check('forty five quiet seconds on Medium go up to High, remembered as Auto\'s own',
+    up && up.next === 'high' && up.raised === 'high' && up.ceiling === '', JSON.stringify(up));
+  const down = autoPresetMove('high', 'high', '', { demote: true }, none);
+  check('coming down from the High Auto raised to sets a ceiling at Medium',
+    down && down.next === 'medium' && down.ceiling === 'medium' && down.raised === '', JSON.stringify(down));
+  const again = autoPresetMove('medium', '', 'medium', { promote: true }, none);
+  check('and a later session\'s quiet GPU does not promote past it, which was a rebuild each way every session',
+    again === null, JSON.stringify(again));
+  const guessed = autoPresetMove('high', '', '', { demote: true }, none);
+  check('coming down from a High the name guess chose sets no ceiling: the guess was wrong, not the preset tried',
+    guessed && guessed.next === 'medium' && guessed.ceiling === '', JSON.stringify(guessed));
+  check('never up in a session that came down',
+    autoPresetMove('medium', '', '', { promote: true }, { demoted: true, promoted: false }) === null);
+  check('never up twice in one session',
+    autoPresetMove('medium', '', '', { promote: true }, { demoted: false, promoted: true }) === null);
+  const twice = autoPresetMove('medium', '', '', { demote: true }, { demoted: true, promoted: false });
+  check('down as often as the evidence says, for a machine the name guessed wrong by two',
+    twice && twice.next === 'low', JSON.stringify(twice));
+  check('Low asked to come lower has nowhere to go', autoPresetMove('low', '', '', { demote: true }, none) === null);
+  check('High asked to go higher has nowhere to go', autoPresetMove('high', '', '', { promote: true }, none) === null);
+  const underCeiling = autoPresetMove('low', '', 'medium', { promote: true }, none);
+  check('a ceiling at Medium still lets Low climb to it', underCeiling && underCeiling.next === 'medium',
+    JSON.stringify(underCeiling));
 }
 
 console.log(failed ? `\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);

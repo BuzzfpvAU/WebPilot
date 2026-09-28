@@ -1059,6 +1059,21 @@ const DEFAULTS = {
    * for good, including picking the one detection would have chosen. */
   graphicsAuto: true,
   /*
+   * WHAT AUTO HAS LEARNED ABOUT THIS MACHINE, kept so a boot does not undo
+   * it (review finding F5, 2026-09-27). Measured: Auto has moved the preset
+   * on the frames at least once, so the boot guess from the GPU's name
+   * stands down (bootGuessGraphics in quality.js); it used to put a
+   * promoted iGPU back to Medium at every boot. Raised: the preset Auto last
+   * promoted into, or ''. Ceiling: the highest preset Auto may promote to,
+   * or '', set when Auto had to come down from a preset it had raised to,
+   * so a machine is not promoted and demoted again every session
+   * (autoPresetMove in autoscale.js). A preset picked by hand clears all
+   * three, because that ends Auto's say.
+   */
+  graphicsAutoMeasured: false,
+  graphicsAutoRaised: '',
+  graphicsAutoCeiling: '',
+  /*
    * LOW LATENCY VIEW: ask the browser to present the flight canvas without
    * the compositor's frame queue (the canvas's desynchronized attribute, see
    * buildShell in src/render/shell.js). On by default because that queue is
@@ -1257,6 +1272,8 @@ export function loadSettings() {
     ['musicTrack', musicIds()],
     ['ghost', ['off', 'best', 'previous']],
     ['freestyleScoring', FREESTYLE_SCORING],
+    ['graphicsAutoRaised', ['', ...GRAPHICS_IDS]],
+    ['graphicsAutoCeiling', ['', ...GRAPHICS_IDS]],
   ]) {
     if (!allowed.includes(s[key])) {
       /* The tune's fallback is the AIRFRAME's default tune, not the blob's:
@@ -3120,8 +3137,14 @@ function feelItem() {
 function graphicsItem(s, scaleNow) {
   const id = normalizeGraphics(s.graphics);
   const pct = Math.round((Number(scaleNow) || 1) * 100);
+  /* The preset above the ceiling was tried here and did not hold: said,
+   * so a pilot wondering why Auto never goes higher has the answer. */
+  const top = GRAPHICS_IDS.indexOf(s.graphicsAutoCeiling);
+  const tried = top >= 0 && top < GRAPHICS_IDS.length - 1
+    ? ` ${graphicsLabel(GRAPHICS_IDS[top + 1])} was tried on this machine and did not keep the picture on time, so Auto stays at ${graphicsLabel(GRAPHICS_IDS[top])} or below.`
+    : '';
   const note = s.graphicsAuto
-    ? `Auto: drawing at ${graphicsLabel(id)}${pct < 100 ? `, at ${pct} percent resolution right now` : ''}. It watches how the frames actually arrive, lowers the resolution when the picture runs late, and changes the preset between runs. Pick a preset to fix it by hand.`
+    ? `Auto: drawing at ${graphicsLabel(id)}${pct < 100 ? `, at ${pct} percent resolution right now` : ''}. It watches how the frames actually arrive, lowers the resolution when the picture runs late, and changes the preset between runs.${tried} Pick a preset to fix it by hand.`
     : graphicsNote(id);
   return choice(
     'Graphics',
@@ -3135,6 +3158,11 @@ function graphicsItem(s, scaleNow) {
       } else {
         s.graphics = v;
         s.graphicsAuto = false;
+        /* A preset by hand ends Auto's say, and what it had learned with
+         * it: see graphicsAutoMeasured in DEFAULTS. */
+        s.graphicsAutoMeasured = false;
+        s.graphicsAutoRaised = '';
+        s.graphicsAutoCeiling = '';
       }
     },
   );

@@ -273,6 +273,37 @@ export function detectDefaultGraphics() {
 }
 
 /*
+ * THE BOOT GUESS FROM THE RENDERER'S NAME, as a decision rather than a side
+ * effect, so it can be checked without a GPU of every kind
+ * (scripts/quality-check.js). Given what the renderer calls itself
+ * (gpuinfo.js) and the settings, the preset a boot should lower an Auto
+ * preset to, or null to leave it. main.js applies it beside setGpuInfo,
+ * where the comments say why each branch exists.
+ *
+ * A software rasteriser always gets Low: nothing above it can run there,
+ * whatever Auto measured on this machine's GPU another day, and a driver
+ * that fell back to the CPU is exactly the day this matters. An integrated
+ * GPU gets Medium from High only while Auto has never measured the machine.
+ * Once it has moved the preset on the frames (graphicsAutoMeasured), the
+ * frames have spoken: the guess used to undo Auto's promotion at every boot,
+ * a world rebuild on the title every session (review finding F5,
+ * 2026-09-27).
+ */
+export function bootGuessGraphics(info, s) {
+  if (!info || !s || !s.graphicsAuto) {
+    return null;
+  }
+  const now = normalizeGraphics(s.graphics);
+  if (info.software) {
+    return now !== 'low' ? 'low' : null;
+  }
+  if (info.integrated && now === 'high' && !s.graphicsAutoMeasured) {
+    return 'medium';
+  }
+  return null;
+}
+
+/*
  * scale is the pilot's own render scale on top of the preset, 1 for
  * native. It multiplies rather than replaces the preset's resolutionScale
  * because the two answer different questions: the preset knows what a
