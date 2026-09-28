@@ -56999,3 +56999,56 @@ On the working tree over 7aa4f99, one check at a time, 00:40 to 00:46 UTC.
                                  them)
     npm run lint:devices         PASS
     npm run verify               not run: F1 and F7 carry it in the plan
+
+## 2026-09-28 | render | pace.js deleted (review F7)
+
+### Why
+
+Phase 1, item 6 of the review plan. `src/render/pace.js` was the
+resolution controller that never reached a map: its only caller ran when
+the view's post object had an `applyPace`, and nothing ever had one. Auto
+graphics (`src/render/autoscale.js`) does its job, and took its two good
+rules with it. `window.__pace` and `window.__paceReset` were read by no
+script and no test.
+
+### What changed
+
+- `src/render/pace.js` deleted, with its import, its state, its observe
+  block in the frame loop and the two hooks in `src/main.js`. The block's
+  one live promise, that nothing rescales during a replay step capture
+  (`tests/replay-test.js` checks the buffer holds still), is kept by Auto,
+  which never observes a replay, and step mode exists only inside one.
+- `src/render/quality.js`: its header said Render scale "is not automatic"
+  because of the pacer, and that the preset is never switched mid session.
+  Both had stopped being true on 2026-09-27: it now says Auto moves the
+  resolution in flight and the preset between runs, never in flight, on
+  the owner's ask ("make the browser auto detect and set it to fly well"),
+  and never touches a preset picked by hand. The `forceScale` note no
+  longer names the pacer. `src/render/autoscale.js`'s header refers to
+  the old pacer in the past tense.
+- `src/fresh.js` regenerated: boot 119 modules, 228 served.
+
+### RUN LOG
+
+On the working tree over 2afe26c, one check at a time, 00:47 to 00:54 UTC.
+
+    npm run input:selftest       all 225 passed
+    npm run autoscale:selftest   all 46 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         64 of 64 checks clean
+    npm run lint:preload         up to date, boot 119 modules, 228 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           all 160 passed, 205 s
+    npm run lint:boot            9 of 9 checks clean
+    npm run verify               17 of 17 passing, 1 SKIP (check 1, no
+                                 emcc and no vendor/betaflight here);
+                                 de0401cd4266 in both processes and one hash
+                                 across 4 rates; hover 0.2793, punch 80.0 m,
+                                 terminal 31.0 m/s, motor step 26 ms, 671.7
+                                 deg/s, yaw -0.10, sag 11.14%, ratio 1.2472;
+                                 map isolation: field P1 116, P2 928277, P5
+                                 69.8 MB, P10 30.4 MB, 499 meshes, the same
+                                 after a city round trip; world golden 35 of
+                                 35; crash pacing 48 of 48. Every value as
+                                 on 6928650.

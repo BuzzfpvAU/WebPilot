@@ -5,9 +5,9 @@
  * WHY THIS EXISTS. Until 2026-09-27 the preset was a guess from the GPU's
  * name, made once at boot (main.js, beside setGpuInfo): a software rasteriser
  * got Low, a name that looked integrated got Medium, everything else High.
- * Nothing measured whether the guess held, and src/render/pace.js, written to
- * hold 60 by scaling the buffer, was never connected to a map (its caller's
- * comment says so). bug-e82b8bb8 was a laptop on Low that could not be flown
+ * Nothing measured whether the guess held, and the pacer written to hold 60
+ * by scaling the buffer (pace.js, deleted on 2026-09-28) never reached a map.
+ * bug-e82b8bb8 was a laptop on Low that could not be flown
  * for lag. So Auto now watches the frames and moves the one lever that costs
  * nothing to move, the resolution, and says when the preset itself should
  * move, which the shell does only between runs because a preset rebuilds the
@@ -26,7 +26,7 @@
  *   gpuMs    from gpugate.js: how long the GPU takes over a frame, queue
  *            included. The one signal that sees a GPU saturated at vsync,
  *            where dt says 16.7 ms and the frames are late anyway
- *   render   and block: the F5 rule from pace.js. A frame that is long
+ *   render   and block: the F5 rule the old pacer had. A frame that is long
  *            because of the page's own script is not helped by fewer
  *            pixels, so a CPU bound frame does not drop the scale
  *
@@ -47,8 +47,8 @@
  *   a drop blocks climbing for ten seconds, so a change cannot ping pong.
  *   a change is followed by a cooldown, and the first frames after it are
  *                not believed: resizing the targets hitches, and a hitch
- *                read as load would drop the scale again (pace.js had this
- *                right and it is kept).
+ *                read as load would drop the scale again (the old pacer
+ *                had this right, and it is kept).
  *
  * THE PRESET. Three seconds over budget at the floor sets `demote`; forty
  * five seconds at full scale with the GPU under 45 percent sets `promote`.

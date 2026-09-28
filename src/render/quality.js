@@ -33,13 +33,15 @@
  *   pins High's draw calls, triangles and target bytes. Defaulting to
  *   Medium would silently change the product and fail that check. First
  *   run on a Steam Deck / SteamOS user agent picks Low; everyone else
- *   gets High. The player can always change it. We never auto-switch
- *   Low / Medium / High mid session: a hitch in FPV is less honest
- *   than a menu the pilot opened on purpose. Internal resolution is the
- *   Render scale slider, which the pilot sets and which does not change
- *   the named preset. It is not automatic: the pacer that would have
- *   driven it needs a per map applyPace hook that no map implements,
- *   and pace.js says so at the top of the file.
+ *   gets High. The player can always change it. Nothing switches Low /
+ *   Medium / High in flight: a hitch in FPV is less honest than a menu
+ *   the pilot opened on purpose. Under Auto graphics, the default, the
+ *   preset may move between runs, on the title, and the internal
+ *   resolution moves in flight as a factor on the Render scale slider
+ *   (src/render/autoscale.js), which is the owner's ask of 2026-09-27:
+ *   "make the browser auto detect and set it to fly well". A preset the
+ *   pilot picked by hand is never touched. The pacer that came before
+ *   Auto, pace.js, never reached a map and was deleted on 2026-09-28.
  *
  *   "Low, a bit less grass."
  *   Blades are not drawn at any preset. The first 184000 world draws
@@ -387,8 +389,10 @@ export function applyPixelRatio(shell, id, scale = 1, viewport = null) {
  * it must not raise the buffer above the budget: High used to take
  * max(minScale, budgetCap) with minScale 1, so a 3840x2160 panel
  * rendered native HalfFloat. preferScale is the authored look.
- * userScale is the Render scale slider. forceScale is the pacer; null
- * means "use the authored ceiling", 0 clamps to the floor.
+ * userScale is the Render scale slider. forceScale is the vendored city
+ * pipeline's own override, which nothing here sets since the pacer that
+ * did was deleted on 2026-09-28; null means "use the authored ceiling", 0
+ * clamps to the floor.
  *
  * 1,200,000 is the absolute pixel floor so a 1080p panel cannot be
  * paced into 720p to buy a frame. That is rubric F4.

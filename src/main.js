@@ -47,7 +47,6 @@
 import * as THREE from 'three';
 import { buildShell } from './render/shell.js';
 import { applyPixelRatio, bootGuessGraphics, graphicsLabel, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
-import { createPace, PACE_COOL } from './render/pace.js';
 import { readGpuInfo } from './render/gpuinfo.js';
 import { makeAttractCamera } from './render/attract.js';
 import { MangaLayer } from './render/manga.js';
@@ -9039,20 +9038,6 @@ export async function boot({ loading, bootStart, mapId }) {
      * hardware independent. Two scalars, written not allocated: P8 forbids
      * a new object here. */
     const blockMs = performance.now() - blockStart;
-    /* Never during a replay step capture, where every frame must be drawn at
-     * one scale. No map has applyPace yet (see quality.js), so today this
-     * guard only keeps it that way; tests/replay-test.js checks the drawing
-     * buffer holds still across a capture. */
-    if (view && view.post && typeof view.post.applyPace === 'function' && !replayStepMode) {
-      pace.observe(dt, renderMs, blockMs, view.post);
-      if (pace.state.dirty) {
-        if (view.post.applyPace(pace.state.want)) {
-          pace.state.cool = PACE_COOL;
-          pace.state.changes += 1;
-        }
-        pace.state.dirty = 0;
-      }
-    }
     /* Flying frames only, and never a replay's: a report about lag is a
      * report about flying. See flightperf.js. */
     if (mode === 'flight' && ui.screen === 'flight' && !replayMode) {
@@ -9254,7 +9239,6 @@ export async function boot({ loading, bootStart, mapId }) {
   let frames = 0;
   /* Render statistics for the harness and the frame budget gate. */
   const renderStats = { calls: 0, triangles: 0 };
-  const pace = createPace();
   /* The flight's own frame record, for the bug report: see flightperf.js. */
   const flightPerf = createFlightPerf();
   /* Input to screen and the refresh rate, for Settings and the report: see
@@ -9262,33 +9246,6 @@ export async function boot({ loading, bootStart, mapId }) {
   const latency = createLatencyMeter();
   shell.renderer.info.autoReset = false;
   window.__renderStats = () => ({ ...renderStats });
-  window.__pace = () => ({
-    emaMs: pace.state.emaMs,
-    renderEma: pace.state.renderEma,
-    shellEma: pace.state.shellEma,
-    p95Ms: pace.p95(),
-    dtN: pace.state.dtN,
-    scale: pace.state.scaleNow,
-    ceil: pace.state.ceil,
-    floor: pace.state.floor,
-    want: pace.state.changes ? pace.state.want : pace.state.ceil,
-    cpuBound: pace.state.cpuBound,
-    changes: pace.state.changes,
-    warm: pace.state.warm,
-    rw: pace.state.rw,
-    rh: pace.state.rh,
-    fps,
-    gpu: gpuInfo ? {
-      name: gpuInfo.name,
-      display: gpuInfo.display,
-      software: gpuInfo.software,
-      raw: gpuInfo.raw,
-    } : null,
-  });
-  window.__paceReset = () => {
-    pace.resetSamples();
-    return pace.state.dtN;
-  };
   window.__scaleAt = (w, h) => {
     const id = view && view.id;
     const q = qualityFor(ui.settings.graphics);
