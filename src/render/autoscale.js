@@ -198,6 +198,24 @@ export function createAutoScale() {
     s.overMs = 0;
     s.easyMs = 0;
     s.changes += 1;
+    /*
+     * Each ask for another preset holds only while its reason does: lower
+     * while the scale sits at the floor and is still late, higher while it
+     * sits at full with the GPU quiet. A scale that climbs off the floor has
+     * found room, and one that comes down from full has found a load, so the
+     * ask made before is withdrawn rather than acted on later, on the title,
+     * about a world that is no longer the one in front of the pilot. Found in
+     * the review of 2026-09-27 (F4), where a stale ask moved the preset the
+     * pilot had just picked.
+     */
+    if (scale > s.floor + 0.001) {
+      s.demote = false;
+      s.floorOverMs = 0;
+    }
+    if (scale < 0.999) {
+      s.promote = false;
+      s.easyFullMs = 0;
+    }
   }
 
   /* A new floor, from the caller: it depends on the preset and the window. */
@@ -205,8 +223,9 @@ export function createAutoScale() {
     s.floor = floor > 1 ? 1 : (floor < AUTO_FLOOR ? AUTO_FLOOR : floor);
   }
 
-  /* A new preset or a new flight: the evidence starts again, the scale
-   * stays where it is (the caller resets it when the preset changes). */
+  /* Auto turned on, a preset picked, a map swapped: the evidence starts
+   * again. The scale stays where it is; main.js sets it back to full on the
+   * same occasions (autoForget there). */
   function resetEvidence() {
     s.warmMs = 0;
     s.overMs = 0;

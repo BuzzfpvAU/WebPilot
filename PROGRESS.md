@@ -56758,3 +56758,57 @@ On the working tree over 03fbbc1, one check at a time, 00:00 to 00:05 UTC.
     npm run lint:input           all 160 passed, 199 s
     npm run verify               not run: the plan asks for it at F1 and F7;
                                  nothing here reaches the physics
+
+## 2026-09-28 | render | Auto forgets what no longer describes the world (review F4)
+
+### Why
+
+Phase 1, item 2 of the review plan. Auto's asks for another preset
+(`demote`, `promote`) were cleared only when Auto itself moved the preset,
+so they outlived everything that made them true. Probed on 2026-09-27 and
+again here: flying on Low with Auto, the ask for a lower preset was set;
+the pilot picked Medium by hand from pause and then Auto again; on the
+title Auto put the preset back to Low, on evidence gathered on Low before
+the pilot said Medium.
+
+### What changed
+
+- `src/render/autoscale.js`: `applied()` withdraws an ask when its reason
+  stops holding. The ask for a lower preset goes when the scale climbs off
+  the floor, the ask for a higher one when the scale comes down from full,
+  with their accumulators.
+- `src/main.js`: `autoForget()`, full resolution and no evidence, called
+  when the pilot turns Auto on, when the preset changes by any hand (seen in
+  applySettings against what it last saw), when Auto is turned off with its
+  factor still applied, and when a map swap starts, so the new world is
+  built at full resolution.
+- NOT on a window resize, which the review also named, and this is a
+  deliberate departure from the plan. Fullscreen in flight changes the
+  window on every Fly and every return to the title, so a resize reset
+  would clear the ask for a lower preset on the way to the one screen that
+  acts on it. The asks withdrawing themselves when the scale moves is the
+  version of the same staleness that survives fullscreen.
+- `scripts/autoscale-selftest.js`: three Auto cases, drive there and back.
+  The two latch cases failed on the old module (the ask stayed up at scale
+  0.85 and 0.90) and pass now.
+
+### RUN LOG
+
+On the working tree over 24bba52, one check at a time, 00:05 to 00:12 UTC.
+
+    npm run autoscale:selftest   before the fix: 2 failed, 20 passed;
+                                 after: all 22 passed
+    stale probe (scratch)        custom track, Low, Auto, flying: the ask
+                                 set at 20 s; Medium by hand: withdrawn,
+                                 factor 1; Auto again: still clear; the
+                                 title at 5 to 60 s: Medium throughout,
+                                 Auto re-learning from full scale (1, then
+                                 0.9 at 20 s, 0.6 at 55 s, SwiftShader)
+    npm run input:selftest       all 225 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         56 of 56 checks clean
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           all 160 passed, 198 s
+    npm run verify               not run: F1 and F7 carry it in the plan

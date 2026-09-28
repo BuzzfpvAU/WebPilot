@@ -629,6 +629,11 @@ export async function boot({ loading, bootStart, mapId }) {
   /* Whether Auto has already moved the preset this session, each way. */
   let autoDemoted = false;
   let autoPromoted = false;
+  /* What applySettings last saw of Auto and the preset, so the moment the
+   * pilot turns Auto on, or the preset changes hands, is seen as one: see
+   * autoForget. Null until the first applySettings, which only records. */
+  let autoSeenOn = null;
+  let autoSeenPreset = null;
   const input = new InputManager();
   /*
    * Sample the sticks on their own timer rather than once per rendered frame.
@@ -4502,6 +4507,9 @@ export async function boot({ loading, bootStart, mapId }) {
     const stayMode = keepPlace ? mode : 'title';
     swapInFlight = true;
     mapReady = false;
+    /* A new world, so Auto starts over before it is built: at full
+     * resolution, with no evidence from the old one. See autoForget. */
+    autoForget();
     if (!keepPlace) {
       mode = 'title';
       ui.show('title');
@@ -4929,6 +4937,31 @@ export async function boot({ loading, bootStart, mapId }) {
    * at 1 on the new preset. A pilot who picks a preset by hand in Settings
    * ends all of this.
    */
+  /*
+   * AUTO STARTS OVER: full resolution and no evidence. Called when the pilot
+   * turns Auto on, when the preset changes by any hand (applySettings), and
+   * when a map swap starts (syncWorld). The evidence Auto held described a
+   * world and a preset that are no longer the ones in front of the pilot,
+   * and acted on later, on the title, it moved a preset the pilot had just
+   * picked: review finding F4, probed on 2026-09-27 (Low's ask for a lower
+   * preset survived Medium picked by hand and Auto picked again, and the
+   * title put it back to Low). The caller applies the scale.
+   *
+   * NOT ON A WINDOW RESIZE, which the review also named. Fullscreen in flight
+   * changes the window on every Fly and every return to the title, so a
+   * resize reset would clear the ask for a lower preset on the way to the
+   * one screen that acts on it. The asks withdraw themselves instead, when
+   * the scale leaves the floor or full scale: see applied in autoscale.js.
+   */
+  function autoForget() {
+    autoScale.resetEvidence();
+    if (autoFactor !== 1) {
+      autoFactor = 1;
+      autoScale.applied(1);
+      ui.setAutoScale(1);
+    }
+  }
+
   function autoMovePreset() {
     const order = ['low', 'medium', 'high'];
     const at = order.indexOf(normalizeGraphics(ui.settings.graphics));
@@ -5038,14 +5071,18 @@ export async function boot({ loading, bootStart, mapId }) {
       shell.camera.updateProjectionMatrix();
     }
     /* Render scale changes are free, no world rebuild. See
-     * applyRenderScale. A pilot who picks a preset by hand leaves Auto, so
-     * its factor stops applying here and the picture goes back to exactly
-     * the slider. */
-    if (!s.graphicsAuto && autoFactor !== 1) {
-      autoFactor = 1;
-      autoScale.applied(1);
-      ui.setAutoScale(1);
+     * applyRenderScale. Auto turned on, a preset changed by any hand, or
+     * Auto turned off with its factor still applied: Auto starts over, and
+     * the picture goes back to exactly the slider until the frames say
+     * otherwise. See autoForget. */
+    const presetNow = normalizeGraphics(s.graphics);
+    const autoOn = Boolean(s.graphicsAuto);
+    if (autoSeenPreset !== null
+      && ((autoOn && !autoSeenOn) || presetNow !== autoSeenPreset || (!autoOn && autoFactor !== 1))) {
+      autoForget();
     }
+    autoSeenOn = autoOn;
+    autoSeenPreset = presetNow;
     applyRenderScale(s);
     if (mode === 'title') {
       /* Between runs the choice takes effect at once. During a run it

@@ -38,6 +38,7 @@
  */
 
 import { createGpuGate } from '../src/render/gpugate.js';
+import { AUTO_FLOOR, createAutoScale } from '../src/render/autoscale.js';
 
 let passed = 0;
 let failed = 0;
@@ -229,6 +230,62 @@ section('F3: time that was not GPU time does not reach the average');
     threw = true;
   }
   check('a lost context does not throw out of the frame loop', !threw);
+}
+
+/* ------------------------------------------------------------------------
+ * Auto, as main.js drives it: observe every frame, and when the controller
+ * asks for a new scale, apply it and say so. `gpuMs` is what the gate would
+ * report (the gate is not run here, its state is), `drawMs` the page's own
+ * render time. Returns the scales it moved through.
+ * ---------------------------------------------------------------------- */
+
+function driveAuto(auto, ms, { dt, gpuMs = null, renderMs = 4, blockMs = 6 }) {
+  const gate = gpuMs == null ? null : { on: true, samples: 100, gpuMs };
+  const moves = [];
+  for (let t = 0; t < ms; t += dt) {
+    auto.observe(dt, renderMs, blockMs, gate, true);
+    if (auto.state.dirty) {
+      auto.applied(auto.state.want);
+      moves.push(Math.round(auto.state.scale * 100) / 100);
+    }
+  }
+  return moves;
+}
+
+section('F4: Auto\'s preset evidence says what is true now, not what once was');
+{
+  const auto = createAutoScale();
+  auto.setFloor(AUTO_FLOOR);
+  /* A GPU that cannot hold sixty: down to the floor, and three seconds more. */
+  driveAuto(auto, 15000, { dt: 1000 / 60, gpuMs: 22 });
+  check('a GPU over budget at the floor for three seconds asks for a lower preset',
+    auto.state.scale <= AUTO_FLOOR + 0.001 && auto.state.demote,
+    `scale ${auto.state.scale.toFixed(2)}, demote ${auto.state.demote}`);
+  /* Then the world gets light: a quieter part of the map, a smaller window. */
+  const moves = driveAuto(auto, 20000, { dt: 1000 / 60, gpuMs: 4 });
+  check('the scale climbs back when there is room', moves.length > 0 && auto.state.scale > AUTO_FLOOR + 0.001,
+    `moves ${moves.join(', ')}`);
+  check('and once it is off the floor the ask for a lower preset is withdrawn', !auto.state.demote,
+    `demote ${auto.state.demote} at scale ${auto.state.scale.toFixed(2)}`);
+}
+{
+  const auto = createAutoScale();
+  auto.setFloor(AUTO_FLOOR);
+  driveAuto(auto, 46000, { dt: 1000 / 60, gpuMs: 4 });
+  check('forty five seconds of a quiet GPU at full scale asks for a higher preset',
+    auto.state.scale >= 0.999 && auto.state.promote, `promote ${auto.state.promote}`);
+  const moves = driveAuto(auto, 2000, { dt: 1000 / 60, gpuMs: 22 });
+  check('a load arrives and the scale comes down', moves.length > 0, `moves ${moves.join(', ')}`);
+  check('and the ask for a higher preset is withdrawn with it', !auto.state.promote,
+    `promote ${auto.state.promote} at scale ${auto.state.scale.toFixed(2)}`);
+}
+{
+  const auto = createAutoScale();
+  auto.setFloor(AUTO_FLOOR);
+  driveAuto(auto, 15000, { dt: 1000 / 60, gpuMs: 22 });
+  auto.resetEvidence();
+  check('resetEvidence withdraws both asks and every accumulator',
+    !auto.state.demote && !auto.state.promote && auto.state.floorOverMs === 0 && auto.state.easyFullMs === 0);
 }
 
 console.log(failed ? `\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);
