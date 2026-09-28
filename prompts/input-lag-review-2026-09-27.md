@@ -536,6 +536,15 @@ stand down under the flag, the loop stops while the page is hidden, and a
 feel report says which loop it flew (perf.loop). PROGRESS.md, the P3.4
 entry.
 
+Flown, 2026-09-28, the same day (bug-c7fb5247, both runs on the Iris Xe
+laptop at Low): the number moved. Key to screen 80 ms median and 144 at
+the 90th on the plain URL, 64 and 80 under the flag, nine presses each;
+the flag ran 125 fps against the display's 60, and the owner: "felt a bit
+better with the looper timer url". The flag stays. What was not seen is
+tearing, which fits presents still landing on vsync with the compositor
+picking up a frame a few milliseconds old instead of a whole refresh old.
+PROGRESS.md, the follow up entry, has the reading.
+
 ### P3.5. Hardware, which beats all of the above (for the owner)
 
 A 120 or 144 Hz display halves two terms of the chain at once, the wait

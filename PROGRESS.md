@@ -58099,3 +58099,62 @@ while the flag is on, so set Render scale where you like it first.
                                  deg/s, yaw -0.10, sag 11.14 percent,
                                  ratio 1.2472, world golden 35 of 35,
                                  crash pacing 48 of 48
+
+## 2026-09-28 | render | The timer loop flown on the owner's laptop: the number moved, the flag stays (plan P3.4, the answer)
+
+### The A and the B
+
+bug-c7fb5247, two runs minutes apart on the same Iris Xe laptop at Low,
+same course, same radio, filed by the owner. The report's own perf block,
+which since this morning says which loop it flew:
+
+| | plain URL (raf) | ?loop=timer |
+|-------------------------|-----------------|----------------|
+| fps in flight | 60 | 125 |
+| frame ms, p50 p90 max | 16.7 16.7 16.8 | 8 9.7 20.1 |
+| GPU ms over a frame | 10.7 | 7.8 |
+| key to screen, median | 80 ms | 64 ms |
+| key to screen, 90th | 144 ms | 80 ms |
+| draws the guard held | 8 | 2 |
+
+Nine presses each side, so the medians are coarse, but they moved the
+same way as the owner's own words: "slight lag - plain url", "felt a bit
+better with the looper timer url". By the plan's condition (the number
+moves or the code comes out), the flag stays.
+
+### The reading, honestly bounded
+
+The owner reported no tearing, and the timer ran 125 fps against a 60 Hz
+panel. That fits the humbler of the two mechanisms: Chrome still presents
+at vsync, but a loop drawing every 8 ms hands each vsync a frame that is
+a few milliseconds old instead of up to a whole refresh old. The mean win
+from that alone is about half the difference of the two cadences, 4 to 8
+ms, plus whatever the fresher physics block adds, which is what 80 to 64
+median and 144 to 80 at the 90th look like. True off vsync presents would
+tear and did not. So the flag earns its keep without the drastic half of
+the hypothesis being true here.
+
+Two readings for the record, neither a defect. GPU ms fell from 10.7 to
+7.8 WITHIN the session when the timer ran: an integrated GPU fed every
+8 ms stays clocked up, where one idling most of each 16.7 ms frame
+downclocks between frames; the fence sees the clocked down pace. And
+10.7 on the raf run is not comparable with the 9.1 the same laptop read
+yesterday at more pixels: a laptop's GPU clock rides its power state,
+so cross session GPU numbers say little. The cost of the flag, also
+honest: about twice the frames is about twice the GPU work a second,
+which is heat and battery on a laptop, and Auto graphics stands down
+while it runs.
+
+### What is NOT done here
+
+The flag is still a URL. Making it a Settings row (persisting, off by
+default, worded with the battery cost and the Auto stand down) is the
+obvious next step and is the owner's call, put to them rather than made:
+a loop that changes what fps means for every report is not a default to
+drift into.
+
+### RUN LOG
+
+    no code changed              this entry and the plan's P3.4 note
+                                 record the owner's A against B; nothing
+                                 to run, and no check was run
