@@ -57819,3 +57819,37 @@ note says where the pilot starts now. Fly it: the craft should be on
 open paving beside the pylon, a metre or more clear of it with nothing
 overhead, facing right. Wrong would be the craft inside or under anything,
 on a road, or off the plot while the plot has open ground.
+
+## 2026-09-28 | git | The open start merged onto main, for the owner to fly
+
+The owner: "merge it to main so i can fly it". Main had moved while the
+branch waited: 5eed2d8, another session's "The feel report quotes the
+pilot's own hover", landed at 03:12, so the fast-forward push of 3cc870d
+was refused, as it should be. The merge base was 8066e62, which new main
+still held, so append only was kept. Main was merged into the branch as
+b4b7edd rather than the branch rebased onto it, so nothing anywhere
+needed a force push. The two changes share no file but PROGRESS.md, where
+each appended an entry; both are kept, in the order they were written.
+Main then fast-forwarded from 5eed2d8 to b4b7edd, append only, at 03:22 UTC.
+
+### RUN LOG (on b4b7edd, the commit main points at)
+
+    node --check                 the seven js files either side changed,
+                                 none failed
+    node src/trackbuilder/selftest.js   951 passed, 0 failed
+    node scripts/props-check.js  all passed, the pylon climb among them:
+                                 3390 steps in contact up to 27.631 m from
+                                 the point, none up to 35.217 m from the
+                                 start
+    node scripts/roads-check.js  all passed
+    node scripts/counter-check.js  all passed
+    node scripts/world-golden.js all passed
+    npm run lint:preload         up to date, 229 served
+    npm run input:selftest       all 225 passed (the feel report's check)
+    npm run lint:input           all 160 passed, 196 s: the builder's Fly
+                                 this map into the starter in a real page,
+                                 place.js with its new imports, and no
+                                 uncaught exception on any page
+    npm run verify               not run: nothing either side changed
+                                 reaches the plant, the module ABI, the
+                                 build or the input path
