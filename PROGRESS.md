@@ -58017,3 +58017,85 @@ for a real move (0.01) rather than a rounding.
                                  fetches this container always refuses
     npm run verify               not run: one number in the preset table,
                                  render side, nothing reaches the module
+
+## 2026-09-28 | render | The loop without vsync, behind ?loop=timer (plan P3.4, the owner's ask)
+
+### Why, and the question it exists to answer
+
+The owner, after the Low cuts landed: "ok that feels better, do 3 now". 3
+is plan item P3.4: with the canvas desynchronized, a frame might reach the
+glass when it is finished instead of at the next vsync, and no API says
+whether this Chrome on this desktop actually does that. On a 60 Hz panel
+that is the largest term left, up to a whole refresh. So the experiment
+the plan wrote is now real: a frame loop driven by a timer instead of
+requestAnimationFrame, behind the URL flag `?loop=timer`, never on by
+default, reachable only by typing it. If the picture with the flag on
+feels tighter (tearing is the tell that presents are really off vsync),
+the browser presents on finish and the experiment earned its keep; if it
+feels the same, Chrome presents at vsync regardless and this code comes
+out again, which is the plan's own condition and stays written on it.
+
+### What changed
+
+- `src/main.js`: frame() kept its scheduling and lost its body to
+  runFrame(), which frameTimer() shares, so both loops run the identical
+  frame through the identical fault handling. The timer's delay is the
+  display period less the GPU guard's measured frame (the plan's formula),
+  floored at the 4 ms nested timeouts are clamped to anyway: about a 10 ms
+  cadence on the laptop this exists for. The physics contract is
+  unchanged, the accumulator takes the loop's capped dt and no delta
+  reaches the integrator, and the GPU guard stays on watch so a GPU that
+  cannot keep the cadence holds draws rather than queueing them.
+- The page hiding stops the timer outright and showing restarts it: rAF
+  stops with a hidden page by itself, a timer throttled to a fire a second
+  would have stepped the physics 100 ms at a time with nobody watching.
+  The first frame back reads the same capped dt an rAF return does.
+- The display period learner and Auto graphics stand down under the flag,
+  at their call sites: a timer's intervals say nothing about the display,
+  the learner would have reported a refresh rate that does not exist, and
+  Auto's evidence is dt against the display's period. The predicted view
+  keeps the learner's held period as its horizon; under present on finish
+  that is a small over lead, accepted for an experiment and written where
+  the flag is declared.
+- The feel report carries which loop flew (`perf.loop`, "timer" or
+  "raf"), because the flag changes what fps, hz and keyToScreen mean, and
+  a report that does not say is a number that looks like an answer.
+
+### For the owner
+
+On the potato, fly the same course twice: once as
+`https://webfpv.org/sim/?loop=timer` and once plain. Right, if the flag
+works here, is the sticks feeling closer again, likely with visible
+tearing in fast yaws, and that is the trade a native sim makes with vsync
+off. The same feel both ways means Chrome presents at vsync regardless;
+say so and the flag comes out. Auto graphics does not move the resolution
+while the flag is on, so set Render scale where you like it first.
+
+### RUN LOG
+
+    probe, flag on               scripts/shots.js at ?map=field&loop=timer,
+                                 Low: boots to the title, two shots 900 ms
+                                 apart differ (the timer is drawing), no
+                                 frame fault, flag read back "timer",
+                                 console carries only the two board
+                                 fetches this container always refuses
+    npm run input:selftest       all 225 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         68 of 68 checks clean
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run replay:test          9 tests: 9 pass, the chase camera moving
+                                 on every frame vt rose and bit still on
+                                 the pause screen
+    npm run lint:input           all 160 passed, 204 s
+    npm run verify               17 of 17 checks passing, check 1 SKIP (no
+                                 emcc here). Trace hash de0401cd4266 in
+                                 checks 2 and 3, UNCHANGED, as a loop that
+                                 feeds the same accumulator must leave it;
+                                 every measured value identical to the
+                                 last run: hover 0.2793, punch 80.0 m,
+                                 terminal 31.0 m/s, motor 26 ms, 671.7
+                                 deg/s, yaw -0.10, sag 11.14 percent,
+                                 ratio 1.2472, world golden 35 of 35,
+                                 crash pacing 48 of 48

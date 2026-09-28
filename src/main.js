@@ -7111,6 +7111,67 @@ export async function boot({ loading, bootStart, mapId }) {
    */
   function frame(nowWall) {
     requestAnimationFrame(frame);
+    runFrame(nowWall);
+  }
+
+  /*
+   * THE LOOP WITHOUT VSYNC, ?loop=timer: plan P3.4, on the owner's ask of
+   * 2026-09-28 ("do 3 now"). An experiment, never the default, and the URL
+   * flag is the whole of how it is reached.
+   *
+   * What it probes. With the canvas desynchronized, a frame MAY reach the
+   * glass when it is finished instead of at the next vsync; whether this
+   * Chrome on this desktop actually does that cannot be read from any API
+   * and could not be tested in the container the code was written in. A
+   * loop driven by a timer rather than requestAnimationFrame draws frames
+   * the display did not ask for, so if the browser presents them on
+   * finish, the picture stops waiting for vsync, the way a native sim
+   * with vsync off behaves, tearing included. If it does not, the flag
+   * changes nothing a pilot can feel, and the plan's own condition says
+   * the code comes out again. Say which it was after flying it.
+   *
+   * The delay aims the next frame at the display's period less what the
+   * GPU takes (the plan's formula), floored at the 4 ms a nested timeout
+   * is clamped to anyway: on the laptop this exists for, roughly a 10 ms
+   * cadence. The GPU guard stays on watch exactly as under rAF, so a GPU
+   * that cannot keep the cadence holds draws rather than queueing them.
+   *
+   * What stands down under it, because its frames say nothing about the
+   * display: the display period learner (latency.js would learn the
+   * timer's own cadence and report a refresh rate that does not exist)
+   * and Auto graphics (its evidence is dt against the display's period).
+   * Both are flagged at their call sites below. The predicted view keeps
+   * the learner's held period as its horizon, which under present on
+   * finish is a small over lead, accepted for an experiment. And the
+   * physics contract holds as it does under rAF: the accumulator takes
+   * this loop's capped dt, and no delta reaches the integrator.
+   *
+   * rAF stops with a hidden page; a timer does not, and Chrome throttles
+   * it toward one fire a second, which would step the physics 100 ms at a
+   * time while nobody watched. So the visibility listener below stops the
+   * timer outright when the page hides and restarts it when it shows, and
+   * the first frame back reads the same capped dt an rAF return does.
+   */
+  const timerLoop = new URLSearchParams(window.location.search).get('loop') === 'timer';
+  /* The pending timeout, 0 when none, and whether boot started the loop at
+   * all, so a visibility flicker before boot cannot start it early. */
+  let timerId = 0;
+  let timerOn = false;
+
+  function timerDelay() {
+    const gpu = gpuGate.state.samples >= 10 ? gpuGate.state.gpuMs : 0;
+    const d = latency.displayPeriodMs() - gpu;
+    return d < 4 ? 4 : d;
+  }
+
+  function frameTimer() {
+    /* Scheduled first, exactly as frame() does, so a thrown body does not
+     * stop the loop. */
+    timerId = setTimeout(frameTimer, timerDelay());
+    runFrame(performance.now());
+  }
+
+  function runFrame(nowWall) {
     try {
       frameBody(nowWall);
     } catch (e) {
@@ -9147,7 +9208,12 @@ export async function boot({ loading, bootStart, mapId }) {
      * been pacing this frame whether or not it drew: a draw the guard or the
      * cap held back still waits on a busy GPU's compositing. The Settings
      * studio's craft counts too, and the guard does not time it. */
-    latency.noteFrame(dt, blockMs, gpuGate.state, worldLive || studioOn);
+    if (!timerLoop) {
+      /* Never under the experimental timer loop: these intervals are the
+       * timer's own cadence, and the learner would report a refresh rate
+       * the display does not have. It holds what it had instead. */
+      latency.noteFrame(dt, blockMs, gpuGate.state, worldLive || studioOn);
+    }
     /*
      * AUTO GRAPHICS, from the frames the pilot is looking at: flight, and the
      * title's attract flight over the same world, which is the free
@@ -9157,7 +9223,7 @@ export async function boot({ loading, bootStart, mapId }) {
      * here, at once and through the Render scale path; the preset moves
      * only between runs, below. See autoscale.js.
      */
-    if (ui.settings.graphicsAuto && mapReady && !swapInFlight && !replayMode && !film && worldLive
+    if (ui.settings.graphicsAuto && !timerLoop && mapReady && !swapInFlight && !replayMode && !film && worldLive
       && ((mode === 'flight' && ui.screen === 'flight') || (mode === 'title' && ui.screen === 'title'))) {
       autoScale.observe(dt, renderMs, blockMs, gpuGate.state, drawThis, latency.targetMs());
       if (autoScale.state.dirty) {
@@ -9304,7 +9370,20 @@ export async function boot({ loading, bootStart, mapId }) {
    */
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
+      /* The experimental timer loop was stopped below when the page hid;
+       * back on screen it resumes, and its first frame reads the same
+       * capped dt an rAF return does, because prevWall was left alone. */
+      if (timerLoop && timerOn && timerId === 0) {
+        frameTimer();
+      }
       return;
+    }
+    /* The timer loop does not stop with a hidden page the way rAF does,
+     * and throttled to a fire a second it would step the physics 100 ms at
+     * a time with nobody watching. Stopped outright; restarted above. */
+    if (timerId !== 0) {
+      clearTimeout(timerId);
+      timerId = 0;
     }
     /* The sticks' timer that polls the GPU's fences stops with the page,
      * so a fence pending now would come back timed as the whole absence.
@@ -10548,6 +10627,9 @@ export async function boot({ loading, bootStart, mapId }) {
     keyToScreen: latency.report(),
     hz: latency.refreshHz(),
     fullscreen: Boolean(document.fullscreenElement),
+    /* Which loop drove the frames, so a report flown under ?loop=timer
+     * says so: the flag changes the meaning of fps, hz and keyToScreen. */
+    loop: timerLoop ? 'timer' : 'raf',
     /* The predicted view's setting and the horizon it last looked ahead in
      * flight: see predictView before the draw. */
     predict: ui.settings.predictView !== false ? Math.round(predictLastMs * 10) / 10 : 0,
@@ -11072,7 +11154,12 @@ export async function boot({ loading, bootStart, mapId }) {
     return { map: view.id, kind: probe.kind, periodMs: period, samples: out };
   };
   window.__budget = (name) => measureBudget(shell, view, { view: name });
-  requestAnimationFrame(frame);
+  if (timerLoop) {
+    timerOn = true;
+    frameTimer();
+  } else {
+    requestAnimationFrame(frame);
+  }
 }
 
 /*

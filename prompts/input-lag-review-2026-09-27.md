@@ -527,6 +527,15 @@ against off, twenty presses each. If the number does not move, Chrome
 presents at vsync regardless and the code comes out again. Do not merge it
 without the number.
 
+Shipped behind the flag, 2026-09-28, on the owner's ask ("do 3 now") after
+the Low cuts landed and helped. The rule above now reads: the flag stays in
+until the owner has flown ?loop=timer against the same laps without it and
+said whether it moved, by feel or by the Input to screen row; no change
+either way and it comes out. The display period learner and Auto graphics
+stand down under the flag, the loop stops while the page is hidden, and a
+feel report says which loop it flew (perf.loop). PROGRESS.md, the P3.4
+entry.
+
 ### P3.5. Hardware, which beats all of the above (for the owner)
 
 A 120 or 144 Hz display halves two terms of the chain at once, the wait
