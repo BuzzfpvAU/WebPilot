@@ -59193,3 +59193,17 @@ On the merged tree:
                                  its own run passed 170 of 170
     npm run verify               not run: neither change touches the plant,
                                  the module ABI or the build
+
+### Live on webfpv.org
+
+main moved 31ada68..118c87e at about 22:51 UTC, and webfpv.org/sim served
+it at 22:52:28 UTC: src/ui/ui.js, src/main.js and index.html, read off the
+live site with a cache busting query, each hash the same as the commit.
+The polls from 22:51:25 until then did not match, so the comparison can
+tell the two apart. index.html comes back max-age=0, the scripts carry
+four hours at the edge, and src/fresh.js gives a reloaded page this
+deploy's scripts whole.
+
+For the owner's flight: reload once, then Settings, Screen, Manga and
+scoring, Off, and fly Hibari Yard; then On again. What would count as
+wrong is written under "For the owner" above.
