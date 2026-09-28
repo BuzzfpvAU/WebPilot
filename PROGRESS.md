@@ -57244,3 +57244,60 @@ marked, and its results follow in the next entry.
     npm run verify               not yet run at commit time
     replay:test, lint:attract, lint:devices, lint:scale
                                  not yet run at commit time
+
+## 2026-09-28 | render | Predicted view: the checks still running at its commit (plan P3.1, follow up)
+
+The entry above was committed at the stop hook's request with part of its
+run unfinished, and said so. The rest of that run, all green, and the
+baseline argument's condition met: lint:devices reached every row and
+every note on every device, the new Predicted view row included.
+
+Four of these (lint:attract, lint:devices, lint:scale and the lint:shell
+rerun) ran while review finding F6 was being written into the same tree,
+so they loaded its edits: they are evidence for P3.1 and F6 together,
+which is what the next commit is. replay:test straddled the first of
+those edits; F6 moves only where Auto's resolution factor may stop, and
+replay mode never reaches it.
+
+### RUN LOG
+
+On 6a3a541's tree, 01:30 to 01:47 UTC, then the lint:shell rerun.
+
+    npm run lint:input           all 160 passed, 201 s
+    npm run verify               17 of 17 checks passing, check 1 SKIP:
+                                 no emcc on PATH, EMSDK unset and
+                                 vendor/betaflight not checked out, so
+                                 build:wasm could not run
+      2  determinism-repeat      a=de0401cd4266 b=de0401cd4266
+      3  determinism-cross-host  node=de0401cd4266 chrome=de0401cd4266,
+                                 the hash unchanged, as a render only
+                                 change must leave it
+      4  frame-independence      1 distinct hash across 4 rates
+      5  hover-throttle          0.2793
+      6  punch-out               80.0 m
+      7  terminal-velocity       31.0 m/s
+      8  motor-step-response     26 ms
+      9  rate-tracking           671.7 deg/s vs 670 (0.25 percent off)
+     10  yaw-coupling            -0.10 deg
+     11  battery-sag             11.14 percent lower (26157 vs 23242 RPM)
+     12  diff-passthrough        ratio 1.2472 vs 1.2537 (0.52 percent off)
+     13  console-clean           errors 0, warnings 0
+     14  audio-bed               ctx running, 42 nodes
+     15  world-scale             1.0000, craft sweep radius 0.1735 m
+     16  map-isolation           field P1 116, P2 928277, P5 69.8 MB,
+                                 P10 30.4 MB, 499 meshes, the same after
+                                 a city round trip
+     17  world-golden            35 of 35 runs bit identical, 62 flights
+     18  crash-pacing            48 of 48 lines, 8 scenarios, 83 pacings
+                                 Every value as it was before P3.1.
+    npm run replay:test          9 tests: 9 pass
+    npm run lint:attract         no world flies the title camera through
+                                 anything solid
+    npm run lint:devices         PASS, every row and every note reachable
+                                 on every device
+    npm run lint:scale           PASS, with F6's rows (next entry)
+    npm run lint:shell           PASS against the 1012 px baseline, 11 s;
+                                 its two notes say the fc and tricks
+                                 screens' overflow improved (3613 to 3599,
+                                 1649 to 1605), which is not this change's
+                                 and is left for whoever re-records it
