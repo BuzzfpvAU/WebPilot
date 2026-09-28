@@ -664,6 +664,14 @@ async function mousePage(page) {
   let swapped = true;
   await page.until('window.__ui.settings.stickMode !== ' + modeBefore.mode, 4000).catch(() => { swapped = false; });
   check('M moves the stick mode on', swapped, JSON.stringify(modeBefore));
+  /* The setting moves in the key's own task and the calibration screen is
+   * painted by the frame loop (ui.setCalibration, once a frame), so the
+   * button's label is the last thing to settle, as with the reverse button
+   * above, and is what is waited on. Reading it in the same task as the
+   * setting was a race that a slow frame lost: under SwiftShader it failed
+   * one run in nine on 2026-09-28, with the setting and the input layer
+   * already at mode 3 and the label still reading mode 2. */
+  await page.until('window.__ui.calModeBtn.textContent === "Stick mode " + window.__ui.settings.stickMode', 4000).catch(() => {});
   const modeAfter = await ev(`
     return JSON.stringify({ mode: ui.settings.stickMode, left: ui.calStickLeft.cap.textContent,
       inputMode: input.stickMode, btn: ui.calModeBtn.textContent });
