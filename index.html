@@ -1031,6 +1031,10 @@
         height: 100%; width: 100%; background: var(--mint);
         transform: scaleX(0); transform-origin: left center;
         transition: transform 0.12s linear;
+        /* A layer of its own, so the scale that moves every frame the
+           throttle does is the compositor's alone and repaints nothing
+           around it. Two bars; the chevron (.lock) does the same. */
+        will-change: transform;
       }
       .bar-fill.warm { background: var(--amber); transition: none; }
       .osd-hits { margin-top: 10px; margin-bottom: 0; }
@@ -1084,6 +1088,9 @@
          see placeNub in src/ui/ui.js. */
       .osd-nub-track {
         position: absolute; inset: 0; pointer-events: none;
+        /* Its own layer, for the bar's reason above: it moves every frame
+           a stick does. */
+        will-change: transform;
       }
       .osd-nub {
         position: absolute; left: 50%; top: 50%;

@@ -376,6 +376,10 @@ function snapshotAxes(gp) {
   return out;
 }
 
+/* How often the pad roster runs when the pad count has not changed: see
+ * poll. */
+const ROSTER_MS = 100;
+
 function listGamepads() {
   const out = [];
   const list = typeof navigator !== 'undefined' && navigator.getGamepads
@@ -1136,6 +1140,9 @@ export class InputManager {
     this.padPickResult = null;
     this.seenPadKeys = new Set();
     this.padWasPresent = false;
+    /* When the roster last ran and how many pads it saw: see poll. */
+    this.rosterAt = -1e9;
+    this.rosterCount = -1;
     this.calibration = null;
     this.calResult = null;
     this.lastWall = performance.now();
@@ -1762,7 +1769,12 @@ export class InputManager {
   }
 
   firstGamepad() {
-    const pads = listGamepads();
+    return this.pickPad(listGamepads());
+  }
+
+  /* firstGamepad for a list already in hand: poll() lists the pads once a
+   * tick and hands the one list to this and to the roster. */
+  pickPad(pads) {
     if (!pads.length) {
       return null;
     }
@@ -1840,8 +1852,7 @@ export class InputManager {
    * rather than trusted to gamepadconnected. A new key in the list is a
    * device the picker has not seen this session.
    */
-  notePadRoster() {
-    const pads = listGamepads();
+  notePadRoster(pads = listGamepads()) {
     const nowKeys = new Set(pads.map(padKey));
     let added = 0;
     nowKeys.forEach((k) => {
@@ -3165,9 +3176,24 @@ export class InputManager {
     /* One poll off the flight spoils its rate window. See flightRec. */
     this.windowFlying = this.windowFlying && this.flying;
 
-    const gp = this.firstGamepad();
+    const pads = listGamepads();
+    const gp = this.pickPad(pads);
     this.syncGuess(gp);
-    this.notePadRoster();
+    /*
+     * THE ROSTER (hotplug, the picker's queue, a lost radio) at once when the
+     * number of pads changes, and otherwise every ROSTER_MS. It builds a Set
+     * and a string per pad, and it ran on every 2 ms tick, a few hundred
+     * small allocations a second for a GC to clear on the machines this
+     * timer is hardest on (review finding F8, 2026-09-27). A plug or an
+     * unplug changes the count and is seen on the tick it happens, as
+     * before; only one pad swapped for another inside a tenth of a second
+     * waits for the next tenth.
+     */
+    if (pads.length !== this.rosterCount || nowWall - this.rosterAt >= ROSTER_MS || nowWall < this.rosterAt) {
+      this.rosterAt = nowWall;
+      this.rosterCount = pads.length;
+      this.notePadRoster(pads);
+    }
     /* The Gamepad object's own timestamp is the only honest statement of when
      * the browser last refreshed it. Counting its changes is how we find out
      * whether polling faster than the frame rate buys anything at all. */

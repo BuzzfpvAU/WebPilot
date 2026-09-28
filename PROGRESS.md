@@ -56957,3 +56957,45 @@ On the working tree over 5a155e5, one check at a time, 00:37 to 00:56 UTC.
     npm run lint:shell           PASS
     npm run lint:input           all 160 passed, 198 s
     npm run verify               not run: F1 and F7 carry it in the plan
+
+## 2026-09-28 | input, ui | Two small per frame costs (review F8)
+
+### Why
+
+Phase 1, item 5 of the review plan. The pad roster (hotplug, the picker's
+queue, a lost radio) ran on every 2 ms tick of the sticks' timer and built
+a Set and a string per pad each time, a few hundred small allocations a
+second for a garbage collector to clear on exactly the machines that timer
+is hardest on; and the tick listed the gamepads twice. The throttle and
+pack bars and the gimbal dots move by transform every frame the throttle or
+a stick moves, without a layer of their own, so each move repainted the
+layer they sat in.
+
+### What changed
+
+- `src/input/input.js`: poll() lists the pads once and hands the list to
+  `pickPad` (firstGamepad's body, now callable with a list in hand) and to
+  the roster. The roster runs at once when the number of pads changes, so a
+  plug or an unplug is seen on its own tick as before, and otherwise every
+  100 ms (`ROSTER_MS`). Only one pad swapped for another inside a tenth of
+  a second waits for the next tenth.
+- `index.html`: `will-change: transform` on `.bar-fill` and
+  `.osd-nub-track`, as `.lock` already had. Two bars and two plates, a few
+  kilobytes of layer.
+
+### RUN LOG
+
+On the working tree over 7aa4f99, one check at a time, 00:40 to 00:46 UTC.
+
+    npm run input:selftest       all 225 passed
+    npm run autoscale:selftest   all 46 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         64 of 64 checks clean
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           all 160 passed, 201 s (the picker, the
+                                 hotplug and the lost radio checks among
+                                 them)
+    npm run lint:devices         PASS
+    npm run verify               not run: F1 and F7 carry it in the plan
