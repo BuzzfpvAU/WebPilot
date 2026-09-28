@@ -57,6 +57,19 @@ export const GATE_SATURATED = 0.85;
 /* A frame's worth of work, at the rate this page holds: 60 Hz. A faster
  * display does not raise the bar; the aim is sixty, steadily. */
 export const GATE_FRAME_MS = 1000 / 60;
+/*
+ * A fence older than this when it is first seen signalled was not timing the
+ * GPU. It was timing a freeze: a tab hidden or frozen with the fence pending
+ * (the sticks' timer, which polls it, stops with the page), a context lost
+ * and restored, or a main thread stall long enough that nobody looked. Found
+ * in the review of 2026-09-27: a page frozen for three seconds took the
+ * average from 155 ms to 759 ms in two samples, and on a real GPU that is the
+ * guard halving the draw rate for a second or more after every alt tab. A
+ * frame that truly needs a quarter of a second of GPU is four frames a
+ * second; there is nothing left for the guard to protect there, and Auto has
+ * the frame interval to see it by.
+ */
+export const GATE_FREEZE_MS = 250;
 
 /* Fences kept in flight at once. A GPU four frames behind is timed as at
  * least that far behind, which is all the guard needs to know. */
@@ -92,6 +105,10 @@ export function createGpuGate(gl) {
   };
 
   function time(ms) {
+    /* A freeze, not a frame: see GATE_FREEZE_MS. Dropped untimed. */
+    if (!(ms >= 0) || ms > GATE_FREEZE_MS) {
+      return;
+    }
     s.gpuMs = s.samples === 0 ? ms : s.gpuMs + (ms - s.gpuMs) * 0.1;
     s.samples += 1;
   }
@@ -170,14 +187,30 @@ export function createGpuGate(gl) {
     s.drawn += 1;
   }
 
-  /* A map swap or a context loss: forget the fences, keep the average. */
-  function reset() {
+  /*
+   * Forget the fences, untimed. main.js calls this when a tab is hidden, when
+   * the context is lost or restored, and when the render targets are
+   * reallocated (a window resize or a new render scale), because a fence
+   * pending across any of those is timing the event and not the GPU. The
+   * average is kept: it is still this GPU drawing this world.
+   *
+   * `newWorld` forgets the average too, for a map swap: the old world's
+   * GPU time says nothing about the new one's, and a guard holding draws on
+   * a light world because a heavy one was saturated is the lag this module
+   * exists to remove. Ten fresh samples, a sixth of a second at sixty, and
+   * it knows again.
+   */
+  function reset(newWorld = false) {
     for (let i = 0; i < RING; i += 1) {
       if (fences[i]) {
         drop(i);
       }
     }
     s.lastSkipped = false;
+    if (newWorld) {
+      s.gpuMs = 0;
+      s.samples = 0;
+    }
   }
 
   return { state: s, poll, shouldSkip, submitted, reset };

@@ -68,6 +68,7 @@
     "replay": "node scripts/replay-log.js",
     "link:selftest": "node scripts/link-selftest.js",
     "input:selftest": "node scripts/input-selftest.js",
+    "autoscale:selftest": "node scripts/autoscale-selftest.js",
     "music:selftest": "node scripts/music-selftest.js",
     "stats:selftest": "node scripts/stats-selftest.js",
     "support:selftest": "node scripts/support-selftest.js",

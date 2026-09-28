@@ -56702,3 +56702,59 @@ smoothing, which are the owner's question and not a change to make; a
 render loop without vsync as a real hardware experiment; and the display
 itself. With a note on what is not worth doing for latency: a physics
 worker, faster polling, a throwaway forward simulation.
+
+## 2026-09-28 | render | The GPU gate stops learning from freezes (review F3)
+
+### Why
+
+Phase 1, item 1 of `prompts/input-lag-review-2026-09-27.md`, which the owner
+asked to be started ("ok switching back to opus, start on the plan"). The
+gate timed a fence as the time from its draw to the first poll that saw it
+signalled, with no bound, and nothing ever called `reset()`. A tab hidden
+or frozen with a fence pending (the sticks' timer that polls it stops with
+the page), a context lost and restored, or a long stall handed the average
+a sample of seconds: probed on 2026-09-27, three seconds frozen took it
+from 155 ms to 759 ms in two samples. On a real GPU that is the guard
+halving the draw rate for a second or more after every alt tab, and Auto
+reading the GPU as saturated for most of a step's hold.
+
+### What changed
+
+- `src/render/gpugate.js`: a fence first seen signalled more than
+  `GATE_FREEZE_MS` (250 ms) after its draw is dropped untimed, whether the
+  poll or a new draw pushing it out of the ring finds it. `reset(newWorld)`
+  drops the ring untimed and, for a new world only, the average too.
+- `src/main.js` calls it: when the tab is hidden (the visibilitychange
+  handler that pauses a flight), on `webglcontextlost` and
+  `webglcontextrestored` on the flight canvas (no context listener existed
+  anywhere in `src/`; three.js r160 prevents the default itself, read in its
+  source, so the browser restores), after a window resize or a render scale
+  change reallocates the targets, and with `newWorld` when a loaded map is
+  adopted, since a heavy world's saturation must not hold a light one's
+  draws.
+- `scripts/autoscale-selftest.js`, new, `npm run autoscale:selftest`: the
+  gate and, from the next items, Auto, driven in plain Node with synthetic
+  frames and a fake WebGL whose fences signal off a fake clock. Written
+  before the fix and run on the old gate first: the three freeze checks
+  failed there (8.00 ms became 307.20 ms, and the sample was counted), and
+  pass now. It is to be run for every later change to either module.
+
+### RUN LOG
+
+On the working tree over 03fbbc1, one check at a time, 00:00 to 00:05 UTC.
+
+    npm run autoscale:selftest   before the fix: 3 failed, 11 passed;
+                                 after: all 15 passed
+    hidden probe (scratch)       the title at 320 by 180 on Low: 154.3 ms
+                                 over 31 samples before a three second
+                                 freeze and 154.3 over 31 after it (the old
+                                 gate went to 758.7 on the same probe)
+    npm run input:selftest       all 225 passed
+    npm run lint:frame           34 passed, 0 failed
+    npm run lint:quality         56 of 56 checks clean
+    npm run lint:preload         up to date, 229 served
+    npm run check:fresh          18 passed, 0 failed
+    npm run lint:shell           PASS
+    npm run lint:input           all 160 passed, 199 s
+    npm run verify               not run: the plan asks for it at F1 and F7;
+                                 nothing here reaches the physics

@@ -611,6 +611,12 @@ export async function boot({ loading, bootStart, mapId }) {
    * null checks when idle.
    */
   const gpuGate = createGpuGate(shell.renderer.getContext());
+  /* A lost context takes its fences with it and a restored one has none, so
+   * both drop the ring untimed rather than leave a fence the guard would
+   * wait on for ever. three.js handles the loss itself (it prevents the
+   * default, so the browser restores); these only keep the gate honest. */
+  shell.canvas.addEventListener('webglcontextlost', () => gpuGate.reset());
+  shell.canvas.addEventListener('webglcontextrestored', () => gpuGate.reset());
   /*
    * Auto graphics' resolution factor and the controller that moves it: see
    * autoscale.js and renderScaleOf. Declared here, before the first thing
@@ -985,6 +991,9 @@ export async function boot({ loading, bootStart, mapId }) {
      * false for exactly that gap. */
     if (view && view.post && mapReady) {
       view.post.setSize(d.w, d.h);
+      /* New targets: a fence pending across the reallocation is timing it,
+       * not the GPU. See reset in gpugate.js. */
+      gpuGate.reset();
     }
     /* A new window is a new floor on High: see autoFloorFor. */
     autoScale.setFloor(autoFloorFor(ui.settings));
@@ -4385,6 +4394,9 @@ export async function boot({ loading, bootStart, mapId }) {
   function adoptLoadedView(keepPlace, stayMode, stayScreen) {
     /* A new view is a new set of solids, whether or not the place is kept. */
     uploadPlantWorld();
+    /* And a new GPU cost: the old world's average says nothing about this
+     * one's. See reset in gpugate.js. */
+    gpuGate.reset(true);
     attractCam = makeAttractCamera(view);
     noteWorldClip();
     /* The new world was built at the window's size; the hold a film had on
@@ -4882,6 +4894,9 @@ export async function boot({ loading, bootStart, mapId }) {
       const d = shell.resize();
       if (view && view.post && mapReady) {
         view.post.setSize(d.w, d.h);
+        /* New targets, so the fences in flight time the reallocation: see
+         * reset in gpugate.js. */
+        gpuGate.reset();
       }
     }
     autoScale.setFloor(autoFloorFor(s));
@@ -9154,6 +9169,10 @@ export async function boot({ loading, bootStart, mapId }) {
     if (!document.hidden) {
       return;
     }
+    /* The sticks' timer that polls the GPU's fences stops with the page,
+     * so a fence pending now would come back timed as the whole absence.
+     * Dropped untimed: see GATE_FREEZE_MS in gpugate.js. */
+    gpuGate.reset();
     audioRpm[0] = 0;
     audioRpm[1] = 0;
     audioRpm[2] = 0;
