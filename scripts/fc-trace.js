@@ -506,10 +506,10 @@ record(
    *
    * This used to run on configs/karate-race.diff, because that preset was
    * written in sliders and would have been silently flat without the apply
-   * command. The stock tune carries the same simplified_* block sitting at
-   * 100, so moving one off 100 is the same proof on the file that ships, and
-   * it is now the file the PIDs screen adjusts for every pilot rather than
-   * one preset most of them never loaded.
+   * command. The stock tune carries the same simplified_* block, sitting at
+   * 100 but for feedforward's 125, so moving PI off 100 is the same proof on
+   * the file that ships, and it is now the file the PIDs screen adjusts for
+   * every pilot rather than one preset most of them never loaded.
    */
   const stockKeep = composeConfig(defaultDiff, RATE_DEFAULTS, RATES_KEEP);
   const simStock = await newSim();

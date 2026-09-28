@@ -17,16 +17,28 @@
  * first row rather than throwing, because a stale setting must never stop
  * the page booting.
  *
- * ONE SHIPPED TUNE, AND IT IS STOCK. Karate race 6S and Precision used to
- * sit below the default and they are gone, files and rows both. A shipped
- * tune is an opinion about how a quad should feel, and this simulator's
- * whole claim is that it feels like the real thing, so the honest starting
- * point is the one a freshly flashed board actually gives you and every
- * other feel is the pilot's own. The Flight controller screen and the PIDs
- * screen are where they make it: both write real Betaflight keys, a Save
- * becomes CUSTOM_TUNE below, and that dump sits on the Tune row beside this
- * one. So the set did not shrink from three answers to one, it shrank from
- * three answers to one plus yours.
+ * ONE SHIPPED TUNE, AND IT IS STOCK BUT FOR FOUR SETTINGS. Karate race 6S
+ * and Precision used to sit below the default and they are gone, files and
+ * rows both. A shipped tune is an opinion about how a quad should feel, and
+ * this simulator's whole claim is that it feels like the real thing, so the
+ * honest starting point is the one a freshly flashed board actually gives
+ * you and every other feel is the pilot's own. The Flight controller screen
+ * and the PIDs screen are where they make it: both write real Betaflight
+ * keys, a Save becomes CUSTOM_TUNE below, and that dump sits on the Tune row
+ * beside this one. So the set did not shrink from three answers to one, it
+ * shrank from three answers to one plus yours.
+ *
+ * The owner made four exceptions on 2026-09-28, from the feel reports: a
+ * quarter more feedforward, and I-term relax and the yaw limit set to take
+ * the bounce back out of a stop. They are Betaflight's own keys at values a
+ * pilot could type, each is argued in the header of
+ * configs/betaflight-default.diff, and npm run feel:response flies that file
+ * beside the factory tune on every run so the difference stays measured.
+ * The id and the name are unchanged, so a stored choice and every screen
+ * that names the tune still find it; the note says what it is. A personal
+ * best does not follow it across, and should not: recordKey in src/main.js
+ * hashes the composed config's text, so a lap flown on the four changes is
+ * filed apart from the laps flown before them, which stay where they were.
  *
  * This file is part of WebFPVSimulator.
  *
@@ -51,7 +63,7 @@ export const TUNES = [
     id: 'betaflight-default',
     airframe: '5inch',
     name: 'Betaflight default',
-    note: 'Factory 4.5.1, untouched. What a freshly flashed quad flies.',
+    note: 'Factory 4.5.1 with four settings changed: a quarter more feedforward, and less bounce back after a stop.',
   },
   {
     id: 'whoop-champion',

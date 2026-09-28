@@ -58326,3 +58326,291 @@ had before any of this.
                                  value as before
     raf await probe (scratch)    at Low under the bare timer 202 ms; with
                                  rafKeepAlive 50 ms, one software frame
+## 2026-09-28 | fc | The default tune: a quarter more feedforward, and the bounce back taken out of a stop (the owner's ask)
+
+### The ask
+
+The owner, 2026-09-28: "almost all the feedback tickets say the quad feels
+floppy, and loose, slow to answer stick. I've decreased the latency lots so
+that should fix things a bit, but how can we give the quad more authority?
+increase feed forward? if so lets do this a little for the default tune,
+also fix the bounce back that is currently present."
+
+This reverses, on the owner's word, the rule that the one shipped tune is
+Betaflight's factory tune untouched (configs/registry.js, the tune's own
+header, and the P3.3 entry above, which put exactly this to the owner). So
+the change is four Betaflight keys at values a pilot could type, each one
+argued in configs/betaflight-default.diff's header, and nothing in the
+module, the plant, the input path or the build.
+
+### What the reports say
+
+Read only, GET https://webfpv.org/board/api/bugs?limit=500 and each of the
+126 feel tickets. "Slow to answer the stick" is the form's most ticked box:
+23 reports, 11 of them since 24 September, every one on the default tune
+with no slider moved. "Bounces back after a stop" is ticked on 9, all on
+the default tune, 8 of them stock. How the quad felt, all time: twitchy 29,
+soft 28, floppy 26, about right 24, stiff 15.
+
+### What the bounce back is, measured
+
+scripts/stick-response.js (npm run feel:response) now flies a stop as well
+as a flick: the stick held for one whole turn on one axis, then centred in
+25 ms, and prints how far the craft turns back from the furthest it got. A
+whole turn, because a stop that leaves the craft inverted and falling reads
+its drift as a bounce (the first version held for half a second, and three
+quarter stick roll then "came back" 3.45 degrees at 14 deg/s, which was the
+fall, not the controller). Each stop is flown in Expert and in Arcade,
+because a slow roll at hover throttle ends falling at 17 m/s through its own
+wash, and the wash, identical on every tune, reads as degrees coming back.
+
+Three mechanisms, each seen in a trace:
+
+- Roll and pitch: Betaflight's I term integrates the degrees the craft runs
+  on past the stop and hands them back once it has stopped. iterm_relax
+  holds I while the setpoint moves, and at 15 Hz the hold is over before a
+  full stick flip has stopped. With I at zero the full stick bounce is gone
+  (1.00 to 0.00 degrees on roll in the first probe), which is what named it.
+- Yaw: factory iterm_relax is RP, so yaw I is never held. Traced through a
+  full stick yaw stop (sim_bf_debug 0 to 4): the stop takes about 165 ms
+  with the motors at their limits, yaw I swings from -72 to its +400 cap in
+  40 ms and sits there, and once the craft stops it drives it back at 51
+  deg/s for 8.15 degrees. pidsum_limit_yaw 400 keeps the anti windup from
+  ever seeing yaw saturate (Round 23, betaflight/betaflight issue 13486).
+- On a pad slower than the 250 Hz RC grid: the module is handed repeated
+  frames, and calculateFeedforward in fc/rc.c reads the first repeat after
+  a movement as a dropped packet and carries the movement on for a frame.
+  At a stop that is one frame of braking too many: at 160 Hz a three
+  quarter roll reverses at 48 deg/s within 25 ms of the stick centring on
+  factory, 73 on the first candidate below.
+
+### What changed
+
+configs/betaflight-default.diff, four settings (seven keys):
+
+    simplified_feedforward_gain   125   factory 100   (f_roll 150, f_pitch 156,
+                                                       f_yaw 150; factory 120,
+                                                       125, 120)
+    iterm_relax_cutoff             10   factory 15
+    iterm_relax               RPY_INC   factory RP
+    pidsum_limit_yaw              500   factory 400
+
+The F values are the ones `simplified_tuning apply` computes at 125, read
+back from the module, with every other PID unchanged (and apply with nothing
+moved reproduces the file exactly), so the PIDs screen's sliders keep the
+raise: a bare f_roll would have been reset to 120 by the first slider move.
+
+The header of the tune, configs/registry.js (the doctrine comment and the
+Tune row's note), the PIDs screen's lede (it said 100 is the tune's stock;
+it now says the sliders start where the tune ships them, one character
+shorter so the pinned overflow cannot grow), a code comment in src/ui/ui.js
+that said 100 always means the tune's own scale, the PIDs panel's screen
+reader label ("Stock 4.5.1 roll is", as its caption already says), and
+fc-trace's comment on the stock tune's simplified block, all say so.
+
+scripts/stick-response.js reads Betaflight's factory values out of a module
+given no config, prints every key the shipped tune changes, and flies that
+factory tune beside the shipped one, so the comparison needs nothing typed.
+
+### The numbers, from npm run feel:response
+
+Flick (ms to 90 percent of the settled roll rate) and lag behind a 2 Hz
+sine, factory against shipped:
+
+    pad        t90         lag ms       overshoot    rough
+    1 kHz      64 -> 59    8.6 -> 6.8   3.7 -> 3.7   0.016 -> 0.016
+    250 Hz     66 -> 61   10.9 -> 9.1   3.8 -> 3.7   0.016 -> 0.016
+    220 Hz     70 -> 67    9.4 -> 7.3   3.8 -> 3.8   0.019 -> 0.020
+    180 Hz     68 -> 65    7.2 -> 4.5   3.8 -> 3.8   0.021 -> 0.023
+
+Whole turn stops, Expert, degrees back, factory against shipped:
+
+    pad 1 kHz       100%           75%            50%
+    roll        1.20 -> 0.38   0.89 -> 0.60   0.41 -> 0.35
+    pitch       1.62 -> 0.48   1.03 -> 0.55   0.80 -> 0.70
+    yaw         8.15 -> 7.34   7.79 -> 4.64   2.99 -> 2.26
+    pad 220 Hz
+    roll        1.12 -> 0.36   0.63 -> 0.45   0.47 -> 0.37
+    pitch       1.54 -> 0.47   0.83 -> 0.48   0.86 -> 0.73
+    yaw         8.15 -> 7.33   7.89 -> 4.60   3.07 -> 2.29
+    pad 180 Hz
+    roll        0.44 -> 0.23   0.48 -> 0.54   0.38 -> 0.58
+    pitch       0.81 -> 0.29   0.50 -> 0.46   0.97 -> 1.05
+    yaw         8.15 -> 7.32   7.23 -> 4.44   2.55 -> 2.09
+
+In Arcade a full stick flip settles under 10 deg/s in half the time (roll
+105 to 51 ms, pitch 126 to 57 at 1 kHz). The script prints carry and settle
+beside every cell.
+
+### How RPY_INC was chosen, and what was declined
+
+Each scratch run below flies the real module in Node; scripts in the
+session's scratchpad, results quoted as measured.
+
+- iterm_relax_cutoff. Swept 15, 12, 10, 8, 7 (and 6 to 3 with yaw in the
+  hold). 10 takes the full stick bounce out; 8 takes a little more at full
+  stick and does worse on half stick stops at 160 to 220 Hz pads; below 8
+  yaw improves and the craft carries further (yaw 50 degrees past the
+  stick at 3 Hz, against 28). 10 it is.
+- RPY against RPY_INC. The first candidate was RPY. Across pads 1 kHz, 220,
+  190 and 160 it was the better full stick fix (mean 0.31 degrees against
+  0.35) but its three quarter and half stick stops came back MORE than
+  factory's at 190 Hz and below (mean 0.74 against 0.72, worst 1.35 against
+  1.09; at 160 Hz three quarter roll 0.61 to 1.31), because it also stops I
+  taking out feedforward's extra frame of braking. RPY_INC lets I shrink,
+  and its partial stops came back less than factory's (mean 0.59, worst
+  0.93). That is the choice. INC's own cost, measured against the stick's
+  integrated setpoint (sim_bf_debug 5 and 8) after a quick bank and back:
+  0.3 to 0.9 degrees off at 0.3 to 0.6 stick where factory is within 0.13,
+  and 1.4 to 1.9 off at full stick where factory is 2.1 to 2.5 and RPY 3.2
+  to 3.8.
+- Feedforward amount. 115, 120, 125, 130 and 150 swept. 150 was P3.3's
+  measured candidate; the owner said a little. 125 against 120 is 1 ms of
+  t90 and 0.4 to 0.7 ms of lag, and the bounce is the same to 0.03.
+- Feedforward shaping, on top of the candidate: boost 0 (t50 43 against 38,
+  declined), boost 10 and 25, smooth factor 10, 15 and 40, jitter factor 0
+  and 12, averaging 2 and 3 point, transition 10. None took the slow pad
+  partial stop cost out without giving back the response, and 3 point
+  averaging made it worse (160 Hz half pitch 1.80). All left at factory.
+- rc_smoothing_auto_factor 45, d_max_advance 0, the D slider at 115, the I
+  slider at 70 (yaw bounce WORSE, 8.15 to 11.65: with I pinned at its cap,
+  less gain unwinds it slower), iterm_relax_type GYRO (sine lag 9.0 to 13.6
+  ms): declined.
+- Yaw. iterm_windup 70 and 50 (full stick 7.34 to 6.61 and 5.90) and
+  iterm_limit 250, 200, 150 (5.10, 4.08, 3.06) help full stick yaw only,
+  and the limit makes the craft carry further; the reports' pilots throw
+  yaw to 0.6 to 0.73 of the stick (stick.flight.travel), where the change
+  already takes 7.79 to 4.64. A lower iterm_limit does not bind anywhere
+  else in this plant (pitch at 40 m/s holds to the tenth at 400, 300, 200
+  and 150), but it is a lever pilots do not reach for, so it was not
+  taken. Yaw P (60 and 80 take half stick yaw to 1.91 and 1.59) is the
+  right lever and a tune in simplified mode RPY cannot keep it: the first
+  slider moved recomputes yaw from Betaflight's defaults.
+- The master multiplier. 115 on top of the change: t90 58, lag 5.9 at 1
+  kHz, overshoot 3.4 (npm run feel:response prints it). That is the lever
+  for "floppy" and "loose", which is stiffness rather than quickness, and
+  it is the owner's to ask for; not taken.
+
+Side effects checked, factory against shipped: propwash after a throttle
+chop and punch, RMS 1.74 deg/s and peak 10.7 on both; angle mode levels
+without passing level, 19 to 27 ms sooner; pitch at 30 to 40 m/s drifts the
+same half a degree over two seconds on both; the weights 0.97 and 2.27 g
+and the micro at 2.025 g, t90 5 ms quicker and a full stick flip (the fixed
+half second hold) back 0.51 degrees or less where factory's came back 0.48
+to 2.06.
+
+### What it costs, and what is the owner's
+
+- A pad near 180 Hz: half stick roll and pitch stops end 0.08 to 0.20
+  degrees further back than factory's, with a sharper flick back (47 and 52
+  deg/s at their fastest against 35 and 39). Fed only the pad's new samples
+  instead of every 4 ms slot (scratch, Arcade), the flick drops to 16 and 8
+  deg/s at 180 Hz, and the shipped tune's half stick stops come back 0.35
+  degrees, as on the ideal pad. So the rest of the fix is in the shell's
+  input path, not the tune: send the module a frame only when the pad has
+  one, or otherwise stop handing it repeats it reads as lost packets. That
+  moves what the module sees and every golden that flies the 4 ms grid
+  (P3.3 above), so it is put to the owner, not made.
+- Personal bests on the default tune start again: recordKey hashes the
+  composed config's text. The laps flown before stay under their old key.
+  The public board ranks on the clock and never sees the tune.
+- The Tune row still says "Betaflight default". The note under it now says
+  factory 4.5.1 with four settings changed. Whether the name should say it
+  too is the owner's call.
+- npm run check:wall, red on main before this change (8 of 57), is 8 of 57
+  after it, but not the same 8: "yaw 180 deg at 9 m/s: three seconds of
+  nothing and the craft is off the face" now passes and "yaw 90 deg at 9
+  m/s: the contact throws it clear and the pilot flies out" now fails (2.70
+  m out). It flies the shipped tune into a wall, and which headings clear
+  the bar moves with the controller.
+
+### The history scare, for the next session
+
+The first fetch printed `forced update` on origin/main and git merge-base
+between the old main (716562b) and origin/main came back empty. The clone
+was --depth 50. git fetch --unshallow, then merge-base: 716562b is an
+ancestor of ffb173e, 160 commits behind, nothing rewritten.
+
+### RUN LOG
+
+    npm run feel:response        the tables above, 11 s, deterministic;
+                                 departures read from the module:
+                                 motor_kv (stored, not read) and the
+                                 seven keys above
+    npm run lint:presets         before 4 of 4 clean, after 4 of 4 clean
+    npm run lint:fc              before and after 33 of 33; the trace
+                                 hashes move, as they must when the base
+                                 config is the tune that changed, and every
+                                 relation between them holds
+    npm run check:path           12 passed before and after; one flown
+                                 vertical loop reads 1.97 turns, was 2.50
+    npm run check:orbit          17 passed before and after; path error
+                                 11.9 to 11.8 m
+    npm run score:selftest       all passed, before and after
+    npm run lint:arcade          PASS, before and after
+    npm run whoop:gates          exit 0, before and after, same output
+    npm run gates                2 of 20 before and after, same output
+                                 (the roadmap gates that are not built)
+    npm run check:wall           8 of 57 failing before and after, one
+                                 case swapped, above
+    npm run lint:nouns           FAIL before and after, identical:
+                                 src/maps/built/showpiece.js:149 "Drift
+                                 course", not this change
+    npm run lint:shell           PASS, 16 s; the PIDs screen, whose lede
+                                 changed, overflows 154 px as pinned. Its
+                                 notes that fc (3599 against 3613) and
+                                 tricks (1605 against 1649) improved on the
+                                 baseline are the same on main without
+                                 this change; not re-recorded, tests/ is
+                                 not this change's to edit
+    scratch probes               bounce, yaw trace, sweeps of cutoff,
+                                 relax mode, feedforward, shaping, windup,
+                                 limit, yaw P, weights, angle mode,
+                                 propwash, fast flight hold, the repeated
+                                 frame probe; none is in the repository
+    board, read only             GET /board/api/bugs?limit=500 and each
+                                 feel ticket; nothing written
+    npm run build:wasm           not run: emcc is not in this container,
+                                 and nothing under src/native, patches or
+                                 vendor changed; dist/sim.wasm is the one
+                                 on main
+    npm run verify               not run: the change is a config file the
+                                 suite does not load (verify and both
+                                 golden checks fly
+                                 tests/fixtures/config-baseline.diff), and
+                                 nothing in the module, the plant, the
+                                 input path or the build moved. Put to the
+                                 owner with the other scales.
+    git diff --stat vendor/betaflight   empty (the submodule was fetched
+                                 at its pinned commit to read pid.c,
+                                 simplified_tuning.c and rc.c)
+
+### The owner's answers, 2026-09-28
+
+"merge it to main, I'll fly it keep the bf default lable". So the Tune row
+keeps the name "Betaflight default", with the note under it saying what
+changed, and the verification scale is the owner's own flight. Merged to
+main as a fast-forward of claude/vigilant-lovelace-x3mmoa (main had not
+moved since ffb173e); no check was re-run for the merge, because the
+merged tree is the tree the RUN LOG above was run on.
+
+### Live on webfpv.org
+
+main moved to 3d3d79a at 05:46:25 UTC and the deploy was served at
+05:47:57, its files stamped 05:47:23. Read off the live site with a cache
+busting query and hashed against the commit: configs/betaflight-default.diff,
+configs/registry.js, src/ui/ui.js and src/ui/pidspanel.js all match. The
+tune file comes back max-age=0 and cf-cache-status DYNAMIC, so no browser
+holds the old one, and src/fresh.js gives a reloaded page this deploy's
+scripts whole.
+
+For the owner's flight: reload once. The PIDs screen should show the Stick
+response slider at 125 and the three F bars above the stock 4.5.1 notch
+(150, 156, 150). Full stick flips and rolls should stop where the stick
+stops instead of bobbing back, quick stick moves should answer sooner, and
+a yaw turn at three quarter stick should swing back about half as far.
+What would count as wrong: a full stick flip that still visibly bounces,
+small stops that flick back on a radio whose feel report reads a pad under
+about 190 Hz (that part is the input path, measured and put to the owner
+above), or the quad settling off attitude after a quick bank and back by
+more than a degree. Personal bests on the default tune start again.
