@@ -58718,3 +58718,17 @@ own flight, and the change goes to main as a fast-forward of
 claude/awesome-fermi-ey79v1: main had not moved from bab410d, fetched and
 checked before the push. No check was re-run for the merge, because the
 merged tree is the tree the RUN LOG above was run on, plus this note.
+
+### Live on webfpv.org
+
+main moved to cb88635 at about 10:05 UTC, and webfpv.org/sim served it
+at 10:07:29 UTC: src/ui/ui.js and index.html, read off the live site
+with a cache busting query, hash the same as the commit (the same poll
+matched bab410d before the deploy, so the comparison is sound). index.html
+comes back max-age=0; the scripts carry four hours, and src/fresh.js
+gives a reloaded page this deploy's scripts whole.
+
+For the owner's flight: reload once, then Settings, HUD, Crosshairs, and
+try each shape. What would count as wrong: the mark off the centre of
+the picture, lost against the sky or the ground, covering the gate
+you aim through, showing over a menu, or still drawn on Off.
