@@ -59291,3 +59291,33 @@ The owner asked for the four confirmed findings to be fixed, with the cheap scal
 - Finding 20, `src/ui/fc.js` `downloadCli`: revoke after 4 s, as `saveRunCard` does. Not run in a browser, and it is a Safari and old Firefox timing, so a headless Chromium would not have shown it either way.
 
 Checks run this turn: `node --check` on the four files clean; `check:clip` 951 passed, 0 failed (the trackbuilder selftest, which imports `wrapAngle`); `lint:preload` up to date. Not run: `lint:shell`, `lint:devices` and `shots` (browser scale, not asked for, and ui.js changed by four lines outside any layout), and `npm run verify`.
+
+### Full check run, 2026-09-29
+
+The owner asked for everything to pass. Run on the tree after the four fixes and the two lint fixes below.
+
+Two red lints fixed, neither by moving a threshold:
+- `lint:boot` "a thrown frame is caught": the assertion's regex still expected the try inside `frame()`, but it moved to `runFrame()` when the timer loop arrived, so the check reported a wrapper that was there as missing. The assertion now states the same property against the new shape: `frameBody` has exactly one call site, inside a try in `runFrame`, and both `frame` and `frameTimer` go through `runFrame`. Negative test: with a second bare `frameBody(nowWall)` added to main.js it fails, and main.js was restored (`git status` clean after).
+- `lint:nouns`: the road layer name "Drift course" at showpiece.js:149 is now "Drift track". Nothing reads that name; the four world checks below pass unchanged. This had failed and been left alone by earlier turns.
+
+Results:
+
+    npm run verify        17 of 17 pass, exit 0; check 1 (build) SKIPPED: no emcc and
+                          vendor/betaflight empty in this container, so the build and the
+                          vendor-diff-empty test did not run. It ran against the committed
+                          dist/sim.wasm. Nothing native changed this turn.
+    node-only selftests   check:plant (+selftest), crash, crash-pacing, world, chase,
+                          counter, props, roads, clip (951/951), orbit, path, fresh, craft,
+                          replay:test, replay:selftest, gif, ghost, contact, score, link,
+                          input, autoscale, predict, music, stats, support, test:edge,
+                          lint:presets, fc, frame, partners, preload, quality, memory,
+                          arcade, attract, scale: all exit 0
+    browser lints         lint:shell, lint:devices, lint:responsive PASS; lint:input
+                          170 of 170
+    lint:boot, nouns      pass after the fixes above (9 of 9; PASS)
+    check:wall            49 passed, 8 FAILED. Not caused by this turn: the same 8 of 57 fail
+                          on 513e40d in a clean worktree, and PROGRESS.md records that
+                          state on main already. Left red and not argued away.
+    check:world-golden:selftest, check:world-engines:selftest   pass
+
+Not run, and why: `lint:catalog` (needs the empty vendor/betaflight), `lint:board` (SKIP: the LeaderBoard repo is not checked out beside this one), `build:wasm`, `gen:*`, and the longer manual drivers (`park:fly`, `trick:sweep`, `gates`, `micro:check`, `whoop:gates`, `shots`). A green run here is therefore not evidence about the build or the vendored tree.
