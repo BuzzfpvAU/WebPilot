@@ -52,6 +52,11 @@ const app = new App({
   results: document.getElementById('tb-results'),
   profile,
   readout: document.getElementById('tb-readout'),
+  /* The whoop canvas's chrome over the room: see ui.js. */
+  card: document.getElementById('tb-card'),
+  empty: document.getElementById('tb-empty'),
+  coach: document.getElementById('tb-coach'),
+  lapbar: document.getElementById('tb-lapbar'),
   toast: document.getElementById('tb-toast'),
   modal: document.getElementById('tb-modal'),
 });

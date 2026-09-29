@@ -10,12 +10,20 @@
  * builder's separate one. If a gate ever appears lying on its side, this
  * rotation is the only line that can be responsible.
  *
- * The preview is read only except for one thing the task allows: dragging an
- * element's height. Drag on empty space orbits, drag on an element that can
- * hold a height raises or lowers it (a bar, a waypoint, and on a map any
- * asset, which is set down on what is under it when let go: see seat.js),
- * drag on anything that stands on the ground orbits, middle or right drag
- * pans, the wheel zooms.
+ * On the five inch and freestyle canvases the preview is read only except for
+ * one thing: dragging an element's height. Drag on empty space orbits, drag on
+ * an element that can hold a height raises or lowers it (a bar, a waypoint, and
+ * on a map any asset, which is set down on what is under it when let go: see
+ * seat.js), drag on anything that stands on the ground orbits, middle or right
+ * drag pans, the wheel zooms.
+ *
+ * ON A WHOOP CANVAS THE ROOM IS THE TOOL. Its gestures are edit3d.js's (place
+ * with a click and a ghost, pull a gate across the floor, turn it by the ring at
+ * its foot, box select), and this file draws what they need: the ghost, the
+ * ring, a translucent pane in every opening in RaceGOW's own colour, an arrow
+ * through it, and the flying order's numbers as HTML bubbles over the canvas so
+ * they stay one size and can be clicked. The two sets of gestures never run
+ * together: roomEditing() says which.
  *
  * The scene is rebuilt wholesale whenever the document changes. A track is
  * tens of objects, not thousands, and a rebuild that cannot get out of step
@@ -72,11 +80,12 @@
  */
 
 import { ELEMENTS, KIND, FRAME_TUBE_OD, GATE_FLAG_POLE_R, docModeOf, flagLeanSign, flagSideOf, flagSideSigns, frameSidesOf, gateFlagHeight, isUnbuilt, trackClassOf, virtualApertureDims } from './elements.js';
-import { PIPE_OD as RACEGOW_PIPE_OD } from './racegow.js';
+import { PIPE_OD as RACEGOW_PIPE_OD, GATE_OPENING_DEFAULT, envelopeFor } from './racegow.js';
 import {
-  aperturesOf, elementById, kindOf, apertureCenter, logosOf, logoForDecal, dressOrder,
+  aperturesOf, createElement, elementById, kindOf, apertureCenter, logosOf, logoForDecal, dressOrder, topOf,
 } from './model.js';
 import { sequenceNumbers } from './sequence.js';
+import { RoomEditor } from './edit3d.js';
 import { frameRectFor } from './snap.js';
 import { levelName } from './figures.js';
 import { travelDirection, markerPassDir } from './faces.js';
@@ -132,6 +141,28 @@ const COL = {
   /* A named gap's window: a deeper amber than the selection's, so a
    * selected gap still reads as selected. */
   gap: 0xffa726,
+  /* The whoop room: the hall dimmed, the RaceGOW envelope lit inside it, the
+   * arrow through an opening, and the ring at a selected gate's foot. */
+  groundDim: 0x0f1a24,
+  envelope: 0x1f3345,
+  envelopeLine: 0x5f86a8,
+  arrow: 0xf7e8cd,
+  measure: { legal: 0x7dffb4, close: 0xffb347, near: 0xffb347, plain: 0xdfe9f2 },
+};
+
+/*
+ * RaceGOW'S OWN COLOURS, from the official diagrams (RACEGOW_ELEMENTS in
+ * racegow.js), laid as a translucent pane in every opening so a RaceGOW pilot
+ * reads a track already: start and finish green, a single gate yellow, stacks
+ * purple, an elevated gate orange, a horizontal gate blue, poles red (a pole is
+ * drawn red already). The gate the lap starts and stops on is the first one in
+ * the flying order.
+ */
+const RACEGOW_HEX = {
+  green: 0x35c47c, yellow: 0xf5c542, purple: 0x9b6bff, orange: 0xff8a3d, blue: 0x4aa8ff, red: 0xe5484d,
+};
+const RACEGOW_TYPE_COLOUR = {
+  gate: 'yellow', doubleStack: 'purple', ladder: 'purple', tower: 'orange', diveGate: 'blue',
 };
 
 /* Filled in by loadThree() on the first press of the 3D button. Until then
@@ -385,6 +416,14 @@ const MICRO_LABEL_K = 0.14;
 /* The camera's vertical field of view, named once because framing a track needs it. */
 const FOV_DEG = 52;
 
+/* The camera a whoop room opens at, three quarters from the front left, and the
+ * one Plan looks down from (as near straight down as applyCamera allows). */
+const ROOM_ANGLE = { theta: (3 * Math.PI) / 4, phi: 0.85 };
+const PLAN_PHI = Math.PI / 2 - 0.02;
+
+/* How much fatter than the pipe the stand-in a whoop gate is picked by is, in
+ * metres across: 26.7 mm of PVC becomes about 8 cm to hit. */
+const PICK_PIPE = 0.055;
 const LINE_GRAB_PX = 9;
 const BEND_START_PX = 4;
 /* How far a pull upward on something that stands on the ground travels before
@@ -620,7 +659,32 @@ export class View3D {
     this.traffic = null;
     this.play = null;
     this.playUi = null;
+    /* The whoop room. Each element's drawing by id, so a drag can move it
+     * without a rebuild; the racing line, so it can be redrawn alone; what
+     * the pointer is over; the ghost of the piece about to be placed and the
+     * distances shown beside it; the box being dragged; and the HTML laid over
+     * the canvas. */
+    this.groups = new Map();
+    this.pathLine = null;
+    this.faceSig = '';
+    this.hoverId = null;
+    this.ghost = null;
+    this.ghostGroup = null;
+    this.measures = [];
+    this.overlay = null;
+    this.bubbles = [];
+    this.measureNodes = [];
+    this.boxNode = null;
+    this.angled = false;
+    this.roomAngle = null;
+    this.editor = new RoomEditor(this, host);
+    this.ensureOverlay();
     this.bind();
+  }
+
+  /* Whether the whoop room's gestures are the ones answering the pointer. */
+  roomEditing() {
+    return this.editor.active();
   }
 
   isFreestyle() {
@@ -798,6 +862,7 @@ export class View3D {
       /* Play is a preview of the 3D view's; leaving the view stops it. */
       this.stopPlay();
       this.updatePlayUi();
+      this.overlay.hidden = true;
       return true;
     }
     if (!THREE) {
@@ -923,18 +988,79 @@ export class View3D {
       this.focusDoc({ x: f.width / 2, y: f.depth / 2, z: 0 }, Math.max(f.width, f.depth) * 1.15);
       return;
     }
+    if (!this.angled) {
+      this.orbit.theta = ROOM_ANGLE.theta;
+      this.orbit.phi = ROOM_ANGLE.phi;
+      this.angled = true;
+    }
     const rect = this.canvas.getBoundingClientRect();
     const sized = rect.width > 0 && rect.height > 0;
-    this.needsFrame = !sized;
-    const aspect = sized ? rect.width / rect.height : 1.6;
-    const vfov = (FOV_DEG * Math.PI) / 180;
-    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
     const r = frameRectFor(doc);
-    const half = Math.hypot(r.maxX - r.minX, r.maxY - r.minY) / 2;
-    this.focusDoc(
-      { x: (r.minX + r.maxX) / 2, y: (r.minY + r.maxY) / 2, z: 0.3 },
-      (half * 1.1) / Math.sin(Math.min(vfov, hfov) / 2),
-    );
+    const top = Math.max(0.9, ...doc.elements.map((e) => topOf(e)));
+    const target = { x: (r.minX + r.maxX) / 2, y: (r.minY + r.maxY) / 2, z: top * 0.4 };
+    /* Before Three.js has arrived there is no camera to measure with: a rough
+     * distance stands in, and the frame is done again when the room is made. */
+    if (!THREE || !this.camera || !this.root) {
+      this.needsFrame = true;
+      const half = Math.hypot(r.maxX - r.minX, r.maxY - r.minY) / 2;
+      this.focusDoc(target, (half * 1.1) / Math.sin((FOV_DEG * Math.PI) / 360));
+      return;
+    }
+    this.needsFrame = !sized;
+    this.focusDoc(target, this.fitRadius(r, top, target, sized ? rect.width / rect.height : 1.6));
+  }
+
+  /*
+   * HOW FAR THE CAMERA HAS TO BE FOR A BOX TO FIT, AT THE ANGLE IT IS AT. The
+   * box is the floor rectangle and the height of the tallest piece; the answer
+   * is the nearest distance at which all eight corners are inside the picture
+   * with a margin, found by halving, because the camera turns and a rectangle
+   * fits from one bearing and not from another, and the picture is not always
+   * the shape of the window it was framed in (a load that arrives while the
+   * plan is showing frames a canvas that has no size: see setEnabled).
+   */
+  fitRadius(r, top, target, aspect) {
+    const o = this.orbit;
+    const saved = { target: { ...o.target }, radius: o.radius, aspect: this.camera.aspect };
+    this.camera.aspect = aspect;
+    this.camera.updateProjectionMatrix();
+    const corners = [];
+    for (const z of [0, top]) {
+      for (const x of [r.minX, r.maxX]) {
+        for (const y of [r.minY, r.maxY]) {
+          corners.push(new THREE.Vector3(x, y, z));
+        }
+      }
+    }
+    o.target = { x: target.x, y: target.z, z: -target.y };
+    const v = new THREE.Vector3();
+    const fits = (radius) => {
+      o.radius = radius;
+      this.applyCamera();
+      this.camera.updateMatrixWorld(true);
+      this.root.updateMatrixWorld(true);
+      return corners.every((c) => {
+        v.copy(c);
+        this.root.localToWorld(v);
+        v.project(this.camera);
+        return v.z > -1 && v.z < 1 && Math.abs(v.x) <= 0.86 && Math.abs(v.y) <= 0.86;
+      });
+    };
+    let lo = this.nearestRadius(0.6);
+    let hi = 60;
+    for (let i = 0; i < 28; i += 1) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) {
+        hi = mid;
+      } else {
+        lo = mid;
+      }
+    }
+    o.target = saved.target;
+    o.radius = saved.radius;
+    this.camera.aspect = saved.aspect;
+    this.camera.updateProjectionMatrix();
+    return hi;
   }
 
   /*
@@ -974,12 +1100,118 @@ export class View3D {
      * on plain hover, with no button held. View2D has had this for a
      * while. */
     cv.addEventListener('pointercancel', (e) => this.onCancel(e));
+    cv.addEventListener('pointerleave', () => this.editor.onLeave());
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (this.roomEditing()) {
+        this.editor.onWheel(e);
+        return;
+      }
       this.orbit.radius *= Math.exp(e.deltaY * 0.0012);
       this.dirty = true;
       this.host.requestDraw();
     }, { passive: false });
+  }
+
+  /* ---------------- camera moves the room's gestures share ---------------- */
+
+  /* Turn the camera round what it looks at. Screen right is round to the
+   * left, screen down is up, which is what the drag on empty space always did. */
+  orbitBy(dx, dy) {
+    this.orbit.theta += dx * 0.006;
+    this.orbit.phi += dy * 0.006;
+    this.angled = true;
+    this.cameraMoved();
+  }
+
+  /* A camera move redraws. The other canvases have always rebuilt the scene
+   * with it, and go on doing so; the whoop room does not, because its HTML
+   * (numbers, distances) is rebuilt with the scene and a rebuild on every frame
+   * of an orbit would take a number that is being typed into out from under
+   * the typing. */
+  cameraMoved() {
+    if (!this.host.isWhoopRace()) {
+      this.dirty = true;
+    }
+    this.host.requestDraw();
+  }
+
+  /* Slide the camera in its own screen plane, scaled by distance so the ground
+   * appears to follow the pointer at any zoom. */
+  panBy(dx, dy) {
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    this.camera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
+    const k = this.orbit.radius * 0.0016;
+    const t = this.orbit.target;
+    this.orbit.target = {
+      x: t.x + (-dx * k) * right.x + (dy * k) * up.x,
+      y: t.y + (-dx * k) * right.y + (dy * k) * up.y,
+      z: t.z + (-dx * k) * right.z + (dy * k) * up.z,
+    };
+    this.cameraMoved();
+  }
+
+  /* Zoom so that what is under the pointer stays under it, which is what
+   * "toward the pointer" means: the floor point there is found before and after
+   * and the camera is slid by the difference. */
+  zoomToward(clientX, clientY, factor) {
+    const before = this.levelPoint(clientX, clientY, 0);
+    this.orbit.radius = clamp(this.orbit.radius * factor, this.nearestRadius(2), 600);
+    this.applyCamera();
+    this.camera.updateMatrixWorld(true);
+    const after = this.levelPoint(clientX, clientY, 0);
+    if (before && after) {
+      const t = this.orbit.target;
+      this.orbit.target = { x: t.x + (before.x - after.x), y: t.y, z: t.z - (before.y - after.y) };
+    }
+    this.angled = true;
+    this.cameraMoved();
+  }
+
+  /* Fetch Three.js without turning the room on: what a whoop canvas does the
+   * moment it opens, so the room is ready when its turn comes. Resolves true
+   * when the library is there and never rejects. */
+  async preload() {
+    if (THREE) {
+      return true;
+    }
+    try {
+      await loadThree();
+      return true;
+    } catch (e) {
+      this.loadError = e.message ?? String(e);
+      return false;
+    }
+  }
+
+  /* Straight down with north up, for measuring, and back to the angle the room
+   * had. Plan is a camera and not a second editor: every gesture is the same. */
+  setPlanCamera(on) {
+    const o = this.orbit;
+    if (on) {
+      if (!this.isPlan()) {
+        this.roomAngle = { theta: o.theta, phi: o.phi };
+      }
+      o.theta = Math.PI / 2;
+      o.phi = PLAN_PHI;
+    } else if (this.isPlan()) {
+      const back = this.roomAngle ?? ROOM_ANGLE;
+      o.theta = back.theta;
+      o.phi = back.phi;
+    }
+    this.angled = true;
+    this.cameraMoved();
+  }
+
+  isPlan() {
+    return this.orbit.phi >= PLAN_PHI - 0.02;
+  }
+
+  /* Which way the camera looks along the floor, in DOCUMENT coordinates: what
+   * the arrow keys are measured against. */
+  floorForward() {
+    return { x: -Math.cos(this.orbit.theta), y: Math.sin(this.orbit.theta) };
   }
 
   ndc(e) {
@@ -1008,11 +1240,16 @@ export class View3D {
       return null;
     }
     const o = hits[0].object;
+    /* Where it was hit, in document coordinates: the root is the one place a
+     * scene point becomes one. */
+    const local = this.root.worldToLocal(hits[0].point.clone());
     return {
       id: o.userData.elementId,
       side: o.userData.side ?? null,
       weak: o.userData.weak === true,
+      ring: o.userData.ring === true,
       distance: hits[0].distance,
+      point: { x: local.x, y: local.y, z: local.z },
     };
   }
 
@@ -1156,6 +1393,10 @@ export class View3D {
     if (!this.enabled || !this.renderer) {
       return;
     }
+    if (this.roomEditing()) {
+      this.editor.onDown(e);
+      return;
+    }
     this.canvas.setPointerCapture(e.pointerId);
     const at = { x: e.clientX, y: e.clientY };
     if (e.button === 1 || e.button === 2) {
@@ -1215,17 +1456,7 @@ export class View3D {
        * keeps the height drag.
        */
       if (el && el.type === 'waypoint' && !e.shiftKey && docModeOf(this.host.doc) !== 'freestyle') {
-        const g = this.levelPoint(e.clientX, e.clientY, el.position.z);
-        this.host.beginWaypointDrag();
-        this.drag = {
-          kind: 'bend',
-          id,
-          last: at,
-          z: el.position.z,
-          offset: g ? { x: el.position.x - g.x, y: el.position.y - g.y } : { x: 0, y: 0 },
-          moved: false,
-          reanchor: false,
-        };
+        this.beginWaypointGrab(e, id, at);
         return;
       }
       this.host.beginEdit('height');
@@ -1241,7 +1472,32 @@ export class View3D {
     this.drag = { kind: 'orbit', last: at };
   }
 
+  /* A press on a waypoint: a drag on one moves it across its own level, and Alt
+   * moves it up and down. One undo step, and the gates either side are pinned
+   * on the first move (moveWaypoint). */
+  beginWaypointGrab(e, id, at) {
+    const el = elementById(this.host.doc, id);
+    if (!el) {
+      return;
+    }
+    const g = this.levelPoint(e.clientX, e.clientY, el.position.z);
+    this.host.beginWaypointDrag();
+    this.drag = {
+      kind: 'bend',
+      id,
+      last: at,
+      z: el.position.z,
+      offset: g ? { x: el.position.x - g.x, y: el.position.y - g.y } : { x: 0, y: 0 },
+      moved: false,
+      reanchor: false,
+    };
+  }
+
   onMove(e) {
+    if (!this.drag && this.roomEditing()) {
+      this.editor.onMove(e);
+      return;
+    }
     if (!this.drag) {
       /* Hovering: say so when the pointer is on the line. */
       if (this.enabled && this.renderer) {
@@ -1321,27 +1577,11 @@ export class View3D {
           this.host.toast(`${def ? def.label : 'That'} stands on the ground, so it has no height to drag.${def && def.kind === KIND.APERTURE ? ' To lift the opening on its legs, set Sill height.' : ''}`);
         }
       }
-      this.orbit.theta += dx * 0.006;
-      this.orbit.phi += dy * 0.006;
-      this.dirty = true;
-      this.host.requestDraw();
+      this.orbitBy(dx, dy);
       return;
     }
     if (this.drag.kind === 'pan') {
-      /* Pan in the camera's own screen plane, scaled by distance so the
-       * ground appears to follow the pointer at any zoom. */
-      const right = new THREE.Vector3();
-      const up = new THREE.Vector3();
-      this.camera.matrixWorld.extractBasis(right, up, new THREE.Vector3());
-      const k = this.orbit.radius * 0.0016;
-      const t = this.orbit.target;
-      this.orbit.target = {
-        x: t.x + (-dx * k) * right.x + (dy * k) * up.x,
-        y: t.y + (-dx * k) * right.y + (dy * k) * up.y,
-        z: t.z + (-dx * k) * right.z + (dy * k) * up.z,
-      };
-      this.dirty = true;
-      this.host.requestDraw();
+      this.panBy(dx, dy);
       return;
     }
     if (this.drag.kind === 'height') {
@@ -1353,6 +1593,10 @@ export class View3D {
   }
 
   onCancel(e) {
+    if (!this.drag && this.roomEditing()) {
+      this.editor.onCancel(e);
+      return;
+    }
     if (this.drag && this.drag.kind === 'height') {
       this.host.cancelEdit();
     }
@@ -1369,6 +1613,9 @@ export class View3D {
 
   onUp(e) {
     if (!this.drag) {
+      if (this.roomEditing()) {
+        this.editor.onUp(e);
+      }
       return;
     }
     if (this.drag.kind === 'height') {
@@ -1450,9 +1697,20 @@ export class View3D {
     const doc = this.host.doc;
     const g = new THREE.Group();
     this.pickables = [];
+    /* What the room's gestures need to find again: each piece's drawing, the
+     * panes that light up under the pointer, and the numbers to hang over the
+     * canvas. */
+    this.groups = new Map();
+    this.panes = new Map();
+    this.bubbleSpecs = [];
+    const whoop = this.host.isWhoopRace();
+    this.startGateId = whoop ? this.startGateOf(doc) : null;
 
     g.add(this.fieldGround(doc));
     g.add(this.gridLines(doc));
+    if (whoop) {
+      g.add(this.buildEnvelope(doc));
+    }
 
     const numbers = sequenceNumbers(doc);
     /* Which of the course's marks each dressed structure wears, by the same
@@ -1463,6 +1721,13 @@ export class View3D {
       const node = this.buildElement(el, numbers.get(el.id) ?? []);
       if (node) {
         g.add(node);
+        this.groups.set(el.id, node);
+      }
+    }
+    if (whoop && this.host.selection.size === 1) {
+      const only = elementById(doc, [...this.host.selection][0]);
+      if (only && kindOf(only) === KIND.APERTURE) {
+        this.buildRing(this.groups.get(only.id), only);
       }
     }
 
@@ -1473,12 +1738,19 @@ export class View3D {
        * from the one they fly. */
       g.add(this.buildGuideMarks(this.host.path));
     }
+    this.pathLine = null;
     if (this.host.pathVisible && this.host.path && this.host.path.samples.length > 1) {
-      g.add(this.buildPath(this.host.path));
+      this.pathLine = this.buildPath(this.host.path);
+      g.add(this.pathLine);
     }
 
     this.content = g;
     this.root.add(g);
+    this.faceSig = this.signature();
+    this.applyHover();
+    if (whoop) {
+      this.syncBubbles();
+    }
   }
 
   /* The race preview's ground, in document coordinates: the plane spans x
@@ -1486,7 +1758,7 @@ export class View3D {
   fieldGround(doc) {
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(doc.field.width, doc.field.depth),
-      new THREE.MeshLambertMaterial({ color: COL.ground }),
+      new THREE.MeshLambertMaterial({ color: this.host.isWhoopRace() ? COL.groundDim : COL.ground }),
     );
     ground.position.set(doc.field.width / 2, doc.field.depth / 2, -0.01);
     return ground;
@@ -1646,9 +1918,36 @@ export class View3D {
     /* Same switch as the plan. Off, the opening is bare and the line
      * through it can be read. The sequence list still has the numbers. */
     const showLabels = this.host.labelsVisible !== false;
+    const whoop = this.host.isWhoopRace();
     for (const n of showLabels ? numbers : []) {
       /* A waypoint has no number: see gateNumbers in sequence.js. */
       if (n.number == null) {
+        continue;
+      }
+      /*
+       * ON A WHOOP CANVAS THE NUMBER IS A BUBBLE OF HTML over the canvas, not a
+       * sprite in the scene: one size on the screen at any distance, crisp, a
+       * button that can be clicked to give the gate another place in the
+       * order, and no canvas texture painted and uploaded for it on every
+       * rebuild. It hangs above the opening it belongs to, and a structure
+       * flown twice has one per pass.
+       */
+      if (whoop && el.id !== '__ghost') {
+        let dz = def.kind === KIND.MARKER ? el.dims.height + 0.12 : 1.0;
+        if (def.kind === KIND.APERTURE) {
+          const levels = aperturesOf(el);
+          const ap = levels[Math.min(n.apertureIndex ?? 0, levels.length - 1)];
+          dz = ap.centerH + ap.clearH / 2 + 0.1;
+        }
+        const same = numbers.filter((x) => (x.apertureIndex ?? 0) === (n.apertureIndex ?? 0));
+        this.bubbleSpecs.push({
+          id: el.id,
+          seqId: n.seq.id,
+          number: n.number,
+          dz,
+          slot: Math.max(0, same.findIndex((x) => x.seq === n.seq)),
+          selected,
+        });
         continue;
       }
       let label = String(n.number);
@@ -1736,6 +2035,21 @@ export class View3D {
         this.register(bar, el);
         frame.add(bar);
         drawn += 1;
+        /*
+         * A FATTER PIPE, NEVER DRAWN, on a whoop canvas. 26.7 mm of PVC is two or
+         * three pixels from any distance that shows a whole track, and from the
+         * plan camera a standing gate is nothing but that top pipe: without a
+         * stand-in a gate can hardly be hit there at all. It answers for the same
+         * side, and is not weak, so it beats the racing line.
+         */
+        if (this.host.isWhoopRace()) {
+          const grab = new THREE.Mesh(new THREE.BoxGeometry(w + PICK_PIPE, h + PICK_PIPE, tube + PICK_PIPE), this.grabMaterial());
+          grab.position.set(x, y, 0);
+          grab.visible = false;
+          grab.userData.side = side;
+          this.register(grab, el);
+          frame.add(grab);
+        }
       }
       /*
        * A gap in the lattice has no pipe to click on, and an author still
@@ -1754,13 +2068,27 @@ export class View3D {
        * click from a flag or a pole seen through a gate.
        */
       if (!drawn || trackClassOf(this.host.doc) === 'micro') {
-        const pick = new THREE.Mesh(
-          new THREE.PlaneGeometry(ap.clearW, ap.clearH),
-          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
-        );
+        /*
+         * And on a whoop canvas that pane is SEEN: a translucent one in
+         * RaceGOW's own colour for the kind of gate it is, so a gate reads
+         * from across the hall and its middle is something to hit. Lit a
+         * little more under the pointer and more again when selected.
+         */
+        const seen = this.host.isWhoopRace();
+        const pane = new THREE.MeshBasicMaterial(seen
+          ? {
+            color: this.paneColour(el), transparent: true, opacity: selected ? 0.42 : 0.28, side: THREE.DoubleSide, depthWrite: false,
+          }
+          : { transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+        const pick = new THREE.Mesh(new THREE.PlaneGeometry(ap.clearW, ap.clearH), pane);
         pick.userData.weak = true;
         this.register(pick, el);
         frame.add(pick);
+        if (seen && el.id !== '__ghost') {
+          const list = this.panes.get(el.id) ?? [];
+          list.push({ mat: pane, base: selected ? 0.42 : 0.28 });
+          this.panes.set(el.id, list);
+        }
       }
       /*
        * A line loop around the TRUE clear opening, on top of the tubes.
@@ -1861,11 +2189,24 @@ export class View3D {
      * either side of the opening, so which way the gate is flown is legible
      * from any angle without reading a number.
      */
+    const whoopRoom = this.host.isWhoopRace();
     for (const n of numbers) {
       const ap = levels[Math.min(n.apertureIndex ?? 0, levels.length - 1)];
       const seq = n.seq;
       if (!seq || seq.entry === 0) {
         continue;
+      }
+      /* On a whoop canvas every pass carries an arrow through its opening, and
+       * the green entry and red exit panes are kept for the selected gate, so
+       * a room of them is not a room of green and red glass. */
+      if (whoopRoom) {
+        const along = { x: f.normal.x * seq.entry, y: f.normal.y * seq.entry, z: f.normal.z * seq.entry };
+        const arrow = arrowMesh(along, Math.max(0.3, ap.clearW * 0.85), selected ? COL.frameSel : COL.arrow);
+        arrow.position.set(0, 0, ap.centerH);
+        group.add(arrow);
+        if (!selected) {
+          continue;
+        }
       }
       for (const [side, colour] of [[-seq.entry, COL.entry], [seq.entry, COL.exit]]) {
         const pane = new THREE.Mesh(
@@ -2270,6 +2611,451 @@ export class View3D {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = 2;
     return mesh;
+  }
+
+  /* ---------------- the whoop room: what building needs drawn ---------------- */
+
+  /* The gate the lap starts and stops on: the first opening in the flying
+   * order. RaceGOW draws it green on every diagram. */
+  startGateOf(doc) {
+    for (const s of doc.sequence) {
+      const el = elementById(doc, s.elementId);
+      if (el && kindOf(el) === KIND.APERTURE) {
+        return el.id;
+      }
+    }
+    return null;
+  }
+
+  /* The one material every never-drawn stand-in shares, so a rebuild does not make
+   * (and disposeContent does not free) one for each of a hundred pipes. */
+  grabMaterial() {
+    if (!this.grabMat) {
+      this.grabMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+      this.grabMat.userData.sharedKit = true;
+    }
+    return this.grabMat;
+  }
+
+  /* The colour of the pane in a gate's opening: see RACEGOW_HEX. The ghost of
+   * the very first gate is the start gate it is about to be. */
+  paneColour(el) {
+    if (el.id === this.startGateId || (el.id === '__ghost' && !this.startGateOf(this.host.doc))) {
+      return RACEGOW_HEX.green;
+    }
+    return RACEGOW_HEX[RACEGOW_TYPE_COLOUR[el.type] ?? 'yellow'];
+  }
+
+  /*
+   * THE ENVELOPE: RaceGOW's 4 by 6 ft rectangle scaled by the gate size (1.42
+   * by 2.13 m at 28 in), drawn lit on the floor of a hall that is dimmed
+   * round it. It is what a track has to fit in and what an empty canvas
+   * frames, and it sits where the game puts a track, on the middle of the room.
+   */
+  buildEnvelope(doc) {
+    const g = new THREE.Group();
+    const first = doc.elements.find((e) => kindOf(e) === KIND.APERTURE);
+    const env = envelopeFor(first ? first.dims.clearW : GATE_OPENING_DEFAULT);
+    const cx = doc.field.width / 2;
+    const cy = doc.field.depth / 2;
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(env.width, env.depth),
+      new THREE.MeshLambertMaterial({ color: COL.envelope }),
+    );
+    plane.position.set(cx, cy, -0.004);
+    g.add(plane);
+    const hw = env.width / 2;
+    const hd = env.depth / 2;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute([
+      cx - hw, cy - hd, 0.005, cx + hw, cy - hd, 0.005, cx + hw, cy + hd, 0.005, cx - hw, cy + hd, 0.005,
+    ], 3));
+    g.add(new THREE.LineLoop(geo, new THREE.LineBasicMaterial({ color: COL.envelopeLine })));
+    return g;
+  }
+
+  /*
+   * THE RING AT A SELECTED GATE'S FOOT, and the knob on it where the gate
+   * faces: drag it and the gate turns (edit3d.js), in quarter turns unless Alt
+   * is held. A gate never leaves the floor, so a ring on the floor is the
+   * handle rather than a gizmo in the air. The visible ring is a thin line; the
+   * thing that is hit is a band five times as wide, never drawn.
+   */
+  buildRing(group, el) {
+    if (!group) {
+      return;
+    }
+    const r = aperturesOf(el)[0].clearW / 2 + 0.32;
+    const line = new THREE.Mesh(
+      new THREE.RingGeometry(r - 0.012, r + 0.012, 64),
+      new THREE.MeshBasicMaterial({ color: COL.frameSel, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    line.position.z = 0.006;
+    group.add(line);
+    const grab = new THREE.Mesh(
+      new THREE.RingGeometry(r - 0.07, r + 0.07, 64),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    grab.position.z = 0.008;
+    grab.userData.ring = true;
+    this.register(grab, el);
+    group.add(grab);
+    const knob = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 14, 10),
+      new THREE.MeshBasicMaterial({ color: COL.frameSel }),
+    );
+    knob.position.set(Math.cos(el.yaw) * r, Math.sin(el.yaw) * r, 0.05);
+    knob.userData.ring = true;
+    this.register(knob, el);
+    group.add(knob);
+  }
+
+  /* ---------------- a drag that does not rebuild ---------------- */
+
+  /*
+   * WHAT A PIECE'S DRAWING DEPENDS ON THAT A MOVE CAN CHANGE BESIDES WHERE IT
+   * IS: which way every piece faces and which way every pass is flown, because
+   * the auto rule re-derives both after every edit. A drag that leaves all of
+   * it as it was can slide the pieces' own groups and redraw the line, which
+   * is a fraction of a rebuild; one that does not, a gate that turns as it is
+   * carried across an old auto faced track, rebuilds.
+   */
+  signature() {
+    const doc = this.host.doc;
+    return `${doc.elements.map((e) => `${e.yaw}|${e.pitch}`).join(';')}#${doc.sequence.map((q) => `${q.entry}|${q.passSide}|${q.apertureIndex}`).join(';')}`;
+  }
+
+  /* The pieces have moved in the document: move their drawings to match. */
+  movePieces(ids) {
+    const doc = this.host.doc;
+    if (!this.groups.size || this.signature() !== this.faceSig) {
+      this.dirty = true;
+      this.host.requestDraw();
+      return;
+    }
+    for (const id of ids) {
+      const group = this.groups.get(id);
+      const el = elementById(doc, id);
+      if (!group || !el) {
+        this.dirty = true;
+        this.host.requestDraw();
+        return;
+      }
+      group.position.set(el.position.x, el.position.y, el.position.z);
+    }
+    this.redrawLine();
+    this.host.requestDraw();
+  }
+
+  /* The racing line alone, from the path as it stands. */
+  redrawLine() {
+    if (this.pathLine) {
+      this.pathLine.removeFromParent();
+      this.pathLine.geometry.dispose();
+      this.pathLine.material.dispose();
+      this.pathLine = null;
+    }
+    const path = this.host.path;
+    if (this.content && this.host.pathVisible && path && path.samples.length > 1) {
+      this.pathLine = this.buildPath(path);
+      this.content.add(this.pathLine);
+    }
+  }
+
+  /* ---------------- the pointer, the ghost and the distances ---------------- */
+
+  /* Light the panes of what the pointer is over. */
+  setHover(id) {
+    if (id === this.hoverId) {
+      return;
+    }
+    this.hoverId = id;
+    this.applyHover();
+    this.host.requestDraw();
+  }
+
+  applyHover() {
+    for (const [id, list] of this.panes) {
+      for (const p of list) {
+        p.mat.opacity = p.base + (id === this.hoverId ? 0.12 : 0);
+      }
+    }
+  }
+
+  /* Free what a group holds, and take it out of the scene. */
+  freeGroup(group) {
+    group.traverse((o) => {
+      if (o.geometry) {
+        o.geometry.dispose();
+      }
+      if (o.material) {
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          if (!(m.userData && m.userData.sharedKit)) {
+            m.dispose();
+          }
+        }
+      }
+    });
+    group.removeFromParent();
+  }
+
+  /*
+   * THE GHOST: the piece a click would place, drawn faint where it would go,
+   * facing the way it would face, with an arrow through it. Rebuilt only when
+   * the snapped spot or the heading changes. It is never picked, and a piece
+   * that cannot be drawn is not drawn rather than taking the room down.
+   */
+  setGhost(g) {
+    const key = `${g.type}|${g.position.x.toFixed(4)}|${g.position.y.toFixed(4)}|${g.yaw.toFixed(4)}`;
+    if (this.ghost && this.ghost.key === key) {
+      return;
+    }
+    this.ghost = { ...g, key };
+    this.rebuildGhost();
+    this.host.requestDraw();
+  }
+
+  clearGhost() {
+    if (!this.ghost && !this.ghostGroup) {
+      return;
+    }
+    this.ghost = null;
+    this.rebuildGhost();
+    this.host.requestDraw();
+  }
+
+  rebuildGhost() {
+    if (this.ghostGroup) {
+      this.freeGroup(this.ghostGroup);
+      this.ghostGroup = null;
+    }
+    const g = this.ghost;
+    if (!g || !this.root) {
+      return;
+    }
+    const def = ELEMENTS[g.type];
+    if (!def || ![KIND.APERTURE, KIND.MARKER, KIND.OBSTACLE].includes(def.kind)) {
+      return;
+    }
+    const saved = this.pickables;
+    this.pickables = [];
+    try {
+      const el = createElement(this.host.doc, g.type, g.position, g.yaw);
+      el.id = '__ghost';
+      const node = this.buildElement(el, []);
+      node.traverse((o) => {
+        if (!o.material) {
+          return;
+        }
+        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+          if (!(m.userData && m.userData.sharedKit)) {
+            m.transparent = true;
+            m.opacity = Math.min(m.opacity ?? 1, 0.55);
+          }
+        }
+      });
+      if (def.kind === KIND.APERTURE) {
+        const ap = aperturesOf(el)[0];
+        const arrow = arrowMesh({ x: Math.cos(g.yaw), y: Math.sin(g.yaw), z: 0 }, Math.max(0.3, ap.clearW * 0.85), COL.arrow, 0.7);
+        arrow.position.set(0, 0, ap.centerH);
+        node.add(arrow);
+      }
+      this.ghostGroup = node;
+      this.root.add(node);
+    } catch (e) {
+      this.ghost = null;
+    } finally {
+      this.pickables = saved;
+    }
+  }
+
+  /*
+   * THE DISTANCES: a line between two openings' middles and, laid over the
+   * canvas, the number on it in both units, green where the pair is a legal
+   * side by side pair and amber where it is too close or nearly one (spacingTone
+   * in snap.js). Redrawn only when they change.
+   */
+  setMeasures(list) {
+    const key = list.map((m) => [m.from, m.to].map((p) => `${p.x.toFixed(3)},${p.y.toFixed(3)},${p.z.toFixed(3)}`).join('>')).join('|');
+    if (key === this.measureKey) {
+      return;
+    }
+    this.measureKey = key;
+    this.measures = list;
+    if (this.measureGroup) {
+      this.freeGroup(this.measureGroup);
+      this.measureGroup = null;
+    }
+    if (list.length && this.root) {
+      const g = new THREE.Group();
+      for (const m of list) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute([m.from.x, m.from.y, m.from.z, m.to.x, m.to.y, m.to.z], 3));
+        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+          color: COL.measure[m.tone] ?? COL.measure.plain, transparent: true, opacity: 0.9, depthTest: false,
+        }));
+        line.renderOrder = 12;
+        g.add(line);
+      }
+      this.measureGroup = g;
+      this.root.add(g);
+    }
+    for (const n of this.measureNodes) {
+      n.remove();
+    }
+    this.measureNodes = [];
+    for (const m of list) {
+      const n = document.createElement('div');
+      n.className = `tb-measure tone-${m.tone}`;
+      n.textContent = m.text;
+      this.overlay.append(n);
+      this.measureNodes.push(n);
+    }
+    this.host.requestDraw();
+  }
+
+  clearMeasures() {
+    if (this.measures.length) {
+      this.setMeasures([]);
+    }
+  }
+
+  /* The box a Shift drag is drawing, in screen pixels of the page; null puts it away. */
+  showBox(r) {
+    if (!r) {
+      if (this.boxNode) {
+        this.boxNode.hidden = true;
+      }
+      return;
+    }
+    if (!this.boxNode) {
+      this.boxNode = document.createElement('div');
+      this.boxNode.className = 'tb-box';
+      this.overlay.append(this.boxNode);
+    }
+    const o = this.overlay.getBoundingClientRect();
+    Object.assign(this.boxNode.style, {
+      left: `${Math.min(r.x0, r.x1) - o.left}px`,
+      top: `${Math.min(r.y0, r.y1) - o.top}px`,
+      width: `${Math.abs(r.x1 - r.x0)}px`,
+      height: `${Math.abs(r.y1 - r.y0)}px`,
+    });
+    this.boxNode.hidden = false;
+  }
+
+  /* ---------------- the HTML laid over the canvas ---------------- */
+
+  /* Made once, beside the canvas, above it and below the status bar. Nothing
+   * in it takes the pointer except the numbers, which are buttons. */
+  ensureOverlay() {
+    if (this.overlay) {
+      return;
+    }
+    const ov = document.createElement('div');
+    ov.className = 'tb-overlay';
+    ov.hidden = true;
+    this.canvas.after(ov);
+    this.overlay = ov;
+  }
+
+  /*
+   * THE NUMBERS ON THE GATES, one button for each pass in the flying order,
+   * rebuilt with the scene. Clicking one turns it into a box to type the place
+   * that pass should have; Enter moves it there (renumber in app.js), Escape
+   * leaves it.
+   */
+  syncBubbles() {
+    for (const b of this.bubbles) {
+      b.node.remove();
+    }
+    this.bubbles = [];
+    for (const spec of this.bubbleSpecs) {
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.className = spec.selected ? 'tb-bubble on' : 'tb-bubble';
+      node.textContent = String(spec.number);
+      node.title = `Number ${spec.number} in the flying order. Click to give it another place.`;
+      node.addEventListener('click', () => this.renumberInline(node, spec));
+      this.overlay.append(node);
+      this.bubbles.push({ node, spec });
+    }
+  }
+
+  renumberInline(node, spec) {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.min = '1';
+    input.value = String(spec.number);
+    input.className = 'tb-bubble-input';
+    input.setAttribute('aria-label', 'Place in the flying order');
+    node.classList.add('editing');
+    node.replaceChildren(input);
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (commit) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      if (commit && input.value !== '' && Number(input.value) !== spec.number) {
+        this.host.renumber(spec.seqId, input.value);
+      } else {
+        node.classList.remove('editing');
+        node.textContent = String(spec.number);
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        finish(true);
+      } else if (e.key === 'Escape') {
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  /* Put every piece of HTML where the frame just drawn says it goes. One
+   * projection set up once, then one point at a time. */
+  placeOverlay() {
+    const whoop = this.host.isWhoopRace();
+    this.overlay.hidden = !whoop || !this.enabled;
+    if (this.overlay.hidden) {
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    this.camera.updateMatrixWorld(true);
+    this.root.updateMatrixWorld(true);
+    const v = new THREE.Vector3();
+    const project = (p) => {
+      v.set(p.x, p.y, p.z ?? 0);
+      this.root.localToWorld(v);
+      v.project(this.camera);
+      if (v.z < -1 || v.z > 1) {
+        return null;
+      }
+      return { x: ((v.x + 1) / 2) * rect.width, y: ((1 - v.y) / 2) * rect.height };
+    };
+    const doc = this.host.doc;
+    for (const b of this.bubbles) {
+      const el = elementById(doc, b.spec.id);
+      const at = el ? project({ x: el.position.x, y: el.position.y, z: el.position.z + b.spec.dz }) : null;
+      b.node.style.display = at ? '' : 'none';
+      if (at) {
+        b.node.style.transform = `translate(${(at.x + b.spec.slot * 26).toFixed(1)}px, ${at.y.toFixed(1)}px)`;
+      }
+    }
+    this.host.placeCard?.(project, rect);
+    this.measures.forEach((m, i) => {
+      const n = this.measureNodes[i];
+      const at = n ? project({ x: (m.from.x + m.to.x) / 2, y: (m.from.y + m.to.y) / 2, z: (m.from.z + m.to.z) / 2 }) : null;
+      if (n) {
+        n.style.display = at ? '' : 'none';
+        if (at) {
+          n.style.transform = `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px)`;
+        }
+      }
+    });
   }
 
   register(mesh, el) {
@@ -3204,6 +3990,7 @@ export class View3D {
     this.seatCamera(0.1);
     this.renderer.shadowMap.enabled = false;
     this.renderer.render(this.scene, this.camera);
+    this.placeOverlay();
   }
 
   dispose() {
@@ -3213,6 +4000,8 @@ export class View3D {
     this.playUi = null;
     this.disposeContent();
     this.sweepAssets(null);
+    this.overlay?.remove();
+    this.overlay = null;
     if (this.fs) {
       this.fs.pipeline.dispose();
       this.fs = null;
@@ -3235,6 +4024,29 @@ export class View3D {
 const GAP_LABEL = {
   cap: 0.028, min: 0.7, refM: 60, nearM: 90, farM: 260, faintest: 0.6,
 };
+
+/*
+ * AN ARROW, centred on the origin and pointing along `dir` (a unit vector in
+ * document coordinates, since it goes into a group that is one): what is drawn
+ * through an opening to say which way it is flown. Never picked, and drawn
+ * without a depth test so it reads through the pane and the pipes.
+ */
+function arrowMesh(dir, length, hex, opacity = 0.95) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: hex, transparent: true, opacity, depthTest: false });
+  const head = length * 0.34;
+  const shaft = length - head;
+  const shaftR = length * 0.03;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(shaftR, shaftR, shaft, 8), mat);
+  body.position.y = -length / 2 + shaft / 2;
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(length * 0.1, head, 14), mat);
+  tip.position.y = length / 2 - head / 2;
+  body.renderOrder = 11;
+  tip.renderOrder = 11;
+  g.add(body, tip);
+  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(dir.x, dir.y, dir.z).normalize());
+  return g;
+}
 
 /*
  * A text label as a camera facing sprite. Canvas2D into a texture is the

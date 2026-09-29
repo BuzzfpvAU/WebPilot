@@ -31,7 +31,7 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ELEMENTS, KIND } from './elements.js';
+import { ELEMENTS, KIND, labelOf, trackClassOf } from './elements.js';
 import {
   createElement, createSequenceEntry, elementById, kindOf, aperturesOf, isSequenceable, sequenceRefCount,
 } from './model.js';
@@ -304,7 +304,7 @@ export function sequenceLabel(doc, seq) {
     return 'missing element';
   }
   const def = ELEMENTS[el.type];
-  const base = el.name || def.label;
+  const base = el.name || labelOf(el.type, trackClassOf(doc));
   if (def.kind === KIND.APERTURE) {
     const levels = aperturesOf(el);
     if (levels.length > 1) {

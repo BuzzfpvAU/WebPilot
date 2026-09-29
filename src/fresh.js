@@ -288,6 +288,7 @@
     'src/share/windows.js',
     'src/trackbuilder/animate.js',
     'src/trackbuilder/app.js',
+    'src/trackbuilder/edit3d.js',
     'src/trackbuilder/elements.js',
     'src/trackbuilder/faces.js',
     'src/trackbuilder/figures.js',

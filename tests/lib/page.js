@@ -168,6 +168,9 @@ export async function openPage({
   url = '/index.html',
   touch = false,
   seed = [],
+  /* Make every request for the CDN fail, as a network that cannot reach it
+   * does, so a page that has to work without Three.js can be shown to. */
+  block = false,
 } = {}) {
   const chrome = findChrome();
   if (!chrome) {
@@ -242,6 +245,10 @@ export async function openPage({
       }
     } else if (msg.method === 'Fetch.requestPaused') {
       const { requestId, request } = msg.params;
+      if (block) {
+        await cdp.send('Fetch.failRequest', { requestId, errorReason: 'ConnectionRefused' }, sessionId).catch(() => {});
+        return;
+      }
       try {
         const buf = await cdnBytes(request.url);
         await cdp.send('Fetch.fulfillRequest', {

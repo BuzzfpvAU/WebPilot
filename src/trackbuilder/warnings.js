@@ -523,7 +523,7 @@ function collectRaceGowWarnings(doc, out, legs) {
       const skew = Math.abs(off - Math.round(off / q) * q);
       if (skew > 0.02) {
         out.push(warn('rg-square-headings',
-          `${label(el)} is ${(skew * 180 / Math.PI).toFixed(1)} deg off square from ${label(gates[0])}. Every gate faces along one of the two track axes: set its Yaw a right angle from theirs.`,
+          `${label(el)} is ${(skew * 180 / Math.PI).toFixed(1)} deg off square from ${label(gates[0])}. Every gate faces along one of the two track axes: turn it to a right angle from theirs.`,
           { elementId: el.id }));
       }
     }

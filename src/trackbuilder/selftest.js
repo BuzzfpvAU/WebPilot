@@ -36,7 +36,7 @@ import {
   logoForDecal, dressOrder, LOGO_SLOTS, SCHEMA_VERSION,
   SCENE_TIMES, SCENE_GROUNDS, SCENE_DEFAULT, sceneOf, deepClone, setSideBuilt,
 } from './model.js';
-import { applyAutoFaces, flipFace, setYaw, clearOverride, travelDirection } from './faces.js';
+import { applyAutoFaces, flipFace, setYaw, clearOverride, travelDirection, defaultYawFor } from './faces.js';
 import {
   addToSequence, addNextLevel, sequenceLabel, faceLabel, bendIndexFor, bendLineAt, gateNumbers,
   neighboursOf, pinFacesAt, sequenceNumbers, removeElement,
@@ -48,7 +48,10 @@ import {
 import { collectWarnings, freestyleReport, labeller, FREESTYLE_SOLIDS_MAX } from './warnings.js';
 import { History } from './history.js';
 import { docFromQuery } from './sharelink.js';
-import { frameRectFor } from './snap.js';
+import {
+  frameRectFor, nearestQuarter, placementFor, placeOnTrack, spacingTone, snapTurn, copyElements,
+  moveToPlace, measuresFor,
+} from './snap.js';
 import { envelopeFor, GATE_OPENING_DEFAULT } from './racegow.js';
 import {
   RAD, DEG, wrapAngle, gateSupportFeet, apertureFrame, GATE_POST_R_SCALE,
@@ -6319,6 +6322,236 @@ function suiteWhoopRepairs() {
   }
 }
 
+function suiteWhoopPlacement() {
+  console.log('\nthe whoop builder: placing');
+  const Q = Math.PI / 2;
+  const IN = 0.0254;
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  /* The document keeps six decimals, so a quarter turn is stored as 1.570796. */
+  const stored = (a, b) => Math.abs(a - b) < 1e-5;
+
+  /* A HEADING IS A QUARTER TURN. RaceGOW's gates are straight pipe and right
+   * angle fittings, so every gate faces along one of two axes; the builder
+   * turned a new gate along the line from the last one, at any angle, and
+   * rg-square-headings then said so about the tool's own work. */
+  {
+    check('nearestQuarter leaves a quarter turn alone', near(nearestQuarter(0), 0) && near(nearestQuarter(Q), Q) && near(nearestQuarter(-Q), -Q));
+    check('and takes 0.4 rad to east, 0.8 rad to north, -0.8 rad to south',
+      near(nearestQuarter(0.4), 0) && near(nearestQuarter(0.8), Q) && near(nearestQuarter(-0.8), -Q));
+    check('half a turn is pi, from either side', near(nearestQuarter(Math.PI - 0.1), Math.PI) && near(nearestQuarter(-Math.PI + 0.1), Math.PI));
+    check('three quarters round is the same as one quarter back', near(nearestQuarter(3 * Q + 0.1), -Q));
+    check('an angle that has gone round many times comes back to the circle', near(nearestQuarter(10 * Math.PI + 0.2), 0));
+    check('and something that is not an angle is east, not NaN', nearestQuarter(NaN) === 0 && nearestQuarter(Infinity) === 0);
+    check('snapping twice changes nothing more', [0.3, 1.2, 2.5, -2.9, 5].every((a) => near(nearestQuarter(nearestQuarter(a)), nearestQuarter(a))));
+  }
+
+  /* PLACING. A gate keeps the heading it is placed with, and gates turn only
+   * when the author turns them. The direction THROUGH the gate stays derived
+   * from the flying order, so nothing here pins a pass. */
+  {
+    const d = createTrack('placing', 'micro');
+    const first = placementFor(d, { x: 5, y: 6 }, 'gate');
+    check('the first gate on an empty canvas faces east, and is not pinned to it',
+      first.yaw === 0 && first.pin === false && first.pinPrevious === null, JSON.stringify(first));
+    const g1 = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    check('a placed gate joins the flying order', d.sequence.length === 1 && d.sequence[0].elementId === g1.id);
+    check('the first gate has not been told a heading, so it can still take the heading of the second', g1.yawOverridden === false);
+
+    const north = placementFor(d, { x: 5, y: 8 }, 'gate');
+    check('a second gate due north takes the north heading and keeps it', near(north.yaw, Q) && north.pin === true, JSON.stringify(north));
+    check('and the first gate, which had none to keep, is given the same one',
+      Boolean(north.pinPrevious) && north.pinPrevious.id === g1.id && near(north.pinPrevious.yaw, Q), JSON.stringify(north.pinPrevious));
+    check('a position 39 degrees off east snaps to east', near(placementFor(d, { x: 6, y: 6.8 }, 'gate').yaw, 0));
+    check('and one 51 degrees off east snaps to north', near(placementFor(d, { x: 5.8, y: 7 }, 'gate').yaw, Q));
+
+    const before = serialize(d);
+    placementFor(d, { x: 9, y: 9 }, 'gate');
+    check('asking where a gate would go changes nothing', serialize(d) === before);
+
+    const pole = placementFor(d, { x: 5.8, y: 7 }, 'pole');
+    check('a pole keeps the old rule: its square is the pass side, and a turn is not pinned for it',
+      near(pole.yaw, defaultYawFor(d, { x: 5.8, y: 7 })) && pole.pin === false && pole.pinPrevious === null, JSON.stringify(pole));
+  }
+
+  /* A LOOP, PLACED WITH THE RULE, IS A TRACK RaceGOW CAN BUILD. */
+  {
+    const d = createTrack('loop', 'micro');
+    for (const [x, y] of [[5, 6], [5, 7.5], [6.5, 7.5], [6.5, 6]]) {
+      placeOnTrack(d, 'gate', { x, y });
+      applyAutoFaces(d);
+    }
+    const yaws = d.elements.map((e) => e.yaw);
+    check('every gate faces along an axis', yaws.every((y) => stored(nearestQuarter(y), y)), yaws.join(', '));
+    check('every gate is pinned, the first one included', d.elements.every((e) => e.yawOverridden === true));
+    check('no pass is pinned: the direction comes from the flying order', d.sequence.every((s) => !s.overridden));
+    applyAutoFaces(d);
+    check('and the auto rule does not turn a gate back', d.elements.every((e, i) => near(e.yaw, yaws[i])));
+    const found = collectWarnings(d, buildPath(d)).filter((w) => w.id === 'rg-square-headings');
+    check('so rg-square-headings has nothing to say', found.length === 0, found.map((w) => w.message).join(' | '));
+
+    const line = createTrack('line', 'micro');
+    for (const y of [6, 7.2, 8.4]) {
+      placeOnTrack(line, 'gate', { x: 5, y });
+      applyAutoFaces(line);
+    }
+    const flownNorth = line.sequence.map((s) => s.entry);
+    line.sequence.reverse();
+    applyAutoFaces(line);
+    check('reverse the order of a straight run and each pass turns round, while no gate turns',
+      flownNorth.every((e) => e === 1) && line.sequence.every((s) => s.entry === -1)
+      && line.elements.every((e) => stored(e.yaw, Q)),
+      `${flownNorth.join(',')} then ${line.sequence.map((s) => s.entry).join(',')}`);
+  }
+
+  /* WHAT IS NOT A WHOOP GATE IS UNCHANGED. */
+  {
+    const five = createTrack('five inch');
+    placeOnTrack(five, 'gate', { x: 20, y: 20 });
+    const p = placementFor(five, { x: 40, y: 30 }, 'gate');
+    check('a five inch gate is turned along the line from the last one, at any angle, and not pinned',
+      near(p.yaw, defaultYawFor(five, { x: 40, y: 30 })) && p.pin === false && p.pinPrevious === null, JSON.stringify(p));
+
+    const padded = createTrack('pads', 'micro');
+    const pads = createElement(padded, 'startPads', { x: 5, y: 4 }, 0);
+    padded.elements.push(pads);
+    const p2 = placementFor(padded, { x: 5, y: 6 }, 'gate');
+    check('the first gate after the start pads faces away from them and is pinned, and the pads are not a gate to pin',
+      near(p2.yaw, Q) && p2.pin === true && p2.pinPrevious === null, JSON.stringify(p2));
+  }
+
+  /* SPACING, AS THE RULE READS IT. Adjacent gates are 27 to 33 in centre to
+   * centre, and only a pair closer than 27 in can break it (warnings.js). A
+   * distance shown while placing says which of those the number is. */
+  {
+    const tone = (inches) => spacingTone(inches * IN);
+    check('30 in is a legal pair', tone(30) === 'legal');
+    check('so are the two ends of the band', tone(27) === 'legal' && tone(33) === 'legal');
+    check('26 in is too close', tone(26) === 'close');
+    check('35 in is nearly a pair', tone(35) === 'near');
+    check('and 60 in is just a distance', tone(60) === 'plain');
+  }
+
+  /* TURNING BY HAND. A whoop gate goes in quarter turns unless Alt is held;
+   * everything else keeps the fifteen degrees it had. */
+  {
+    const d = createTrack('turning', 'micro');
+    const g = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const pole = placeOnTrack(d, 'pole', { x: 6, y: 6 });
+    check('a whoop gate turned to 50 degrees goes to 90', near(snapTurn(d, g, 50 * RAD, false), Q));
+    check('and holding Alt lets it go where it is pulled', near(snapTurn(d, g, 50 * RAD, true), 50 * RAD));
+    check('a pole goes in fifteen degree steps', near(snapTurn(d, pole, 50 * RAD, false), 45 * RAD));
+    const five = createTrack('five inch');
+    const g5 = placeOnTrack(five, 'gate', { x: 20, y: 20 });
+    check('and a five inch gate too, as it always did', near(snapTurn(five, g5, 50 * RAD, false), 45 * RAD));
+  }
+  /* COPYING AND RENUMBERING, the two things a pilot does to a track that is
+   * nearly right. A copy sits beside its original, a gate width on, because
+   * that is where a side by side pair goes; it joins the end of the flying
+   * order; and moving a number in the order is what the number on a gate
+   * asks for. */
+  {
+    const d = createTrack('copies', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const b = placeOnTrack(d, 'gate', { x: 5, y: 7.5 });
+    const c = placeOnTrack(d, 'gate', { x: 5, y: 9 });
+    applyAutoFaces(d);
+    const before = d.elements.length;
+    const made = copyElements(d, [b.id]);
+    const copy = elementById(d, made[0]);
+    check('a copy is a new element with an id of its own', made.length === 1 && d.elements.length === before + 1
+      && made[0] !== b.id && new Set(d.elements.map((e) => e.id)).size === d.elements.length);
+    check('30 in along the width of the gate it copies, which is side by side',
+      near(copy.position.x, 5 + 30 * IN) && near(copy.position.y, 7.5), `${copy.position.x}, ${copy.position.y}`);
+    check('facing the same way, and pinned as its original is',
+      near(copy.yaw, b.yaw) && copy.yawOverridden === b.yawOverridden);
+    check('sharing nothing with it', copy.dims !== b.dims && copy.position !== b.position);
+    check('at the end of the flying order', d.sequence.length === 4 && d.sequence[3].elementId === copy.id);
+
+    const group = copyElements(d, [c.id, a.id]);
+    const ga = elementById(d, group[0]);
+    const gc = elementById(d, group[1]);
+    const tail = d.sequence.slice(-2).map((s) => s.elementId).join();
+    check('a group is copied by the order it is flown in, whatever order it was named in',
+      group.length === 2 && near(ga.position.y, a.position.y) && near(gc.position.y, c.position.y)
+      && tail === group.join(), tail);
+    check('and moves as one, past the whole of what it copies',
+      near(gc.position.x - c.position.x, ga.position.x - a.position.x) && ga.position.x - a.position.x > 30 * IN - 1e-9);
+
+    const barrier = placeOnTrack(d, 'barrier', { x: 3, y: 4 });
+    const seqBefore = d.sequence.length;
+    const [bc] = copyElements(d, [barrier.id]);
+    check('a barrier is copied and has no place in the order to join',
+      Boolean(elementById(d, bc)) && d.sequence.length === seqBefore);
+    check('copying nothing, or something that is not there, is nothing', copyElements(d, []).length === 0 && copyElements(d, ['no-such']).length === 0);
+
+    const e = createTrack('order', 'micro');
+    const [p1, p2, p3, p4] = [6, 7.5, 9, 10.5].map((y) => placeOnTrack(e, 'gate', { x: 5, y }));
+    const order = () => e.sequence.map((s) => s.elementId);
+    moveToPlace(e, e.sequence[0].id, 3);
+    check('the first gate given number 3 is third, and the ones it passed close up',
+      order().join() === [p2, p3, p1, p4].map((x) => x.id).join(), order().join());
+    moveToPlace(e, e.sequence[3].id, 1);
+    check('the last given number 1 is first', order().join() === [p4, p2, p3, p1].map((x) => x.id).join(), order().join());
+    moveToPlace(e, e.sequence[0].id, 99);
+    check('a number past the end is the end', order().join() === [p2, p3, p1, p4].map((x) => x.id).join(), order().join());
+    moveToPlace(e, e.sequence[0].id, 0);
+    check('and one before the start is the start, which is where it already is', order().join() === [p2, p3, p1, p4].map((x) => x.id).join());
+    const before2 = order().join();
+    check('something that is not a number changes nothing', moveToPlace(e, e.sequence[1].id, 'abc') === false && order().join() === before2);
+
+    const w = createTrack('waypoints', 'micro');
+    const [q1, q2] = [6, 7.5].map((y) => placeOnTrack(w, 'gate', { x: 5, y }));
+    const wp = createElement(w, 'waypoint', { x: 5, y: 6.7, z: 0.3 }, 0);
+    w.elements.push(wp);
+    addToSequence(w, wp.id, 0, 1);
+    const q3 = placeOnTrack(w, 'gate', { x: 5, y: 9 });
+    moveToPlace(w, w.sequence[0].id, 2);
+    const flown = w.sequence.map((s) => s.elementId);
+    check('numbers count gates and not waypoints, as the ones drawn on the track do',
+      flown.indexOf(q1.id) > flown.indexOf(q2.id) && flown.indexOf(q1.id) < flown.indexOf(q3.id), flown.join());
+  }
+  /* THE DISTANCES SHOWN WHILE A GATE IS PLACED OR DRAGGED: to the gate before
+   * it in the flying order, the one after it, and any gate near enough to be a
+   * side by side pair, in the units the rules are published in. */
+  {
+    const d = createTrack('gaps', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const centreOf = (el) => ({ x: el.position.x, y: el.position.y, z: el.position.z + 0.3556 });
+    let m = measuresFor(d, { x: 5, y: 6 + 30 * IN, z: 0.3556 });
+    check('a gate about to go 30 in on shows one distance, to the gate before it, and it is a legal pair',
+      m.length === 1 && m[0].tone === 'legal' && m[0].text === '30 in (762 mm)', JSON.stringify(m.map((x) => [x.tone, x.text])));
+    check('the line runs from the gate before to where the new one would be',
+      near(m[0].from.y, 6) && near(m[0].to.y, 6 + 30 * IN));
+    m = measuresFor(d, { x: 5, y: 9, z: 0.3556 });
+    check('a gate 3 m on shows a plain distance, which is what nearly every distance is', m.length === 1 && m[0].tone === 'plain');
+    check('and one placed on the first gate shows it too close', measuresFor(d, { x: 5, y: 6.3, z: 0.3556 })[0].tone === 'close');
+    check('an empty track has nothing to measure to', measuresFor(createTrack('none', 'micro'), { x: 5, y: 6, z: 0.3 }).length === 0);
+
+    const b = placeOnTrack(d, 'gate', { x: 5, y: 8 });
+    const c = placeOnTrack(d, 'gate', { x: 5, y: 10 });
+    applyAutoFaces(d);
+    m = measuresFor(d, centreOf(b), b.id);
+    check('a gate that is dragged shows the gate before it and the gate after it',
+      m.length === 2 && m.every((x) => x.tone === 'plain'), JSON.stringify(m.map((x) => [x.tone, x.text])));
+    check('each measured to the middle of the opening, not the foot',
+      m.some((x) => near(x.from.y, 6) && near(x.from.z, 0.3556)) && m.some((x) => near(x.from.y, 10)),
+      JSON.stringify(m.map((x) => x.from)));
+
+    m = measuresFor(d, { x: 5, y: 10 + 30 * IN, z: 0.3556 });
+    check('a new gate is measured to the LAST gate of the order, not the first',
+      m.length === 1 && m[0].tone === 'legal' && near(m[0].from.y, 10), JSON.stringify(m.map((x) => [x.tone, x.text, x.from.y])));
+
+    const n = placeOnTrack(d, 'gate', { x: 5 + 35 * IN, y: 8 });
+    applyAutoFaces(d);
+    m = measuresFor(d, centreOf(b), b.id);
+    const nearPair = m.find((x) => x.tone === 'near');
+    check('and a gate nearly a pair with it, though it is not next in the order',
+      Boolean(nearPair) && nearPair.text === '35 in (889 mm)', JSON.stringify(m.map((x) => [x.tone, x.text])));
+    check('nothing is listed twice', new Set(m.map((x) => `${x.from.x},${x.from.y},${x.from.z}`)).size === m.length);
+    check('a gate is never measured to itself', m.every((x) => !(near(x.from.x, b.position.x) && near(x.from.y, b.position.y) && near(x.from.z, 0.3556))));
+  }
+}
+
 async function main() {
   if (process.argv.includes('--emit')) {
     process.stdout.write(serialize(demoTrack()));
@@ -6363,6 +6596,7 @@ async function main() {
   suiteSeat();
   suiteClubhouseShell();
   suiteWhoopRepairs();
+  suiteWhoopPlacement();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exitCode = failed ? 1 : 0;
 }

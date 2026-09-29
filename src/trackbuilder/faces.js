@@ -442,14 +442,24 @@ export function setPitch(doc, elementId, pitch) {
   return true;
 }
 
+/*
+ * THE LAST PLACE THE COURSE HAS BEEN: the last of the chain, or the one before
+ * it when the chain ends on the start pads that close the lap. Null on an
+ * empty track. What a new element is placed relative to, and what its heading
+ * is measured from.
+ */
+export function lastAnchorOf(doc) {
+  const chain = anchorChain(doc);
+  if (!chain.length) {
+    return null;
+  }
+  return chain[chain.length - (chain.length > 1 && !chain[chain.length - 1].seq ? 2 : 1)] ?? null;
+}
+
 /* The default yaw for a brand new element, so it lands facing the way the
  * course is already going rather than facing east. */
 export function defaultYawFor(doc, position) {
-  const chain = anchorChain(doc);
-  if (!chain.length) {
-    return 0;
-  }
-  const last = chain[chain.length - (chain.length > 1 && !chain[chain.length - 1].seq ? 2 : 1)];
+  const last = lastAnchorOf(doc);
   if (!last) {
     return 0;
   }

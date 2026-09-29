@@ -59764,3 +59764,154 @@ function (`openIncoming` in `app.js`).
                              `shots.js` (Stage 0 changes framing only, and the flow check
                              measures the framing directly), `lint:responsive` (run at the end
                              of Stage 3, once the layout has stopped moving)
+
+## 2026-09-29 | builder | Whoop builder, Stage 1: build in the room
+
+Stage 1 of WHOOP-BUILDER-PLAN.md, on the same approval as Stage 0 (see that entry for what
+"build up to stage 3" is taken to cover). The whoop canvas is built in the 3D room now, with
+the plan as a camera angle. The 5 inch and freestyle canvases have exactly the handlers they
+had: `View3D.roomEditing()` says which set answers the pointer, and it is true only on a
+whoop track with the room up. Nothing here touches the physics, the module ABI, the build,
+the board or the schema (`schemaVersion` stays 3, no stored field is added).
+
+### What is built, against the plan's sections
+
+- **3.1, mouse and keyboard.** `src/trackbuilder/edit3d.js` (new) holds the gestures and
+  no Three.js; the view says where things are and draws. A tool armed: a click on the floor
+  places and the tool stays armed; a drag looks round instead, so the camera is never lost to a
+  tool; a ghost follows the pointer. Nothing armed: a press anywhere in a gate selects it and a
+  pull moves it across the floor at the height it was pressed (so it tracks the pointer), on
+  the inch grid, Alt free; the ring at the foot of a selected gate turns it in quarter turns;
+  Shift drag boxes; right or middle drag pans; the wheel zooms toward the pointer; the number
+  on a gate is a button that takes the place the gate should have. Arrows nudge a grid square
+  (six inches with Shift), relative to the camera; Q and E turn a quarter; X reverses; Control
+  D copies 30 in along the gate's width; F frames the selection, Home the track, V toggles Room
+  and Plan. A press is not an edit: the undo step begins at the first real movement.
+- **3.3, what is on the canvas.** A translucent pane in every opening in RaceGOW's own colour
+  (green for the first gate in the flying order, which is the one the lap starts and stops on,
+  yellow, purple, orange, blue), lit under the pointer; an arrow through every pass, and the
+  green and red entry and exit panes kept for the selected gate only; a number bubble of HTML
+  over each pass, 22 px at any distance; the racing line on by default; the envelope lit on a
+  dimmed floor; live distances in inches and millimetres beside a ghost or a gate being pulled.
+  Not built: the outline of constant pixel width. It needs the `Line2` addon (a dependency,
+  which CLAUDE.md wants argued first), and the pane and the arrow do the job the outline was
+  for. It is one line of PROGRESS to argue if the owner wants it.
+- **3.4, panels and words.** On a whoop canvas the side column is a drawer (Flying order, on
+  the lap bar, opens it; More on the card opens it), and the canvas keeps its width. A card
+  floats by the selected piece with Place in order, X, Y, Height off floor, Turn, Direction and
+  Copy, Remove, More, in inches with the millimetres under them. A lap bar along the foot: length
+  in metres and feet, gates, whether the lap closes, warnings. The words: Height off floor,
+  Gap between gates, Gate width and height, Turn, Reverse direction, Let the tool decide again,
+  Path through the stack, Turned by hand, Reverse and Remove on a flying order row, Horizontal
+  gate for the dive gate, Room, Plan and 2D for the views.
+- **3.6, the first minute.** The room opens from the front left, framed on the track (the
+  envelope when empty). An empty canvas says "Pick a gate on the left, then click the floor"
+  and offers Start from a RaceGOW track, which opens the eight shipped ones in Load. A line at
+  the foot says what the pointer does now while there are fewer than three gates.
+- **3.7, how it is built.** Every change goes through the one door (`edit`, `beginEdit`,
+  `endEdit`), so undo, autosave and the derived line come free. A drag has a fast path: it moves
+  the pieces' own groups and redraws the line, the scene is rebuilt once on release, and the
+  check compares the two mesh for mesh. Three.js is fetched the moment a whoop canvas opens and
+  the plan is what shows until it arrives, so a blocked CDN leaves the tool it always was.
+  Pick targets: the pane across every opening, and a fatter pipe that is never drawn round
+  each pipe.
+
+### Where this departs from the plan, and why
+
+- **The quarter turn rule for a new gate (plan 3.5.1) is here, not in Stage 2.** A room you can
+  place in with a ghost and a click, that turned every new gate along a line at any angle,
+  produced `rg-square-headings` warnings about the tool's own work, which was the plan's own
+  finding 3. Magnets, the Row tool and Replace with are still Stage 2. The rule is
+  `placementFor` in `snap.js`; `defaultYawFor` is left alone and the five inch is proved
+  unchanged by a test, which is the plan's "for micro only" by a safer road. The first gate
+  is left unpinned and takes its heading from the second (a first gate that never learned which
+  way the track goes leaves the line running along its own plane).
+- **A distance is amber only where the rule says it matters.** The plan said green inside 27
+  to 33 in and amber outside, which would colour nearly every distance on a track amber.
+  `warnings.js` reads the rule as: only a pair closer than 27 in can break it, and 33 to 41 in
+  is a pair that is nearly a side by side pair. So a legal pair is green, a pair too close or
+  nearly a pair is amber, and any other distance is plain (`spacingTone`).
+- **Height is typed, not dragged, in the room.** The 3D view's one old gesture, dragging a
+  horizontal pole or a waypoint up and down, is a drag across the floor now, as it is for
+  every other piece; the height is the card's Height off floor. The five inch canvas keeps
+  the old drag. A waypoint keeps its own drag (across its level, Alt for up and down), because
+  it pins the gates either side of it.
+- **X and Y on the card are inches from the middle of the room,** which is where the game puts
+  a track, so a track the size of an envelope has numbers near zero. The plan named the fields
+  and not the origin; Stage 3's build sheet is where a chosen corner comes in.
+- **The card is hidden while a tool is armed.** It sat exactly where the next gate goes and
+  swallowed the click; the build check found it (3 steps for 6 clicks).
+- **Two Stage 0 checks are measured differently, and the reasons are here because
+  CLAUDE.md says never to move a threshold to pass.** The fit checks measured a track's width
+  as a share of the canvas; with the side column gone the canvas is 1400 px wide and a small
+  track in a wide window fills its height, not its width, so they now measure how much of the
+  picture the track fills in its larger direction (`fill`, at least 0.35). The unfixed code's
+  14 and 16 percent still fail it. The labels check measured the height of a canvas sprite;
+  the numbers are HTML now, so it measures what the promise was, that no number sits down in
+  the opening of its own gate, and that each is 22 px. Against the unfixed code it fails
+  because that has no numbers of this kind; the 0.33 m against 0.71 m demonstration is in the
+  Stage 0 entry. `fit narrow` passes on the unfixed code too: it guards the deferred frame of
+  this work, not a defect that was reported.
+- **A tighter fit.** Fit finds the nearest distance at which the eight corners of the track's
+  box are inside the picture, at the angle the camera is at, instead of a sphere round it. The
+  sphere fitted the vertical field of view and left a wide window mostly empty.
+
+### Measured
+
+    a rebuild of the room, Track 1 (17 elements)      7.8 ms median, 20 p95  ->  3.7, 8.6
+    a rebuild of the room, Track 6 (34 elements)      10.8 ms median, 53 p95 ->  5.1, 13.5
+    one step of a drag, fast path, Track 1 / Track 6  0.8 / 2.0 ms median, 3.7 / 10.7 p95
+    (the drop is the numbers: a canvas texture painted and uploaded per label per rebuild
+     is a DOM node now. The fast path is still worth having: a rebuild makes and frees
+     hundreds of meshes, which a real GPU pays for in uploads and the collector pays for.)
+
+### What went wrong
+
+- Twice the flow check clicked a gate to select it with a tool still armed, which places a
+  piece (an armed tool is an armed tool). The check now puts the tool away with Escape, the
+  key the plan names for it.
+- A number is a button, and from straight above it sits on its gate, so a click on the middle
+  of a gate in Plan opens the box for its number, and the next key typed goes into it. That is
+  by design (a click on the rest of the bar picks the gate), and my first checks were wrong to
+  click the middle. The same thing gave the first fat pipe check a point under a number.
+- The bend check pressed a spot on the line with a gate in front of it from where the camera
+  had orbited to, which the gate rightly takes. It now asks the view which spots are clear only
+  to choose one, and presses it with a real pointer.
+- Home was first asserted as a share of the width, which a small track in a wide window does not
+  fill. The check now says Home gives back what Fit gave.
+- The tool that carries my edits turned `\u` sequences typed in it into real characters three
+  times (a stray curly apostrophe in two test names and a close glyph in ui.js). The added lines
+  are scanned for non ASCII before each commit now, and the glyph is a source escape.
+- Two mutations were MISSED the first time: removing the fat pipes (the click was on the pane)
+  and removing the redraw on selecting (a release redrew anyway). Both now have an assertion of
+  their own, and every mutation listed below is caught.
+
+### RUN LOG
+
+    code                     src/trackbuilder: edit3d (new), snap, app, view3d, ui, faces,
+                             elements, sequence, warnings, index.html, start, selftest;
+                             scripts/builder-flow-check.js; tests/lib/page.js gains
+                             `block` (make every CDN request fail), used by one case
+    self test                node src/trackbuilder/selftest.js: 1073 passed, 0 failed
+                             (1014 after Stage 0, 59 new, each written before the code)
+    browser check            npm run check:builder: 18 cases, 125 assertions, all pass
+    mutations                47 single behaviour reversions, each caught by the case or
+                             assertion that guards it: 24 against the self test (the
+                             placement rule, copy, renumber, distances) and 23 against
+                             the browser check (the gestures, the fast path, the ring, the
+                             line, the panes and fat pipes, the ghost, the room opening by
+                             itself, the card, the empty canvas, the blocked CDN)
+    unfixed code             the Stage 0 cases still fail against an export of the code before
+                             Stage 0, except `fit narrow` (see above)
+    micro:check              267 pass, exit 0
+    whoop:gates              21 of 21
+    lint:preload             up to date, 234 served (two new modules from Stage 0 and one now)
+    input-check              170 passed (it drives the builder's Fly this track)
+    device-check             PASS (every builder bar control on a laptop; the whoop canvas is
+                             not in it yet, Stage 2 adds it at 820 by 1180 and 1024 by 768)
+    node --check             every edited file
+    dashes and non ASCII     none added (scanned over the diff)
+    not run                  `npm run verify` (no physics, plant, ABI or build change),
+                             `shots.js` (offered at the end of the turn, as CLAUDE.md asks),
+                             lint:responsive (the simulator's freestyle page, nothing here
+                             touches it; run at the end of Stage 3)

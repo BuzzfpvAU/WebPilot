@@ -696,6 +696,74 @@
         text-align: center;
       }
 
+      /*
+       * WHAT THE WHOOP ROOM LAYS OVER ITS CANVAS: the numbers on the gates, the
+       * distances beside a gate being placed or pulled, and the box a Shift
+       * drag draws. view3d.js makes them and puts each where the frame it has
+       * just drawn says. The layer takes no pointer, and its numbers, which are
+       * buttons, are the one thing in it that do. They are HTML so that they
+       * stay one size at any distance and stay sharp.
+       */
+      .tb-overlay {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+        border-radius: var(--r-panel);
+      }
+      .tb-overlay[hidden] { display: none; }
+      .tb-bubble {
+        position: absolute;
+        left: 0;
+        top: 0;
+        margin: -11px 0 0 -11px;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border-radius: 50%;
+        border: 1px solid rgba(15, 21, 15, 0.7);
+        background: var(--cream);
+        color: var(--deep);
+        font: 600 var(--t-small) / 20px var(--ui-font);
+        text-align: center;
+        pointer-events: auto;
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+      }
+      .tb-bubble:hover { background: #ffffff; }
+      .tb-bubble.on { background: var(--amber); }
+      .tb-bubble.editing { width: 48px; margin-left: -24px; border-radius: var(--r-ctl); }
+      .tb-bubble-input {
+        width: 100%;
+        height: 100%;
+        padding: 0 2px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: center;
+      }
+      .tb-measure {
+        position: absolute;
+        left: 0;
+        top: 0;
+        translate: -50% -50%;
+        padding: 1px 6px;
+        border-radius: var(--r-chip);
+        background: rgba(8, 13, 20, 0.82);
+        color: var(--cream);
+        font: 500 var(--t-small) / 1.6 var(--mono);
+        white-space: nowrap;
+      }
+      .tb-measure.tone-legal { color: var(--mint); }
+      .tb-measure.tone-close, .tb-measure.tone-near { color: #ffb347; }
+      .tb-box {
+        position: absolute;
+        border: 1px solid var(--pick-edge);
+        background: var(--pick);
+      }
+      .tb-box[hidden] { display: none; }
+
       #tb-side {
         width: 320px;
         flex: none;
@@ -1508,6 +1576,130 @@
         #tb-side { width: 290px; }
       }
 
+      /* ---------------- the whoop canvas: the room is the tool ---------------- */
+
+      /*
+       * On a whoop canvas the drawing gets the width. The side column, which is
+       * the inspector, the flying order and the results, is a drawer that slides
+       * in from the right over the stage when it is asked for and is out of the
+       * way when it is not, and the things a pilot needs while building are laid
+       * over the room itself: a card by the selected piece, a bar along the foot
+       * with the lap's figures, a line saying what the pointer does now, and on
+       * an empty canvas a way in. body.tb-whoop is app.js's; every other canvas
+       * is exactly as it was.
+       */
+      #tb-main { position: relative; }
+      body.tb-whoop #tb-side {
+        position: absolute;
+        z-index: 30;
+        top: var(--s3);
+        right: var(--s3);
+        bottom: var(--s3);
+        width: 340px;
+        transform: translateX(calc(100% + var(--s5)));
+        transition: transform 0.18s ease;
+        box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
+      }
+      body.tb-whoop.tb-drawer #tb-side { transform: none; }
+      #tb-card, #tb-coach, #tb-empty, #tb-lapbar { display: none; }
+      body.tb-whoop #tb-lapbar { display: flex; }
+      body.tb-whoop #tb-coach:not([hidden]),
+      body.tb-whoop #tb-empty:not([hidden]),
+      body.tb-whoop #tb-card:not([hidden]) { display: block; }
+      /* The two hints the room has no use for: a line to drag, a pipe to pick. */
+      body.tb-whoop [data-classic] { display: none; }
+      body:not(.tb-whoop) [data-whoop] { display: none; }
+
+      #tb-lapbar {
+        position: absolute;
+        z-index: 4;
+        left: var(--s4);
+        right: var(--s4);
+        bottom: 44px;
+        align-items: center;
+        gap: var(--s4);
+        padding: var(--s2) var(--s4);
+        border-radius: var(--r-panel);
+        background: rgba(8, 13, 20, 0.86);
+        box-shadow: inset 0 0 0 1px rgba(157, 179, 200, 0.16);
+        font-size: var(--t-label);
+        color: var(--slate);
+        /* The room is clickable under the bar; only its button takes the pointer. */
+        pointer-events: none;
+      }
+      #tb-lapbar .tb-btn { pointer-events: auto; }
+      .tb-lap-fig { display: flex; align-items: baseline; gap: var(--s2); white-space: nowrap; }
+      .tb-lap-fig b { color: var(--cream); font-weight: 600; font-family: var(--mono); }
+      .tb-lap-fig.good b { color: var(--mint); }
+      .tb-lap-fig.bad b { color: #ffb347; }
+      .tb-lap-gap { flex: 1; }
+      #tb-lapbar .tb-btn { padding: 4px 10px; }
+
+      #tb-coach {
+        position: absolute;
+        z-index: 4;
+        left: 50%;
+        bottom: 96px;
+        transform: translateX(-50%);
+        max-width: calc(100% - 2 * var(--s5));
+        padding: var(--s2) var(--s5);
+        border-radius: 999px;
+        background: rgba(8, 13, 20, 0.86);
+        box-shadow: inset 0 0 0 1px rgba(157, 179, 200, 0.16);
+        color: var(--cream);
+        font-size: var(--t-label);
+        text-align: center;
+        pointer-events: none;
+      }
+
+      #tb-empty {
+        position: absolute;
+        z-index: 4;
+        left: 50%;
+        top: 12%;
+        transform: translateX(-50%);
+        width: min(420px, calc(100% - 2 * var(--s5)));
+        padding: var(--s5);
+        border-radius: var(--r-panel);
+        background: rgba(8, 13, 20, 0.86);
+        box-shadow: inset 0 0 0 1px rgba(157, 179, 200, 0.2);
+        text-align: center;
+      }
+      #tb-empty { pointer-events: none; }
+      #tb-empty .tb-btn { pointer-events: auto; }
+      #tb-empty p { margin: 0 0 var(--s3); color: var(--cream); font-size: var(--t-body); }
+      #tb-empty p.tb-help { color: var(--slate); font-size: var(--t-label); }
+
+      #tb-card {
+        position: absolute;
+        z-index: 6;
+        width: 272px;
+        padding: var(--s3) var(--s4) var(--s4);
+        border-radius: var(--r-panel);
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        box-shadow: 0 8px 26px rgba(0, 0, 0, 0.55);
+      }
+      /* Docked to the foot of the stage where there is no room to float it, and
+         always on a narrow window. */
+      #tb-card.docked { left: var(--s4); right: auto; top: auto; bottom: 96px; }
+      .tb-card-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
+      .tb-card-head strong { flex: 1; color: var(--amber); font-size: var(--t-body); }
+      .tb-card-x { padding: 0 var(--s2); line-height: 1.2; }
+      .tb-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+      .tb-card-grid .tb-field { margin: 0; }
+      /* The inspector hides a field's unit (the label says it); the card shows
+         the same length in millimetres under the inches. */
+      .tb-card-grid .tb-field-suffix {
+        display: block;
+        color: var(--dim);
+        font: var(--t-micro) / 1.2 var(--mono);
+      }
+      .tb-card-actions { display: flex; gap: var(--s2); margin-top: var(--s4); }
+      .tb-card-actions .tb-btn { flex: 1; padding: 5px 6px; }
+      .tb-card-fig { display: flex; flex-direction: column; gap: 3px; }
+      .tb-card-fig > span { font-size: var(--t-micro); color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
+
       /* ---------------- reduced motion ---------------- */
 
       /*
@@ -1538,6 +1730,12 @@
         <div id="tb-stage">
           <canvas id="tb-2d"></canvas>
           <canvas id="tb-3d" hidden></canvas>
+          <!-- The whoop canvas's own chrome. app.js and ui.js fill these, and
+               body.tb-whoop is what shows them. -->
+          <div id="tb-card" hidden></div>
+          <div id="tb-empty" hidden></div>
+          <div id="tb-coach" hidden></div>
+          <div id="tb-lapbar"></div>
           <div id="tb-status">
             <span id="tb-readout">0.00, 0.00 m</span>
             <!--
@@ -1550,13 +1748,19 @@
               <span><kbd>Mid</kbd>pan</span>
               <span><kbd>Click</kbd>select</span>
               <span><kbd>Shift</kbd>add</span>
-              <span><kbd>Drag</kbd>box select</span>
+              <span data-classic><kbd>Drag</kbd>box select</span>
+              <span data-whoop><kbd>Drag</kbd>move</span>
+              <span data-whoop><kbd>Shift drag</kbd>box select</span>
+              <span data-whoop><kbd>Ring</kbd>turn</span>
+              <span data-whoop><kbd>Ctrl D</kbd>copy</span>
+              <span data-whoop><kbd>F</kbd>frame</span>
               <span><kbd>Q E</kbd>rotate</span>
               <span><kbd>Alt</kbd>off grid</span>
               <span data-race-only><kbd>X</kbd>flip face</span>
-              <span data-race-only data-3d-only><kbd>Drag line</kbd>bend it</span>
-              <span data-race-only data-3d-only><kbd>Click pipe</kbd>pick a side</span>
-              <span><kbd>V</kbd>2D and 3D</span>
+              <span data-race-only data-3d-only data-classic><kbd>Drag line</kbd>bend it</span>
+              <span data-race-only data-3d-only data-classic><kbd>Click pipe</kbd>pick a side</span>
+              <span data-classic><kbd>V</kbd>2D and 3D</span>
+              <span data-whoop><kbd>V</kbd>room and plan</span>
               <span><kbd>Del</kbd>remove</span>
               <span><kbd>Ctrl Z</kbd>undo</span>
             </span>

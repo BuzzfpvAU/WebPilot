@@ -33,16 +33,19 @@
 import { ELEMENTS, KIND, elementByKey, trackClassOf, docModeOf } from './elements.js';
 import {
   createTrack, createElement, deepClone, deserialize, duplicateTrack,
-  elementById, kindOf, isSequenceable, normalize, startPadsOf, touch,
+  elementById, kindOf, normalize, startPadsOf, touch,
   aperturesOf, toPlain, logosOf, brandingBytes, newLogoId, dressOrder, setSideBuilt,
   LOGO_SLOTS, BRANDING_MAX_CHARS,
 } from './model.js';
-import { applyAutoFaces, clearOverride, defaultYawFor, flipFace, setYaw } from './faces.js';
+import { applyAutoFaces, clearOverride, flipFace, setYaw } from './faces.js';
 import {
   addToSequence, addNextLevel, bendLineAt, clampSequenceToApertures, moveInSequence,
   neighboursOf, pinFacesAt, removeElement, removeFromSequence, setApertureIndex,
 } from './sequence.js';
-import { applyFigure, defaultFigure, upgradeStackedFigures } from './figures.js';
+import { applyFigure, upgradeStackedFigures } from './figures.js';
+import {
+  QUARTER, copyElements, moveToPlace, nearestQuarter, placeOnTrack, turnStepFor,
+} from './snap.js';
 import { buildPath, passYawOf } from './path.js';
 import { collectWarnings, freestyleReport, labeller, sortWarnings } from './warnings.js';
 /* Nothing built stands in the air: see seat.js. A map is seated with what is
@@ -414,6 +417,17 @@ export class App {
     this.armedLogoId = '';
     this.mode = '2d';
     this.pathVisible = false;
+    /* WHOOP CANVAS ONLY. Whether a drag that starts on the racing line bends
+     * it into a waypoint. Off by default: the line runs through the middle of
+     * every gate, so with it able to take a press, a click in a gate's opening
+     * was a click on the line. A view choice, like the line, and not stored. */
+    this.bendLine = false;
+    /* Which view the author asked for, so the room's opening by itself on a
+     * whoop canvas never overrules them: see syncViewToCanvas. */
+    this.viewChosen = false;
+    this.autoRoom = false;
+    /* The side column, which a whoop canvas keeps in a drawer. */
+    this.drawerOpen = false;
     /* Flying-order numbers, on by default. A view choice, like the line:
      * it is not stored in the track, and turning it off does not change
      * what gets flown or published. */
@@ -451,6 +465,7 @@ export class App {
      * uses it to point at the switch in the bar. See closeModal. */
     this.afterModal = null;
     this.restore();
+    this.pathVisible = this.isWhoopRace();
     /* The palette is the RESTORED document's class, not the default. Panels
      * builds one in its constructor because it must have something before a
      * document exists, and restore() runs after that, so a reopened RaceGOW
@@ -466,6 +481,7 @@ export class App {
     this.view2d.frameTrack();
     this.view3d.frameTrack();
     this.refresh();
+    this.syncViewToCanvas();
     if (asking) {
       this.openChooser();
     }
@@ -701,6 +717,11 @@ export class App {
       this.fitTopBar();
     };
     window.addEventListener('resize', onResize);
+    /* The stage's width changes without the window's: a whoop canvas takes the
+     * side column's room, and hands it back on another canvas. */
+    if (typeof ResizeObserver === 'function' && this.nodes.canvas3d.parentElement) {
+      new ResizeObserver(() => onResize()).observe(this.nodes.canvas3d.parentElement);
+    }
     window.addEventListener('beforeunload', () => this.autosaver.flush());
   }
 
@@ -849,6 +870,9 @@ export class App {
     this.pruneActiveNode();
     this.keepPickedSide();
     this.panels.renderAll();
+    /* What is selected is drawn differently in the room (its colour, its ring),
+     * so a selection is a reason to redraw the scene, not only the frame. */
+    this.view3d.markDirty();
     this.requestDraw();
   }
 
@@ -861,6 +885,7 @@ export class App {
     this.pruneActiveNode();
     this.keepPickedSide();
     this.panels.renderAll();
+    this.view3d.markDirty();
     this.requestDraw();
   }
 
@@ -984,7 +1009,7 @@ export class App {
     this.panels.renderAll();
     if (!this.bendSaid) {
       this.bendSaid = true;
-      this.toast('That dropped a waypoint on the line, which bends it and scores nothing. The gates either side keep facing the way they face; Re-derive in the inspector hands one back to the automatic rule.');
+      this.toast(`That dropped a waypoint on the line, which bends it and scores nothing. The gates either side keep facing the way they face; ${this.panels.say('Re-derive')} in the inspector hands one back to the automatic rule.`);
     }
     return el.id;
   }
@@ -1063,7 +1088,9 @@ export class App {
       return;
     }
     this.view2d.centerOn(c);
-    this.view3d.focusDoc(c, Math.max(12, this.view3d.orbit.radius * 0.6));
+    /* Twelve metres is close on a sixty metre field and the whole of a whoop
+     * hall, so a whoop canvas is let in as near as a gate needs. */
+    this.view3d.focusDoc(c, Math.max(this.isWhoopRace() ? 1.4 : 12, this.view3d.orbit.radius * 0.6));
     this.requestDraw();
   }
 
@@ -1101,6 +1128,7 @@ export class App {
      * createElement has always done. */
     this.armedLogoId = '';
     this.panels.renderPalette();
+    this.clearGhost();
     this.requestDraw();
     if (this.armed === 'road') {
       this.sayOnce('arm road', 'Click to lay the road’s nodes: it bends through them the way a car can drive. Click the first node to close a loop, press Enter or double click to finish it open, Escape to stop.');
@@ -1144,7 +1172,15 @@ export class App {
     this.armedLogoId = '';
     this.roadDraft = null;
     this.panels.renderPalette();
+    this.clearGhost();
     this.requestDraw();
+  }
+
+  /* The ghost of a piece not yet placed, and the distances beside it, belong to
+   * the tool that is armed: they go when it is put away or changed. */
+  clearGhost() {
+    this.view3d.clearGhost();
+    this.view3d.clearMeasures();
   }
 
   /* ---------------- the road tool ---------------- */
@@ -1437,8 +1473,10 @@ export class App {
 
     let newId = null;
     this.edit(`place ${def.label}`, (d) => {
-      const yaw = def.kind === KIND.ANNOTATION ? 0 : defaultYawFor(d, world);
-      const element = createElement(d, type, world, yaw);
+      /* The rule for where it faces, the flying order it joins and the figure
+       * a stack is flown in are one function in snap.js, so the self test
+       * runs the same code this does. */
+      const element = placeOnTrack(d, type, world);
       /* The logo the Sponsor logos dialog armed this with, if it armed it.
        * createElement has already put the course's first logo on a decal, so
        * this only overrides, and only for a logo that is still on the
@@ -1448,15 +1486,7 @@ export class App {
         && logosOf(d).some((l) => l.id === this.armedLogoId)) {
         element.logoId = this.armedLogoId;
       }
-      d.elements.push(element);
       newId = element.id;
-      if (isSequenceable(element)) {
-        addToSequence(d, element.id, 0);
-        const fig = defaultFigure(element);
-        if (fig !== 'single') {
-          applyFigure(d, element.id, fig);
-        }
-      }
     });
     if (newId) {
       this.setSelection([newId]);
@@ -1465,7 +1495,7 @@ export class App {
         if (!this.pathVisible) {
           this.togglePath();
         }
-        this.toast('Each hole is its own gate. This stack is a spiral up: bottom, wrap around, then the top. Change it under How it is flown.');
+        this.toast(`Each hole is its own gate. This stack is a spiral up: bottom, wrap around, then the top. Change it under ${this.panels.say('How it is flown')}.`);
       }
     }
   }
@@ -1557,6 +1587,128 @@ export class App {
     if (stranded.length) {
       this.toast(`${stranded.length === 1 ? 'A vehicle was' : `${stranded.length} vehicles were`} on that road, and ${stranded.length === 1 ? 'it is' : 'they are'} parked now with no road, in the row along the south edge of the plot. Drag ${stranded.length === 1 ? 'it' : 'each'} onto a road, or delete ${stranded.length === 1 ? 'it' : 'them'}.`);
     }
+  }
+
+  /* ---------------- the whoop canvas, in the room ---------------- */
+
+  /* A RaceGOW track, as opposed to a five inch one or a map. What the room
+   * builds with, and what the numbers, the ring and the quarter turns are for. */
+  isWhoopRace(doc = this.doc) {
+    return trackClassOf(doc) === 'micro' && docModeOf(doc) !== 'freestyle';
+  }
+
+  /*
+   * COPY WHAT IS SELECTED, beside it (Control D). One undo step, and the
+   * copies are what is selected afterwards, so a second press copies the copy
+   * one gate further on.
+   */
+  copySelection() {
+    if (!this.selection.size || !this.isWhoopRace()) {
+      return;
+    }
+    let made = [];
+    this.edit('copy', (d) => { made = copyElements(d, [...this.selection]); });
+    if (made.length) {
+      this.setSelection(made);
+    }
+  }
+
+  /*
+   * THE DIRECTION AN ARROW KEY MOVES, on the floor. In the plan the arrows are
+   * the compass. In the room they are the camera's: up is away from it, to the
+   * nearest of the four axes, because an arrow that moves a gate to the left
+   * of a screen it is looking at the other way round from is a wrong key.
+   */
+  arrowAxis(name) {
+    const north = { x: 0, y: 1 };
+    const east = { x: 1, y: 0 };
+    let fwd = north;
+    if (this.mode === '3d' && this.view3d.camera) {
+      const f = this.view3d.floorForward();
+      fwd = Math.abs(f.x) >= Math.abs(f.y) ? { x: Math.sign(f.x) || 1, y: 0 } : { x: 0, y: Math.sign(f.y) || 1 };
+    }
+    const right = { x: fwd.y, y: -fwd.x };
+    if (name === 'up') {
+      return fwd;
+    }
+    if (name === 'down') {
+      return { x: -fwd.x, y: -fwd.y };
+    }
+    return name === 'right' ? right : { x: -right.x, y: -right.y };
+  }
+
+  /* A step of an arrow key: one grid square, or six inches with Shift. One
+   * undo step for each press, which is how many presses it was. */
+  nudgeSelection(name, big = false) {
+    const ids = [...this.selection].filter((id) => {
+      const e = elementById(this.doc, id);
+      return e && ![KIND.VEHICLE, KIND.ROAD].includes(kindOf(e));
+    });
+    if (!ids.length) {
+      return;
+    }
+    const dir = this.arrowAxis(name);
+    const step = big ? 6 * 0.0254 : this.doc.field.gridSize;
+    const round6 = (v) => Math.round(v * 1e6) / 1e6;
+    this.edit('nudge', (d) => {
+      for (const id of ids) {
+        const e = elementById(d, id);
+        e.position.x = round6(e.position.x + dir.x * step);
+        e.position.y = round6(e.position.y + dir.y * step);
+      }
+    });
+  }
+
+  /* The number on a gate, typed in: move that pass to that place. */
+  renumber(seqId, place) {
+    this.edit('renumber', (d) => { moveToPlace(d, seqId, place); });
+  }
+
+  /*
+   * THE DRAWER: the inspector, the flying order and the results, which a whoop
+   * canvas keeps out of the drawing's way and opens when asked (the lap bar's
+   * button, the card's More). CSS does the sliding; this is the state.
+   */
+  toggleDrawer(open = null) {
+    this.drawerOpen = open == null ? !this.drawerOpen : open;
+    document.body.classList.toggle('tb-drawer', this.drawerOpen);
+  }
+
+  /* Whether the racing line can be grabbed and bent in the room. See bendLine. */
+  toggleBendLine() {
+    this.bendLine = !this.bendLine;
+    if (this.bendLine && !this.pathVisible) {
+      this.createPath();
+    }
+    this.updateTopBar();
+    this.view3d.markDirty();
+    this.requestDraw();
+    if (this.bendLine) {
+      this.toast('Drag the racing line to bend it: that drops a waypoint on it. Press Bend line again and a click on a gate is a click on the gate.');
+    }
+  }
+
+  /* F: frame what is selected, close enough to work on. */
+  frameSelection() {
+    const c = this.selectionCentroid();
+    if (!c) {
+      return;
+    }
+    let reach = 0;
+    for (const id of this.selection) {
+      const e = elementById(this.doc, id);
+      if (e) {
+        reach = Math.max(reach, Math.hypot(e.position.x - c.x, e.position.y - c.y));
+      }
+    }
+    this.view2d.centerOn(c);
+    this.view3d.focusDoc(c, Math.max(1.4, reach * 3 + 1.2));
+    this.requestDraw();
+  }
+
+  /* view3d.placeOverlay: float the card by what is selected. */
+  placeCard(project, rect) {
+    this.panels.placeCard(project, rect);
   }
 
   onHoverWorld(world) {
@@ -1761,6 +1913,76 @@ export class App {
     this.requestDraw();
   }
 
+  /*
+   * THE WHOOP CANVAS'S THREE VIEWS. Room is the track in 3D, where it is built.
+   * Plan is the same room from straight above, for measuring: a camera angle
+   * and not a second editor. 2D is the canvas this tool has always had, one
+   * press away, and the fall back when Three.js does not arrive. The other
+   * canvases keep their 2D and 3D buttons.
+   */
+  showRoom() {
+    this.viewChosen = true;
+    this.autoRoom = false;
+    this.setMode('3d');
+    this.view3d.setPlanCamera(false);
+    this.updateTopBar();
+    this.requestDraw();
+  }
+
+  showPlan() {
+    this.viewChosen = true;
+    this.autoRoom = false;
+    this.setMode('3d');
+    this.view3d.setPlanCamera(true);
+    this.updateTopBar();
+    this.requestDraw();
+  }
+
+  show2d() {
+    this.viewChosen = true;
+    this.autoRoom = false;
+    this.setMode('2d');
+  }
+
+  /* V: on the whoop canvas, room and plan; elsewhere, 2D and 3D as ever. */
+  toggleView() {
+    if (!this.isWhoopRace()) {
+      this.setMode(this.mode === '2d' ? '3d' : '2d');
+      return;
+    }
+    if (this.mode === '3d' && !this.view3d.isPlan()) {
+      this.showPlan();
+    } else {
+      this.showRoom();
+    }
+  }
+
+  /*
+   * A WHOOP CANVAS OPENS IN THE ROOM, once the room is ready. Three.js is
+   * fetched the moment the canvas opens and the plan is what shows until it
+   * arrives, so a slow or blocked CDN leaves the tool on the plan it always
+   * had (view3d.js says why the preview must never be load bearing). The
+   * author's own choice of view is never overruled, and leaving for another
+   * canvas puts back what that canvas has always opened on.
+   */
+  syncViewToCanvas() {
+    if (this.isWhoopRace()) {
+      if (this.mode === '2d' && !this.viewChosen && !this.roomPending) {
+        this.roomPending = true;
+        this.view3d.preload().then((ok) => {
+          this.roomPending = false;
+          if (ok && this.isWhoopRace() && this.mode === '2d' && !this.viewChosen) {
+            this.autoRoom = true;
+            this.setMode('3d');
+          }
+        });
+      }
+    } else if (this.autoRoom) {
+      this.autoRoom = false;
+      this.setMode('2d');
+    }
+  }
+
   frameAll() {
     if (this.mode === '2d') {
       this.view2d.frameTrack();
@@ -1924,12 +2146,14 @@ export class App {
     this.history.reset();
     this.path = null;
     this.warnings = [];
-    this.pathVisible = false;
+    this.pathVisible = this.isWhoopRace();
+    this.bendLine = false;
     writeAutosave(this.doc);
     this.view2d.frameTrack();
     this.view3d.frameTrack();
     this.view3d.markDirty();
     this.refresh();
+    this.syncViewToCanvas();
     const said = [message, kept, seated].filter(Boolean).join(' ');
     if (said) {
       this.toast(said);
@@ -3151,8 +3375,14 @@ export class App {
 
     this.undoBtn = btn('Undo', () => this.undo(), 'Control Z');
     this.redoBtn = btn('Redo', () => this.redo(), 'Control Shift Z');
-    this.mode2d = btn('2D', () => this.setMode('2d'), 'Top down authoring view');
-    this.mode3d = btn('3D', () => this.setMode('3d'), 'Preview. Drag a horizontal pole or a waypoint to change its height. Everything else stands on the ground, or on what is under it on a map.');
+    /* Any press on a view button is the author's own choice, and the room
+     * opening by itself on a whoop canvas never overrules it. */
+    this.mode2d = btn('2D', () => this.show2d(), 'Top down authoring view');
+    this.mode3d = btn('3D', () => { this.viewChosen = true; this.setMode('3d'); }, 'Preview. Drag a horizontal pole or a waypoint to change its height. Everything else stands on the ground, or on what is under it on a map.');
+    /* A whoop canvas is built in the room. Plan is the same room from straight
+     * above, for measuring, and 2D is the canvas this tool has always had. */
+    this.modeRoom = btn('Room', () => this.showRoom(), 'The track in 3D. Build here: pick a gate on the left, click the floor, drag a gate to move it.');
+    this.modePlan = btn('Plan', () => this.showPlan(), 'The same room from straight above, for measuring. Every gesture is the same.');
     /* Plain, not primary. There is one green button on this bar and it is
      * the one that leaves for the air; a second would make neither read as
      * the thing to press. Show line goes amber while a line is showing,
@@ -3160,6 +3390,8 @@ export class App {
     /* The line is derived on every edit now, so this only paints it. */
     this.pathBtn = btn('Show line', () => this.togglePath(), 'Draw the racing line on the canvas');
     this.labelsBtn = btn('Labels', () => this.toggleLabels(), 'Flying-order numbers on the gates. Turn them off to see the racing line.');
+    /* Whoop canvas only: with it off, a click in a gate is a click on the gate. */
+    this.bendBtn = btn('Bend line', () => this.toggleBendLine(), 'Drag the racing line to bend it into a waypoint. Off, a click on a gate is a click on the gate.');
 
     const file = document.createElement('input');
     file.type = 'file';
@@ -3294,10 +3526,11 @@ export class App {
     zoneEdit.className = 'tb-zone tb-zone-edit';
     zoneEdit.append(
       group(this.undoBtn, this.redoBtn),
-      group(this.mode2d, this.mode3d),
+      group(this.modeRoom, this.modePlan, this.mode2d, this.mode3d),
       group(
-        btn('Fit', () => this.frameAll(), 'Frame the whole field'),
+        (this.fitBtn = btn('Fit', () => this.frameAll(), 'Frame the whole field')),
         this.pathBtn,
+        this.bendBtn,
         this.labelsBtn,
         btn('Sponsor logos', () => this.openLogo(), 'Up to five sponsors\u2019 logos, shared out over the gates, the flags and the grass'),
       ),
@@ -3329,8 +3562,22 @@ export class App {
     this.redoBtn.disabled = !this.history.canRedo();
     this.undoBtn.title = this.history.canUndo() ? `Undo ${this.history.undoLabel()}` : 'Nothing to undo';
     this.redoBtn.title = this.history.canRedo() ? `Redo ${this.history.redoLabel()}` : 'Nothing to redo';
+    const whoop = this.isWhoopRace();
+    const plan = this.mode === '3d' && this.view3d.isPlan();
     this.mode2d.classList.toggle('on', this.mode === '2d');
     this.mode3d.classList.toggle('on', this.mode === '3d');
+    /* A whoop canvas has Room, Plan and 2D; every other canvas has 2D and 3D. */
+    this.modeRoom.style.display = whoop ? '' : 'none';
+    this.modePlan.style.display = whoop ? '' : 'none';
+    this.mode3d.style.display = whoop ? 'none' : '';
+    this.modeRoom.classList.toggle('on', whoop && this.mode === '3d' && !plan);
+    this.modePlan.classList.toggle('on', whoop && plan);
+    this.bendBtn.style.display = whoop ? '' : 'none';
+    this.bendBtn.classList.toggle('on', this.bendLine);
+    /* The whoop canvas's layout: the side column is a drawer and the room's own
+     * chrome is shown. See the block in index.html. */
+    document.body.classList.toggle('tb-whoop', whoop);
+    this.fitBtn.title = whoop ? 'Frame the track' : 'Frame the whole field';
     const map = docModeOf(this.doc) === 'freestyle';
     if (this.classBtns) {
       const canvas = canvasOf(this.doc);
@@ -3648,6 +3895,13 @@ export class App {
         this.setSelection(this.doc.elements.map((el) => el.id));
         return;
       }
+      /* Control D copies on a whoop canvas, and would otherwise be the
+       * browser's bookmark. Elsewhere it is left to the browser. */
+      if (mod && e.key.toLowerCase() === 'd' && this.isWhoopRace()) {
+        e.preventDefault();
+        this.copySelection();
+        return;
+      }
       if (mod) {
         return;
       }
@@ -3703,7 +3957,20 @@ export class App {
         return;
       }
       if (e.key === 'v' || e.key === 'V') {
-        this.setMode(this.mode === '2d' ? '3d' : '2d');
+        this.viewChosen = true;
+        this.toggleView();
+        return;
+      }
+      /* The arrows nudge on a whoop canvas: a grid square, or six inches with
+       * Shift. Where an armed tool or a road is being laid they are left alone. */
+      if (this.isWhoopRace() && !this.armed && this.selection.size
+        && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        this.nudgeSelection(e.key.slice(5).toLowerCase(), e.shiftKey);
+        return;
+      }
+      if ((e.key === 'f' || e.key === 'F') && this.isWhoopRace()) {
+        this.frameSelection();
         return;
       }
       if (e.key === 'q' || e.key === 'Q' || e.key === 'e' || e.key === 'E') {
@@ -3736,9 +4003,12 @@ export class App {
         const element = elementById(d, id);
         /* A road turns by its nodes and a vehicle by its road. */
         if (element && ![KIND.ANNOTATION, KIND.ROAD, KIND.VEHICLE].includes(kindOf(element))) {
-          /* A building steps a whole quarter turn, from wherever the
+          /* A whoop gate steps a quarter turn, which is what RaceGOW can
+           * build; a building steps a whole quarter turn, from wherever the
            * compass has it, rather than fifteen degrees it cannot hold. */
-          if (turnsOf(element.type) === 'quarter') {
+          if (turnStepFor(this.doc, element) === QUARTER) {
+            setYaw(d, id, nearestQuarter(element.yaw + Math.sign(degrees) * QUARTER));
+          } else if (turnsOf(element.type) === 'quarter') {
             setYaw(d, id, snapYaw(element.type, snapYaw(element.type, element.yaw) + Math.sign(degrees) * QUARTER_TURN));
           } else {
             /* From where a marker's square sits, not its stored yaw: see

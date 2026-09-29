@@ -41,6 +41,7 @@ import {
   SCENE_TIMES, SCENE_GROUNDS, sceneOf,
 } from './model.js';
 import { gateNumbers, gateNumberOf, sequenceLabel, faceLabel, unsequencedElements } from './sequence.js';
+import { labelOf } from './elements.js';
 import { standsOnGround } from './seat.js';
 import { figuresFor, matchingFigure, figureBlurb, levelName } from './figures.js';
 import { elevationProfile } from './path.js';
@@ -59,6 +60,32 @@ import { DRIFT } from '../maps/built/traffic.js';
  * document and km/h in its inspector, the unit a driver reads: this is the
  * one place the builder converts it. */
 const KMH = 3.6;
+
+/*
+ * THE WORDS OF A WHOOP CANVAS. The panels were written in the model's words,
+ * and a pilot who has never seen the tool does not know what a sill is, or
+ * that Yaw is which way a gate faces, or what a face flipped is for. On a whoop
+ * canvas each is said the way a person building the track says it. The model,
+ * the file and the five inch canvas keep theirs.
+ */
+const WHOOP_WORDS = {
+  'Sill height': 'Height off floor',
+  'Level spacing': 'Gap between gates',
+  'Opening width': 'Gate width',
+  'Opening height': 'Gate height',
+  'Opening size': 'Gate size',
+  Base: 'Height off floor',
+  Yaw: 'Turn',
+  'Flip face': 'Reverse direction',
+  'Re-derive': 'Let the tool decide again',
+  'How it is flown': 'Path through the stack',
+  set: 'Turned by hand',
+};
+
+/* Inches, because the rules and the pipe are in them, with the millimetres
+ * beside; the document stays in metres. */
+const IN = 0.0254;
+const round6 = (v) => Math.round(v * 1e6) / 1e6;
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -330,7 +357,7 @@ export class Panels {
       const b = el('button', 'tb-tool');
       b.type = 'button';
       b.title = def.note;
-      b.append(el('span', 'tb-tool-key', def.key), el('span', 'tb-tool-label', def.label));
+      b.append(el('span', 'tb-tool-key', def.key), el('span', 'tb-tool-label', labelOf(def.id, cls)));
       b.addEventListener('click', () => this.host.arm(def.id));
       this.paletteButtons.set(def.id, b);
       (def.group === 'track' ? track : extra).append(b);
@@ -404,6 +431,11 @@ export class Panels {
     if (this.pathButton) {
       this.pathButton.classList.toggle('on', this.host.pathVisible);
     }
+    /* What the pointer does now is said by the coach line, and whether the card
+     * shows changes the moment a tool is armed or put away. */
+    this.renderCoach();
+    this.renderCard();
+    this.renderEmpty();
   }
 
   /* ---------------- render entry point ---------------- */
@@ -414,6 +446,7 @@ export class Panels {
     this.renderInspector();
     this.renderSequence();
     this.renderResults();
+    this.renderWhoop();
     this.restoreFocus(focus);
   }
 
@@ -449,9 +482,14 @@ export class Panels {
 
   /* ---------------- inspector ---------------- */
 
+  /* A word, in the whoop canvas's own where it has one. */
+  say(word) {
+    return this.host.isWhoopRace() ? (WHOOP_WORDS[word] ?? word) : word;
+  }
+
   field(key, label, value, onCommit, opts = {}) {
     const row = el('label', 'tb-field');
-    row.append(el('span', 'tb-field-label', label));
+    row.append(el('span', 'tb-field-label', this.say(label)));
     const input = el('input');
     input.type = opts.text ? 'text' : 'number';
     const nudge = opts.step ?? 0.1;
@@ -1135,7 +1173,7 @@ export class Panels {
   renderFigurePicker(host, doc, element) {
     const current = matchingFigure(doc, element);
     const n = aperturesOf(element).length;
-    host.append(el('h3', null, 'How it is flown'));
+    host.append(el('h3', null, this.say('How it is flown')));
     host.append(el('p', 'tb-help', 'Each hole is its own gate. Pick the figure, then fly that line. The racing line shows the wrap.'));
     const grid = el('div', 'tb-fig-grid');
     for (const fig of figuresFor(element)) {
@@ -1221,7 +1259,7 @@ export class Panels {
       return m && f && m.id === f.id;
     });
     const current = all ? matchingGatePreset(first.dims) : null;
-    host.append(el('h3', null, elements.length > 1 ? `Opening size, ${elements.length} gates` : 'Opening size'));
+    host.append(el('h3', null, elements.length > 1 ? `${this.say('Opening size')}, ${elements.length} gates` : this.say('Opening size')));
     const grid = el('div', 'tb-fig-grid');
     /* The class's own presets: MultiGP's four on a field, RaceGOW's two
      * legal sizes in a room. */
@@ -1388,9 +1426,9 @@ export class Panels {
     }
 
     const row = el('div', 'tb-row-btns');
-    row.append(button(kindOf(element) === KIND.MARKER ? 'Flip side' : 'Flip face', 'tb-btn', () => this.host.flipFace(seq.id), 'Shortcut: X'));
+    row.append(button(kindOf(element) === KIND.MARKER ? 'Flip side' : this.say('Flip face'), 'tb-btn', () => this.host.flipFace(seq.id), 'Shortcut: X'));
     if (seq.overridden || element.yawOverridden) {
-      row.append(button('Re-derive', 'tb-btn', () => this.host.clearOverride(seq.id),
+      row.append(button(this.say('Re-derive'), 'tb-btn', () => this.host.clearOverride(seq.id),
         'Hand this back to the automatic rule, which points it along the line from the previous element to the next.'));
     }
     row.append(button('Remove', 'tb-btn tb-danger', () => this.host.removeSequenceEntry(seq.id)));
@@ -1565,10 +1603,13 @@ export class Panels {
       body.append(face);
       li.append(body);
       if (seq.overridden) {
-        li.append(el('span', 'tb-badge', 'set'));
+        li.append(el('span', 'tb-badge', this.say('set')));
       }
-      li.append(button('X', 'tb-mini', (e) => { e.stopPropagation(); this.host.flipFace(seq.id); }, 'Flip the face or the pass side'));
-      li.append(button('-', 'tb-mini tb-danger', (e) => { e.stopPropagation(); this.host.removeSequenceEntry(seq.id); }, 'Take it out of the order'));
+      /* Two buttons with a letter and a dash on them, on every row, said in words
+       * on a whoop canvas. */
+      const whoopRows = this.host.isWhoopRace();
+      li.append(button(whoopRows ? 'Reverse' : 'X', 'tb-mini', (e) => { e.stopPropagation(); this.host.flipFace(seq.id); }, 'Flip the face or the pass side'));
+      li.append(button(whoopRows ? 'Remove' : '-', 'tb-mini tb-danger', (e) => { e.stopPropagation(); this.host.removeSequenceEntry(seq.id); }, 'Take it out of the order'));
 
       li.addEventListener('click', () => {
         if (element) {
@@ -1612,6 +1653,224 @@ export class Panels {
       }
       host.append(ul);
     }
+  }
+
+  /* ---------------- the whoop room's own chrome ---------------- */
+
+  /* The card, the lap bar, the coach and the empty canvas's way in: the four
+   * things laid over the room, in place of the side column a whoop canvas
+   * keeps in a drawer. Each is empty and hidden anywhere else. */
+  renderWhoop() {
+    this.renderCard();
+    this.renderLapBar();
+    this.renderCoach();
+    this.renderEmpty();
+  }
+
+  /*
+   * THE CARD BY THE SELECTED PIECE: six fields and three buttons, in inches
+   * with the millimetres beside them, because a pilot standing in a hall with a
+   * tape measure thinks in one and reads the rules in the other. Everything
+   * else, the frame's sides, the stack's figure, the flag's side, is in the
+   * drawer under More. X and Y are measured from the middle of the room, which
+   * is where the game puts a track, so they are numbers a track that is about
+   * the size of an envelope can have. It floats beside the piece in the room
+   * (placeCard) and docks to the foot where there is no room for that.
+   */
+  renderCard() {
+    const card = this.nodes.card;
+    if (!card) {
+      return;
+    }
+    const doc = this.host.doc;
+    const ids = [...this.host.selection].filter((id) => elementById(doc, id));
+    /* Not while a tool is armed: the pointer is for placing then, and a card
+     * beside the piece just placed sits exactly where the next one goes. */
+    if (!this.host.isWhoopRace() || !ids.length || this.host.armed) {
+      card.hidden = true;
+      card.textContent = '';
+      return;
+    }
+    card.textContent = '';
+    card.hidden = false;
+    card.classList.toggle('docked', this.host.mode !== '3d');
+    const head = el('div', 'tb-card-head');
+    const actions = el('div', 'tb-card-actions');
+    actions.append(
+      button('Copy', 'tb-btn', () => this.host.copySelection(), 'A copy beside it, 30 in on. Control D'),
+      button('Remove', 'tb-btn tb-danger', () => this.host.deleteSelection(), 'Delete'),
+      button('More', 'tb-btn', () => this.host.toggleDrawer(true), 'Everything else about it: the frame, the flag, how a stack is flown'),
+    );
+    const close = button('\u00d7', 'tb-btn tb-mini tb-card-x', () => this.host.setSelection([]), 'Let go of it. Escape');
+    close.setAttribute('aria-label', 'Let go of it');
+
+    if (ids.length > 1) {
+      head.append(el('strong', null, `${ids.length} selected`), close);
+      card.append(head, el('p', 'tb-help', 'Drag one to move them together. Q and E turn them. Arrow keys nudge them.'), actions);
+      return;
+    }
+    const element = elementById(doc, ids[0]);
+    const def = ELEMENTS[element.type];
+    const entries = doc.sequence.filter((q) => q.elementId === element.id);
+    const numbers = gateNumbers(doc);
+    const number = entries.length ? numbers.get(entries[0].id) : null;
+    head.append(el('strong', null, `${element.name || labelOf(element.type, 'micro')}${number != null ? `, number ${number}` : ''}`), close);
+    card.append(head);
+
+    const grid = el('div', 'tb-card-grid');
+    const id = element.id;
+    const mid = { x: doc.field.width / 2, y: doc.field.depth / 2 };
+    const mm = (m) => `${Math.round(m * 1000)} mm`;
+    if (number != null) {
+      grid.append(this.field(`card-order-${id}`, 'Place in order', number, (val) => this.host.renumber(entries[0].id, val),
+        { step: 1, places: 0, min: 1 }));
+    }
+    const dx = element.position.x - mid.x;
+    const dy = element.position.y - mid.y;
+    grid.append(
+      this.field(`card-x-${id}`, 'X (in)', dx / IN, (val) => {
+        this.host.edit('move', (d) => { elementById(d, id).position.x = round6(mid.x + val * IN); });
+      }, { step: 1, places: 1, suffix: mm(dx) }),
+      this.field(`card-y-${id}`, 'Y (in)', dy / IN, (val) => {
+        this.host.edit('move', (d) => { elementById(d, id).position.y = round6(mid.y + val * IN); });
+      }, { step: 1, places: 1, suffix: mm(dy) }),
+    );
+    /* Height off the floor: the sill of a gate, which is what lifts one on its
+     * legs; the base of a pole laid across a room; nothing for what stands on
+     * the ground. */
+    if (def.kind === KIND.APERTURE) {
+      grid.append(this.field(`card-h-${id}`, 'Height off floor (in)', (element.dims.sillH ?? 0) / IN, (val) => {
+        this.host.edit('resize', (d) => { elementById(d, id).dims.sillH = round6(Math.max(0, val * IN)); });
+      }, { step: 1, places: 1, min: 0, suffix: mm(element.dims.sillH ?? 0) }));
+    } else if (!standsOnGround(doc, element) && def.kind !== KIND.DECAL) {
+      grid.append(this.field(`card-h-${id}`, 'Height off floor (in)', element.position.z / IN, (val) => {
+        this.host.edit('height', (d) => { elementById(d, id).position.z = round6(Math.max(0, val * IN)); });
+      }, { step: 1, places: 1, min: 0, suffix: mm(element.position.z) }));
+    }
+    if (def.kind === KIND.APERTURE || def.kind === KIND.START || def.kind === KIND.OBSTACLE) {
+      const yaw = this.host.shownYaw ? this.host.shownYaw(element) : element.yaw;
+      grid.append(this.field(`card-turn-${id}`, 'Turn (degrees)', yaw * DEG, (val) => {
+        this.host.setElementYaw(id, val * RAD);
+      }, { step: 90, places: 0 }));
+    }
+    if (entries.length && (def.kind === KIND.APERTURE || def.kind === KIND.MARKER)) {
+      const fig = el('div', 'tb-card-fig');
+      fig.append(el('span', null, def.kind === KIND.APERTURE ? 'Direction' : 'Pass side'),
+        button(def.kind === KIND.APERTURE ? 'Reverse' : 'Other side', 'tb-btn', () => this.host.flipFace(entries[0].id), `${faceLabel(doc, entries[0])}. X`));
+      grid.append(fig);
+    }
+    card.append(grid, actions);
+  }
+
+  /*
+   * Where the card floats: to the right of what is selected, or to its left
+   * when there is no room on the right, and never over the lap bar. `project`
+   * puts a document point on the stage; a window too narrow to float it in
+   * docks it. Called by view3d.placeOverlay after every frame.
+   */
+  placeCard(project, rect) {
+    const card = this.nodes.card;
+    if (!card || card.hidden) {
+      return;
+    }
+    const c = this.host.selectionCentroid();
+    const at = c ? project({ x: c.x, y: c.y, z: c.z + 0.9 }) : null;
+    if (!at || rect.width < 640) {
+      card.classList.add('docked');
+      card.style.left = '';
+      card.style.top = '';
+      return;
+    }
+    card.classList.remove('docked');
+    const w = card.offsetWidth;
+    const h = card.offsetHeight;
+    let x = at.x + 44;
+    if (x + w > rect.width - 10) {
+      x = at.x - 44 - w;
+    }
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    card.style.left = `${clamp(x, 10, rect.width - w - 10).toFixed(0)}px`;
+    card.style.top = `${clamp(at.y - h / 2, 10, Math.max(10, rect.height - h - 104)).toFixed(0)}px`;
+  }
+
+  /*
+   * THE LAP BAR, along the foot: the lap's length, how many gates, whether the
+   * lap closes and how many warnings there are, from the same path and the same
+   * warnings the drawer's results show. The button opens the drawer, which is
+   * where the flying order, the warnings and the elevation profile are.
+   */
+  renderLapBar() {
+    const bar = this.nodes.lapbar;
+    if (!bar) {
+      return;
+    }
+    bar.textContent = '';
+    if (!this.host.isWhoopRace()) {
+      return;
+    }
+    const doc = this.host.doc;
+    const path = this.host.path;
+    const gates = [...gateNumbers(doc).values()].filter((n) => n != null).length;
+    const bad = (this.host.warnings ?? []).filter((w) => w.level === 'warn').length;
+    const fig = (label, value, tone) => {
+      const f = el('span', tone ? `tb-lap-fig ${tone}` : 'tb-lap-fig');
+      f.append(el('span', null, label), el('b', null, value));
+      return f;
+    };
+    bar.append(
+      fig('Length', path ? `${path.length.toFixed(1)} m, ${(path.length / 0.3048).toFixed(0)} ft` : '0 m'),
+      fig('Gates', String(gates)),
+      fig('Lap', path && path.closed ? 'closes' : 'open', path && path.closed ? 'good' : ''),
+      fig('Warnings', String(bad), bad ? 'bad' : 'good'),
+      el('span', 'tb-lap-gap'),
+      button('Flying order', 'tb-btn', () => this.host.toggleDrawer(), 'The order the gates are flown in, every warning, and the elevation profile'),
+    );
+  }
+
+  /* One line at the foot of the room, while a track is still a few gates, saying
+   * what the pointer does now. It goes when there are three gates: by then the
+   * pilot knows. */
+  renderCoach() {
+    const coach = this.nodes.coach;
+    if (!coach) {
+      return;
+    }
+    const doc = this.host.doc;
+    const gates = doc.elements.filter((e) => kindOf(e) === KIND.APERTURE).length;
+    let text = '';
+    if (this.host.isWhoopRace() && (doc.elements.length || this.host.armed) && gates < 3) {
+      if (this.host.armed) {
+        text = 'Click the floor to place it. The tool stays armed, so a second click places another. Right click or Esc puts it away.';
+      } else if (this.host.selection.size) {
+        text = 'Drag it to move it. Drag the ring at its foot to turn it. The arrow keys nudge it.';
+      } else {
+        text = 'Click a gate to select it. Drag empty floor to look round. Pick a tool on the left to place more.';
+      }
+    }
+    coach.hidden = !text;
+    coach.textContent = text;
+  }
+
+  /* An empty canvas is the hardest thing to start from and a finished track with
+   * one gate to move is the easiest, so it says what to do and offers the
+   * second. */
+  renderEmpty() {
+    const box = this.nodes.empty;
+    if (!box) {
+      return;
+    }
+    /* Not once a tool is armed: the coach line says what to do then. */
+    const show = this.host.isWhoopRace() && this.host.doc.elements.length === 0 && !this.host.armed;
+    box.hidden = !show;
+    box.textContent = '';
+    if (!show) {
+      return;
+    }
+    box.append(
+      el('p', null, 'Pick a gate on the left, then click the floor.'),
+      el('p', 'tb-help', 'Or start from a finished RaceGOW track and move a gate.'),
+      button('Start from a RaceGOW track', 'tb-btn tb-primary', () => this.host.openLoad(), 'The eight tracks of RaceGOW5, to open and change'),
+    );
   }
 
   /* ---------------- results ---------------- */

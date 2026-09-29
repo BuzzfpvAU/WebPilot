@@ -1364,6 +1364,18 @@ export function tuningFor(cls, mode = 'race') {
   return { ...TUNING, ...TUNING.micro };
 }
 
+/*
+ * THE NAME OF A PIECE ON A CLASS'S CANVAS. RaceGOW calls what the five inch
+ * calls a dive gate a Horizontal Gate (racegow.js), and a pilot building a
+ * whoop track knows it by that name, so the whoop canvas says so; every other
+ * piece, and every other canvas, keeps the name it has.
+ */
+const WHOOP_LABELS = { diveGate: 'Horizontal gate' };
+
+export function labelOf(type, cls = TRACK_CLASS_DEFAULT) {
+  return (cls === 'micro' && WHOOP_LABELS[type]) || ELEMENTS[type]?.label || type;
+}
+
 /* Convenience: every element definition in palette order, extras last. */
 export function paletteItems(cls = TRACK_CLASS_DEFAULT, mode = 'race') {
   return [
