@@ -2422,6 +2422,9 @@ export async function buildMap(shell, onProgress, options) {
     userScale: options && options.renderScale,
   });
   pipeline.enabled.ink = q.city.ink;
+  /* What the preset gave, which the pilot's Manga and scoring switch may
+   * only narrow: see setInkLines in src/render/quality.js. */
+  pipeline.inkPreset = q.city.ink;
   pipeline.enabled.fxaa = q.city.fxaa;
   const d = shell.resize();
   pipeline.setSize(d.w, d.h);

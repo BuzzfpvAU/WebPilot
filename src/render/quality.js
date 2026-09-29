@@ -480,3 +480,78 @@ export function internalScale(w, h, mapQ, forceScale, userScale) {
   }
   return s;
 }
+
+/*
+ * THE INK LINES, AND THE PILOT'S HAND ON THEM. The black outline round the
+ * edges of the world, in the town, on a built map and on the race field
+ * alike, is a screen space pass that Low leaves out and Medium and High
+ * draw (city.ink and field.outline above). The pilot's Manga and scoring
+ * switch (src/ui/ui.js, DEFAULTS.mangaAndScoring) takes it away on Medium
+ * and High too, so the picture is Low's without giving up anything else
+ * those presets pay for. It can only narrow what the preset gave: on Low
+ * the switch has nothing to take, and turning it on never adds a pass the
+ * preset left out.
+ *
+ * There are two post chains, and they hold the ink differently:
+ *
+ *   The town's and a built map's Pipeline: the ink is a pass of its own,
+ *   `enabled.ink`, and off is not running it, as Low does, which also saves
+ *   a full screen pass. What the preset gave is `inkPreset`, written where
+ *   the pipeline is built.
+ *
+ *   The race field's composer: the outline pass is the field's
+ *   antialiasing as well as its ink (src/render/post.js, "Antialiasing,
+ *   paid for entirely by fetches the ink already made"), and its order in
+ *   the composer decides whether a render target needs a depth buffer, so
+ *   the pass is left where it is and the ink's strength goes to zero. The
+ *   strength the preset gave is `inkStrength`. Only Medium and High have
+ *   the pass at all.
+ *
+ * Called once a frame from main.js with the switch, so a world swapped in
+ * (a new map, a new preset) is given it without a call of its own, and each
+ * write is guarded on a change. Render only: nothing here is read by the
+ * physics, the scorer or the plant.
+ *
+ * What it does NOT touch is the inverted hull outline on a few props (a
+ * gate post, a trunk, a vending machine: outlineHull in celmat.js and
+ * hullOutline in the vendored core/outline.js). Those are geometry, every
+ * preset draws them, and Low does, which is the picture this matches.
+ */
+export function setInkLines(post, on) {
+  if (!post) {
+    return;
+  }
+  const want = on !== false;
+  if (post.enabled && post.ink) {
+    /* A pipeline built by something that never said what its preset gave
+     * is left as it is: narrowing needs the thing it narrows. */
+    if (post.inkPreset === undefined) {
+      return;
+    }
+    const ink = want && post.inkPreset !== false;
+    if (post.enabled.ink !== ink) {
+      post.enabled.ink = ink;
+    }
+    return;
+  }
+  const u = post.outline && post.outline.uniforms ? post.outline.uniforms.uStrength : null;
+  if (u && post.inkStrength !== undefined) {
+    const strength = want ? post.inkStrength : 0;
+    if (u.value !== strength) {
+      u.value = strength;
+    }
+  }
+}
+
+/* Whether the chain draws ink lines now, for the harness
+ * (window.__manga.state) and the checks. */
+export function inkLinesOn(post) {
+  if (!post) {
+    return false;
+  }
+  if (post.enabled && post.ink) {
+    return Boolean(post.enabled.ink);
+  }
+  const u = post.outline && post.outline.uniforms ? post.outline.uniforms.uStrength : null;
+  return Boolean(u && u.value > 0);
+}

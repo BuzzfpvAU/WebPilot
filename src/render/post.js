@@ -733,6 +733,10 @@ export function buildComposer(renderer, scene, camera, quality) {
       }
     },
     outline,
+    /* The ink's strength as the preset drew it, which the pilot's Manga and
+     * scoring switch may take to zero and back: see setInkLines in
+     * src/render/quality.js. Undefined where there is no outline pass. */
+    inkStrength: outline ? outline.uniforms.uStrength.value : undefined,
     bloom,
     grade,
     composer,

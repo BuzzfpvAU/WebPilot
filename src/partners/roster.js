@@ -134,7 +134,7 @@ export const PARTNERS = Object.freeze([
     name: 'Mantis FPV',
     short: 'Mantis FPV',
     role: 'retail',
-    about: 'Australian FPV drone parts and service, online and in store in Parramatta, Sydney, with a repair and build service and one to one coaching in their workshop.',
+    about: 'Australian FPV drone parts and service, online and in store in Parramatta, Sydney, with a repair and build service and one to one coaching in their workshop. Australian based, with worldwide shipping.',
     links: [
       { kind: 'site', label: 'Visit Mantis FPV', href: 'https://www.mantisfpv.com.au/' },
     ],

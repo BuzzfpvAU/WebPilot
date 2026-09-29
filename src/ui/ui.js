@@ -1033,7 +1033,9 @@ const DEFAULTS = {
    * and none of the calculations under them). On by default, which is the
    * game as it was. Off, nothing of the manga look is drawn anywhere and no
    * score is drawn in flight: no speed lines, impact frame or screentone
-   * (ui.manga is false), no score, combo or chase overlay, the menus' titles
+   * (ui.manga is false), no score, combo or chase overlay, no black outline
+   * round the world on Medium and High (the ink pass, which Low never draws:
+   * setInkLines in src/render/quality.js), the menus' titles
    * in the system's own type and their panels without the ink frame, the
    * results as a list, and a found mark's moment in plain clothes. It is
    * the pictures and nothing else: the scorer, the counter, the chase, a
@@ -7648,8 +7650,9 @@ export class Ui {
          * src/render/latency.js. Read only, like the GPU row. */
         latencyItem(this.latencyProbe ? this.latencyProbe() : null),
         /*
-         * THE SWITCH OVER ALL OF IT: the manga look everywhere and the
-         * score's readouts in flight, and never the counting under them
+         * THE SWITCH OVER ALL OF IT: the manga look everywhere, the black
+         * outline round the world on Medium and High, and the score's
+         * readouts in flight, and never the counting under them
          * (DEFAULTS.mangaAndScoring). First of the three, because the two
          * after it are finer parts of it, and while it is off their notes
          * say they are waiting on it rather than describing a look that is
@@ -7658,8 +7661,8 @@ export class Ui {
         toggle(
           'Manga and scoring',
           s.mangaAndScoring
-            ? 'On: the game\'s manga look and its score. The menus\' titles are lettered in the manga hand, and on a freestyle map the score, its combos and the chase are drawn as you fly them. Clean FPV and the Impact frame below trim parts of it.'
-            : 'Off: no manga look anywhere, and no score while you fly. No speed lines, impact frame or lettering, menus in plain type, and no score, combo or chase meter over the picture. The counting goes on underneath, so a scored run still runs its two minutes and ends on its results.',
+            ? 'On: the game\'s manga look and its score. The menus\' titles are lettered in the manga hand, Medium and High draw black outlines round the world, and on a freestyle map the score, its combos and the chase are drawn as you fly them. Clean FPV and the Impact frame below trim parts of it.'
+            : 'Off: no manga look anywhere, and no score while you fly. No black outlines round the world on Medium and High, as on Low, no speed lines, impact frame or lettering, menus in plain type, and no score, combo or chase meter over the picture. The counting goes on underneath, so a scored run still runs its two minutes and ends on its results.',
           s.mangaAndScoring,
           (v) => { s.mangaAndScoring = v; },
         ),
