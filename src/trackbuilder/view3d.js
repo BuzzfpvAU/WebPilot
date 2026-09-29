@@ -77,6 +77,7 @@ import {
   aperturesOf, elementById, kindOf, apertureCenter, logosOf, logoForDecal, dressOrder,
 } from './model.js';
 import { sequenceNumbers } from './sequence.js';
+import { frameRectFor } from './snap.js';
 import { levelName } from './figures.js';
 import { travelDirection, markerPassDir } from './faces.js';
 import { knotForSeq, markerSquare } from './path.js';
@@ -375,6 +376,15 @@ function assetKey(el) {
 const PICK_R = 0.3;
 /* How close to the racing line, in screen pixels, a press grabs it, and how
  * far a press has to travel before it bends it rather than being a click. */
+/* How much of the race field's label size a whoop's numbers get. They were
+ * 0.30, which is a number 0.33 m tall over a gate 0.71 m across: nearly half
+ * of it, so at the distance that shows a whole track the numbers covered the
+ * gates they named. */
+const MICRO_LABEL_K = 0.14;
+
+/* The camera's vertical field of view, named once because framing a track needs it. */
+const FOV_DEG = 52;
+
 const LINE_GRAB_PX = 9;
 const BEND_START_PX = 4;
 /* How far a pull upward on something that stands on the ground travels before
@@ -590,10 +600,12 @@ export class View3D {
     this.content = null;      /* rebuilt group */
     this.pickables = [];
     /* Plain numbers rather than a THREE.Vector3, because the orbit target is
-     * set by frameField() before the library has necessarily arrived. */
+     * set by frameTrack() before the library has necessarily arrived. */
     this.orbit = { target: { x: 0, y: 0, z: 0 }, radius: 60, theta: -Math.PI / 2.4, phi: 1.05 };
     this.drag = null;
     this.dirty = true;
+    /* A frame asked for while the canvas had no size: see frameTrack. */
+    this.needsFrame = false;
     /* The freestyle half: its scene, once CEL has arrived, and each asset's
      * drawing, kept across rebuilds by assetKey(). */
     this.fs = null;
@@ -762,7 +774,7 @@ export class View3D {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(COL.sky);
     this.scene.fog = new THREE.Fog(COL.sky, 90, 320);
-    this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 2000);
+    this.camera = new THREE.PerspectiveCamera(FOV_DEG, 1, 0.1, 2000);
 
     /* THE ONE CONVERSION. Document space is Z up; Three.js is Y up. */
     this.root = new THREE.Group();
@@ -807,6 +819,9 @@ export class View3D {
     }
     this.ensure();
     this.resize();
+    if (this.needsFrame) {
+      this.frameTrack();
+    }
     this.dirty = true;
     this.host.requestDraw();
     return true;
@@ -861,7 +876,7 @@ export class View3D {
     }
     const o = this.orbit;
     o.phi = clamp(o.phi, 0.06, Math.PI / 2 - 0.02);
-    o.radius = clamp(o.radius, 2, 600);
+    o.radius = clamp(o.radius, this.nearestRadius(2), 600);
     const x = o.target.x + o.radius * Math.cos(o.phi) * Math.cos(o.theta);
     const z = o.target.z + o.radius * Math.cos(o.phi) * Math.sin(o.theta);
     const y = o.target.y + o.radius * Math.sin(o.phi);
@@ -869,19 +884,80 @@ export class View3D {
     this.camera.lookAt(o.target.x, o.target.y, o.target.z);
   }
 
+  /* How close the camera may come. A gate is 0.71 m across, so the floor that
+   * suits a sixty metre course, 2 m, or 4 when framing something, would not let
+   * a whoop canvas look at one. */
+  nearestRadius(fieldFloor) {
+    return trackClassOf(this.host.doc) === 'micro' ? 0.6 : fieldFloor;
+  }
+
   /* Look at a point given in DOCUMENT coordinates. */
   focusDoc(point, radius) {
     this.ensure();
     this.orbit.target = { x: point.x, y: point.z, z: -point.y };
     if (radius != null) {
-      this.orbit.radius = clamp(radius, 4, 600);
+      this.orbit.radius = clamp(radius, this.nearestRadius(4), 600);
     }
     this.dirty = true;
   }
 
-  frameField() {
-    const f = this.host.doc.field;
-    this.focusDoc({ x: f.width / 2, y: f.depth / 2, z: 0 }, Math.max(f.width, f.depth) * 1.15);
+  /*
+   * What Fit and every load show. The whole field on every canvas but the
+   * whoop, as it always was; on a whoop canvas the track, from the rectangle
+   * frameRectFor gives both views.
+   *
+   * A SPHERE ROUND THAT RECTANGLE, not the rectangle itself, because the
+   * camera turns: a rectangle fits from one bearing and not from another,
+   * and the author is about to orbit it. The radius is the sphere's over the
+   * sine of half the narrower field of view, which is the distance at which
+   * the sphere just fits whichever way the window is shaped.
+   *
+   * The window is not always the shape it will be. A load that arrives while
+   * the plan is showing frames a canvas that has no size, so that is said
+   * and done again when the room gets its size, in setEnabled.
+   */
+  frameTrack() {
+    const doc = this.host.doc;
+    const f = doc.field;
+    if (trackClassOf(doc) !== 'micro' || docModeOf(doc) === 'freestyle') {
+      this.focusDoc({ x: f.width / 2, y: f.depth / 2, z: 0 }, Math.max(f.width, f.depth) * 1.15);
+      return;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    const sized = rect.width > 0 && rect.height > 0;
+    this.needsFrame = !sized;
+    const aspect = sized ? rect.width / rect.height : 1.6;
+    const vfov = (FOV_DEG * Math.PI) / 180;
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+    const r = frameRectFor(doc);
+    const half = Math.hypot(r.maxX - r.minX, r.maxY - r.minY) / 2;
+    this.focusDoc(
+      { x: (r.minX + r.maxX) / 2, y: (r.minY + r.maxY) / 2, z: 0.3 },
+      (half * 1.1) / Math.sin(Math.min(vfov, hfov) / 2),
+    );
+  }
+
+  /*
+   * A DOCUMENT POINT ON THE SCREEN, in pixels from the canvas's top left, or
+   * null when it is behind the camera. The root's own rotation is what turns
+   * a document point into a scene one, so it is asked to, rather than the
+   * conversion being written out here a second time.
+   */
+  toScreen(p) {
+    if (!this.camera || !this.root) {
+      return null;
+    }
+    this.applyCamera();
+    this.camera.updateMatrixWorld(true);
+    this.root.updateMatrixWorld(true);
+    const v = new THREE.Vector3(p.x, p.y, p.z ?? 0);
+    this.root.localToWorld(v);
+    v.project(this.camera);
+    if (v.z < -1 || v.z > 1) {
+      return null;
+    }
+    const rect = this.canvas.getBoundingClientRect();
+    return { x: ((v.x + 1) / 2) * rect.width, y: ((1 - v.y) / 2) * rect.height };
   }
 
   /* ---------------- interaction ---------------- */
@@ -1566,7 +1642,7 @@ export class View3D {
      * and to every standoff, because a number that shrinks but keeps a 0.7 m
      * gap is a number floating in the air away from what it names.
      */
-    const k = trackClassOf(this.host.doc) === 'micro' ? 0.30 : 1;
+    const k = trackClassOf(this.host.doc) === 'micro' ? MICRO_LABEL_K : 1;
     /* Same switch as the plan. Off, the opening is bare and the line
      * through it can be read. The sequence list still has the numbers. */
     const showLabels = this.host.labelsVisible !== false;
@@ -1669,8 +1745,15 @@ export class View3D {
        * all been taken away one at a time is the same thing and gets the
        * same pane. It is WEAK: the racing line runs through the middle of
        * it, and a grab on the line there is a grab on the line.
+       *
+       * ON A WHOOP CANVAS EVERY OPENING GETS ONE, not only the gaps. The pipe
+       * of a RaceGOW gate is 26.7 mm, which from any distance that shows a
+       * whole track is three or four pixels to hit, so a gate could hardly be
+       * picked in the room; with a pane, the middle of a gate picks it. Only
+       * there: on a 60 m field the panes are 1.5 m squares that would take the
+       * click from a flag or a pole seen through a gate.
        */
-      if (!drawn) {
+      if (!drawn || trackClassOf(this.host.doc) === 'micro') {
         const pick = new THREE.Mesh(
           new THREE.PlaneGeometry(ap.clearW, ap.clearH),
           new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }),
@@ -1904,7 +1987,7 @@ export class View3D {
        * a waypoint is now what a bent line is made of, so there can be
        * several in a space the width of a sofa.
        */
-      const k = trackClassOf(this.host.doc) === 'micro' ? 0.30 : 1;
+      const k = trackClassOf(this.host.doc) === 'micro' ? MICRO_LABEL_K : 1;
       const ring = new THREE.Mesh(new THREE.RingGeometry(0.36 * k, 0.46 * k, 20), mat);
       ring.position.z = 0.02;
       group.add(ring);

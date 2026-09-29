@@ -62,7 +62,9 @@ const app = new App({
    a published map from the board's Remix in the builder after that. */
 const linked = docFromLocation();
 if (linked) {
-  app.loadDocument(linked, `Opened "${linked.name}" from the link.`);
+  /* Kept, not asked: a link opens that track, and what it displaces goes into
+     Load. See openIncoming in app.js. */
+  app.openIncoming(linked, `Opened "${linked.name}" from the link.`);
 }
 await app.adoptIncomingShare();
 await app.adoptIncomingMap();

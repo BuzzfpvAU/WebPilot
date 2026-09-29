@@ -78,6 +78,13 @@ import {
  */
 export const SCHEMA_VERSION = 3;
 
+/* The whoop room before it grew to 10 by 12 m, the only other size it has
+ * ever had: see the migration at the foot of normalize(). */
+const OLD_ROOM = Object.freeze({ width: 5, depth: 6 });
+
+/* The sizes a gate cannot do without: see the repair in normalize(). */
+const GATE_SIZES = ['clearW', 'clearH', 'levelPitch'];
+
 /*
  * ONE MARK, as a data URL, and the cap on it. The list they live in, and the
  * budget they share, are below.
@@ -891,6 +898,21 @@ export function normalize(raw) {
         ? num(clampDim(type, key, wanted))
         : (traffic ? num(clampByLimits(def, key, wanted))
           : (key === 'levels' ? int(wanted, def.dims[key], 1, 24) : Math.max(0, wanted)));
+      /*
+       * A GATE OF NO SIZE HAS NO OPENING. The clamp above stops a length going
+       * negative and lets it stay zero, so a document with a gate 0 m wide was
+       * read back as exactly that: nothing could be flown through it and
+       * nothing in the builder could say why. These three are the sizes a gate
+       * cannot do without; a sill height of zero is a gate on the floor and a
+       * flag's clearance of zero is a waypoint, so they are left alone. What a
+       * new gate of this class starts at is the size it is repaired to, and the
+       * note names the gate and the size so the author can put it right.
+       */
+      if (def.kind === KIND.APERTURE && GATE_SIZES.includes(key) && !(dims[key] > 0)) {
+        const fallback = defaultDims(type, doc.trackClass)[key];
+        repairs.push(`${id}: ${key} was ${wanted}, which is not a size a gate can have, so it is ${fallback} m, what a new ${def.label.toLowerCase()} starts at.`);
+        dims[key] = fallback;
+      }
     }
 
     const el = {
@@ -1064,8 +1086,17 @@ export function normalize(raw) {
    *
    * Silent, with no repair note. The author did nothing wrong and their
    * track has not been damaged; the room grew underneath it.
+   *
+   * ONCE, ON THE OLD ROOM AND NOTHING ELSE. This used to run for any micro
+   * document whose field was not 10 by 12, which is every document an author
+   * had resized in the inspector, so the size they typed was thrown away on
+   * the next read and their track shifted by half the difference. Only 5 by 6
+   * was ever the room (racegow.js has had no other), so only 5 by 6 is
+   * brought up. A room resized to exactly 5 by 6 is brought up as well, which
+   * is harmless: the shift keeps the track where it stood about the middle,
+   * and the game centres on the field either way.
    */
-  if (doc.trackClass === 'micro') {
+  if (doc.trackClass === 'micro' && doc.field.width === OLD_ROOM.width && doc.field.depth === OLD_ROOM.depth) {
     const T = tuningFor('micro');
     const dx = (T.fieldWidth - doc.field.width) * 0.5;
     const dy = (T.fieldDepth - doc.field.depth) * 0.5;

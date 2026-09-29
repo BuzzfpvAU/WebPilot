@@ -47,6 +47,9 @@ import {
 } from './path.js';
 import { collectWarnings, freestyleReport, labeller, FREESTYLE_SOLIDS_MAX } from './warnings.js';
 import { History } from './history.js';
+import { docFromQuery } from './sharelink.js';
+import { frameRectFor } from './snap.js';
+import { envelopeFor, GATE_OPENING_DEFAULT } from './racegow.js';
 import {
   RAD, DEG, wrapAngle, gateSupportFeet, apertureFrame, GATE_POST_R_SCALE,
 } from './geometry.js';
@@ -56,7 +59,7 @@ import { ELEMENTS, PALETTE_ORDER, GATE_FLAG_H, flagSideOf, flagSideSigns, elemen
   virtualApertureDims, countElementsByType, formatElementCounts,
   GATE_PRESETS, applyGatePreset, matchingGatePreset, levelPitchFor, FRAME_TUBE_OD,
   KIND, FREESTYLE_PALETTE_ORDER, PALETTE_EXTRA, paletteItems, docModeOf, isTrafficType,
-  TUNING, tuningFor, ROAD_NODES_MAX,
+  TUNING, tuningFor, ROAD_NODES_MAX, defaultDims,
 } from './elements.js';
 import {
   boardPlanOf, planShapeOf, snapYaw, turnsOf,
@@ -6169,6 +6172,153 @@ function suitePoleSquare() {
   }
 }
 
+/*
+ * THE WHOOP BUILDER'S FIRST REPAIRS, WRITTEN BEFORE THEY WERE MADE.
+ *
+ * WHOOP-BUILDER-PLAN.md, Stage 0. Each block reproduces a defect that the
+ * 2026-09-29 sweep reported (finding 14 and finding 26) or that the plan
+ * measured on the running page, so a regression arrives as a failing check
+ * and not as a pilot's report. Each block was run against the code as it
+ * stood and failed there, and only then was the fix made; PROGRESS.md has
+ * the names of what failed and the mutation checks that show each one can.
+ *
+ * What is not here is what only a page can see: whether a click in the middle
+ * of a gate selects it, whether a label covers a gate, and whether Fit puts
+ * the track on screen. scripts/builder-flow-check.js drives those.
+ */
+function suiteWhoopRepairs() {
+  console.log('\nthe whoop builder: repairs');
+
+  /* UNDO RECORDS ONLY REAL CHANGES. The app stamps modifiedUtc on every
+   * settled edit, and a stamp is the only thing a click that merely selects
+   * an element changes, so a history that compares whole documents recorded a
+   * step called "move" for every one of them. */
+  {
+    const h = new History();
+    const d = createTrack('clicks', 'micro');
+    place(d, 'gate', 5, 6);
+    h.begin(d, 'move');
+    d.modifiedUtc = '2099-01-01T00:00:00Z';
+    check('a click that only moves modifiedUtc records no undo step', h.commit(d) === false);
+    check('and leaves nothing to undo', h.canUndo() === false);
+    h.begin(d, 'move');
+    d.elements[0].position.x += 0.0254;
+    d.modifiedUtc = '2099-01-01T00:00:01Z';
+    check('a real move with a new modifiedUtc still records', h.commit(d) === true);
+    check('and one undo puts the gate back', Math.abs(h.undo(d).elements[0].position.x - 5) < 1e-9);
+  }
+
+  /* THE ROOM MIGRATION RUNS ONCE. The room grew from 5 by 6 m to 10 by 12 and
+   * every older document is brought up to it, its elements shifted by half
+   * the growth so the track stays where its author put it about the middle
+   * of the floor. It did that on every read of every whoop document, so a
+   * room an author had resized came back as 10 by 12 with everything moved. */
+  {
+    const d = createTrack('resized', 'micro');
+    place(d, 'gate', 4.2, 5.1);
+    d.field.width = 8;
+    d.field.depth = 10;
+    const back = deserialize(serialize(d)).doc;
+    check('a whoop room the author resized keeps its size on read',
+      back.field.width === 8 && back.field.depth === 10, `${back.field.width} by ${back.field.depth}`);
+    check('and nothing in it moves',
+      Math.abs(back.elements[0].position.x - 4.2) < 1e-9 && Math.abs(back.elements[0].position.y - 5.1) < 1e-9,
+      `${back.elements[0].position.x}, ${back.elements[0].position.y}`);
+    check('and export, import, export is byte identical for it',
+      serialize(deserialize(serialize(back)).doc) === serialize(back));
+
+    const old = createTrack('old room', 'micro');
+    old.field.width = 5;
+    old.field.depth = 6;
+    place(old, 'gate', 2.5, 3);
+    const up = deserialize(serialize(old)).doc;
+    check('a document written for the old 5 by 6 room still comes up to the 10 by 12 one',
+      up.field.width === 10 && up.field.depth === 12, `${up.field.width} by ${up.field.depth}`);
+    check('with its track shifted by half the growth, so it stays about the middle',
+      Math.abs(up.elements[0].position.x - 5) < 1e-9 && Math.abs(up.elements[0].position.y - 6) < 1e-9,
+      `${up.elements[0].position.x}, ${up.elements[0].position.y}`);
+  }
+
+  /* A GATE OF NO SIZE IS REPAIRED ON READ. normalize clamped a length to zero
+   * and stopped there, which is a structure with no opening at all: nothing
+   * can be flown through it and nothing in the builder can say so. (The sweep
+   * also reported a NaN radius; that did not reproduce on a four gate room,
+   * so nothing here claims it.) */
+  {
+    const d = createTrack('flat', 'micro');
+    const g = place(d, 'gate', 5, 6);
+    const raw = JSON.parse(serialize(d));
+    raw.elements[0].dims.clearW = 0;
+    raw.elements[0].dims.clearH = -3;
+    raw.elements[0].dims.levelPitch = 0;
+    const r = normalize(raw);
+    const got = r.doc.elements[0].dims;
+    const want = defaultDims('gate', 'micro');
+    check('a gate of no width or height is read back at the size a new one has',
+      got.clearW === want.clearW && got.clearH === want.clearH, JSON.stringify(got));
+    check('with a level spacing to match', got.levelPitch > 0, String(got.levelPitch));
+    check('and the repair names the gate and the size',
+      r.repairs.some((m) => m.includes(g.id) && m.includes('clearW')), r.repairs.join('; '));
+    check('an ordinary gate has nothing repaired', normalize(JSON.parse(serialize(d))).repairs.length === 0,
+      normalize(JSON.parse(serialize(d))).repairs.join('; '));
+  }
+
+  /* A ?track= LINK IS DECODED ONCE. URLSearchParams has already undone the
+   * percent escapes by the time the value is read, so decoding again threw on
+   * a name with a percent sign in it (and the link silently opened nothing)
+   * and quietly rewrote a name that only looked like an escape. */
+  {
+    const d = createTrack('100% fast', 'micro');
+    place(d, 'gate', 5, 6);
+    const got = docFromQuery(`?class=micro&track=${encodeURIComponent(serialize(d))}`);
+    check('a ?track= link whose name holds a percent sign opens', Boolean(got) && got.name === '100% fast',
+      String(got && got.name));
+    const sly = createTrack('a%41b', 'micro');
+    const gotSly = docFromQuery(`?track=${encodeURIComponent(serialize(sly))}`);
+    check('and a name that looks like an escape is not decoded a second time',
+      Boolean(gotSly) && gotSly.name === 'a%41b', String(gotSly && gotSly.name));
+    const twice = docFromQuery(`?track=${encodeURIComponent(encodeURIComponent(serialize(d)))}`);
+    check('a link that was encoded twice by hand still opens', Boolean(twice) && twice.name === '100% fast',
+      String(twice && twice.name));
+    check('no ?track= is nothing', docFromQuery('?class=micro') === null);
+    check('and garbage is nothing, not a throw', docFromQuery('?track=%7Bnope') === null);
+  }
+
+  /* FIT AND EVERY LOAD FRAME THE TRACK, on a whoop canvas. A whoop track is a
+   * metre or two across and the hall it stands in is 10 by 12, so framing the
+   * field opened it as a small cluster in an empty rectangle. Every other
+   * canvas frames its field, as it always did. */
+  {
+    const empty = createTrack('empty', 'micro');
+    const r = frameRectFor(empty);
+    const env = envelopeFor(GATE_OPENING_DEFAULT);
+    check('an empty whoop canvas frames the RaceGOW envelope and a margin, not the hall',
+      r.maxX - r.minX >= env.width && r.maxX - r.minX < env.width + 1.5
+      && r.maxY - r.minY >= env.depth && r.maxY - r.minY < env.depth + 1.5,
+      `${(r.maxX - r.minX).toFixed(2)} by ${(r.maxY - r.minY).toFixed(2)} against ${env.width.toFixed(2)} by ${env.depth.toFixed(2)}`);
+    check('centred on the middle of the room, which is where the game puts a track',
+      Math.abs((r.minX + r.maxX) / 2 - empty.field.width / 2) < 1e-9
+      && Math.abs((r.minY + r.maxY) / 2 - empty.field.depth / 2) < 1e-9);
+
+    const t1 = PRESETS.find((p) => p.id === 'racegow5-track1');
+    const rt = frameRectFor(t1);
+    check('a loaded whoop track frames its own extent, every element inside it',
+      t1.elements.every((e) => e.position.x >= rt.minX && e.position.x <= rt.maxX
+        && e.position.y >= rt.minY && e.position.y <= rt.maxY));
+    check('and that is a small part of the hall', rt.maxX - rt.minX < t1.field.width * 0.6
+      && rt.maxY - rt.minY < t1.field.depth * 0.6,
+      `${(rt.maxX - rt.minX).toFixed(2)} by ${(rt.maxY - rt.minY).toFixed(2)}`);
+
+    const five = createTrack('five inch');
+    const rf = frameRectFor(five);
+    check('the five inch canvas still frames its whole field',
+      rf.minX === 0 && rf.minY === 0 && rf.maxX === five.field.width && rf.maxY === five.field.depth);
+    const map = createTrack(undefined, 'full', 'freestyle');
+    const rm = frameRectFor(map);
+    check('and so does a map', rm.minX === 0 && rm.minY === 0 && rm.maxX === map.field.width && rm.maxY === map.field.depth);
+  }
+}
+
 async function main() {
   if (process.argv.includes('--emit')) {
     process.stdout.write(serialize(demoTrack()));
@@ -6212,6 +6362,7 @@ async function main() {
   suiteDiveSupports();
   suiteSeat();
   suiteClubhouseShell();
+  suiteWhoopRepairs();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exitCode = failed ? 1 : 0;
 }

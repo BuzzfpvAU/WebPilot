@@ -44,6 +44,7 @@
     "check:props": "node scripts/props-check.js",
     "check:roads": "node scripts/roads-check.js",
     "check:clip": "node src/trackbuilder/selftest.js",
+    "check:builder": "node scripts/builder-flow-check.js",
     "check:orbit": "node scripts/orbit-check.js",
     "check:path": "node scripts/path-check.js",
     "check:fresh": "node scripts/fresh-check.js",

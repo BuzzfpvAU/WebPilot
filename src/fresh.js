@@ -304,6 +304,8 @@
     'src/trackbuilder/seat.js',
     'src/trackbuilder/selftest.js',
     'src/trackbuilder/sequence.js',
+    'src/trackbuilder/sharelink.js',
+    'src/trackbuilder/snap.js',
     'src/trackbuilder/stage.js',
     'src/trackbuilder/start.js',
     'src/trackbuilder/storage.js',

@@ -33,6 +33,20 @@ import { deepClone } from './model.js';
 
 const LIMIT = 200;
 
+/*
+ * WHAT COUNTS AS THE DOCUMENT MOVING. Everything but the stamp that says when.
+ *
+ * The app stamps modifiedUtc on a settled edit, and a stamp is the only thing
+ * a click that merely selects an element could change, so a history that
+ * compared whole documents recorded a step called "move" for every such click
+ * a second after the last one, and Undo then appeared to do nothing. A shallow
+ * copy with the stamp blanked keeps the key order, which is all the comparison
+ * needs, and costs one object rather than a deep clone.
+ */
+function sameContent(a, b) {
+  return JSON.stringify({ ...a, modifiedUtc: '' }) === JSON.stringify({ ...b, modifiedUtc: '' });
+}
+
 export class History {
   constructor(limit = LIMIT) {
     this.limit = limit;
@@ -57,7 +71,8 @@ export class History {
   /*
    * Close a gesture. Only records a step if the document actually moved, so
    * a click that selects and a drag of zero pixels leave no undo behind.
-   * Returns true when a step was recorded.
+   * Returns true when a step was recorded, and the caller stamps the
+   * document only then: see App.edit.
    */
   commit(doc) {
     if (!this.pending) {
@@ -65,7 +80,7 @@ export class History {
     }
     const before = this.pending;
     this.pending = null;
-    if (JSON.stringify(before.doc) === JSON.stringify(doc)) {
+    if (sameContent(before.doc, doc)) {
       return false;
     }
     this.past.push(before);

@@ -59654,3 +59654,113 @@ beyond "go".
                              `shots.js` (nothing on screen changed)
     scratch                  the mirror of their site, the conversion script and the
                              screenshots are in the session's scratchpad, not committed
+
+## 2026-09-29 | builder | Whoop builder, Stage 0: six repairs, tests first (the owner said "build up to stage 3")
+
+The owner's message after the plan was "build up to stage 3". That is taken as go for
+Stages 0 to 3 of WHOOP-BUILDER-PLAN.md on the plan's own recommended answers to the
+decisions those stages depend on: 1 (the whoop canvas builds in 3D, the plan becomes a
+camera), 2 (the whoop first), 7 (the palette letters stay, the RaceGOW diagram colours go
+on openings), 9 (a track's share link carries it in the fragment), 10 (Three.js loads at
+once on the whoop canvas, the plan is the fallback), 11 (nothing is ported from their code)
+and 12 (the first track test is the acceptance). It is NOT taken as an answer to 3 to 6 or
+8, which only Stages 4 and 5 need: the club profile, the new parts, the physics, the board
+change and the exports. None of those is started. If "up to stage 3" meant something else,
+this entry is where to say so.
+
+Nothing here changes the physics model, the module ABI or the build. The builder and its
+tests are the whole change, and `schemaVersion` stays 3.
+
+### What changed
+
+Six repairs, each with a test written first and shown failing on the code as it stood.
+Finding numbers are the 2026-09-29 sweep's.
+
+- **Undo**: a click that only selects an element recorded an undo step called "move"
+  (finding 14). `settle()` stamped the document on every gesture, and the history compared
+  whole documents, so the stamp was the change. The stamp now moves only when the history
+  found something (`stampIfChanged`), and the history ignores the stamp when it compares
+  (`sameContent`). Either alone is enough for the step; the two together also keep the
+  autosave and the Load list from being told a track changed when it had not.
+- **Framing**: Fit and every load framed the whole 10 by 12 m hall in both views, so a
+  track two metres across opened as a small cluster. `frameRectFor` in the new
+  `snap.js` is the one rule (the track's extent and 0.45 m, at least 1.6 m across, or the
+  RaceGOW envelope on an empty canvas; every other canvas frames its field as it did) and
+  both views ask it. The room fits a sphere round that rectangle, because the camera
+  turns. It re-frames when the canvas first has a size, because a load that arrives while
+  the plan is showing frames a canvas that has none. The camera may now come to 0.6 m on a
+  whoop canvas; it stopped at 2 to 4 m, which is three gate widths.
+- **Picking**: only a gate's pipes could be picked in the room, 26.7 mm of PVC. The
+  invisible pane that lets a gap be picked now exists across every opening on a whoop
+  canvas, and is still weak, so the racing line beats it where the line is shown.
+- **Numbers**: the flying order labels were 0.33 m tall over a gate 0.71 m across
+  (`MICRO_LABEL_K` 0.30 to 0.14, which also sizes a waypoint's ring).
+- **Import and a `?track=` link**: both replaced the canvas with nothing said and neither
+  can be undone (finding 14), and the link threw on a name holding a percent sign because
+  it was decoded twice (finding 26). Both now go through `openIncoming`: what they displace
+  goes into Load by the rule the other canvases already use (`keepSeat`, `keepDisplaced`),
+  the toast says so, and a link is decoded once (`sharelink.js`, which Stage 3 grows into
+  the fragment link).
+- **Model**: a gate sized 0 or less is repaired to what a new one starts at, with a note
+  that names the gate and the size, and the 10 by 12 migration of an old micro canvas runs
+  once and no longer treats a track that merely happens to be that size as an old one.
+
+### A deliberate departure from the plan
+
+The plan said import and a link should ASK before replacing the canvas. They keep instead.
+The documented rule (the 2026-09-29 sweep, R2B-4) is that a link opens that track, so a
+confirm would contradict it; keeping what is displaced honours it and loses nothing, and a
+track that could not be kept is not replaced. If the owner would rather be asked, it is one
+function (`openIncoming` in `app.js`).
+
+### Measured, before and after
+
+    a click that only selects a gate      1 undo step, stamp moved     0 steps, stamp unmoved
+    plan, Track 1, extent across          14 percent of the canvas     57 percent
+    room, Track 1, extent across          16 percent                   36 percent, all in view
+    click the middle of Track 1's gates   1 of 5 picked                5 of 5
+    tallest flying order number           0.330 m (gate 0.711 m)       0.154 m
+    import over unsaved work              work gone, nothing said      in Load, the toast says where
+    ?track= with "100% linked"            opens nothing                opens, work kept
+
+### What went wrong
+
+- The sweep said zero sized gates gave a NaN in the racing line. It did not reproduce: the
+  first test I wrote for it passed on the broken code. I removed the assertion and said so
+  in the test's comment. The repair is still right, since a gate 0 across has no opening,
+  but the NaN is not something this work established.
+- The mutation runner for the self test reported "0 failing" when the self test crashed on
+  a missing directory in the scratch copy, which reads as a pass. It now treats a run with
+  no "N passed, M failed" line as a failure. My first `?track=` mutation was not faithful
+  either (it threw where the old code returned null) and was redone.
+- The room's deferred frame (`needsFrame`) was not covered by the first browser check.
+  Removing it was MISSED at 1600 by 900, because in any window wider than it is tall the
+  sphere fit is set by the vertical field of view and does not care what shape the canvas
+  was when it was framed. It matters when the window is taller than wide, so the check has
+  a case at 820 by 900, where the canvas is 320 px across; without the deferred frame the
+  track measures 115 percent of it.
+- The first browser check asked the 3D view where a gate is on the screen, which agreed
+  with whatever the view believed and could not run against the old code at all, so it
+  could not show a case failing before its fix. It projects the point itself now. It also
+  shipped with a leftover junk expression in the import case and a `check(..., true)` that
+  asserted nothing, both found on reading it back and removed.
+
+### RUN LOG
+
+    code                     src/trackbuilder: app, history, model, sharelink (new), snap
+                             (new), start, view2d, view3d, selftest; scripts/builder-flow-check.js
+                             (new); package.json gains `check:builder`
+    self test                node src/trackbuilder/selftest.js: 1014 passed, 0 failed (990
+                             before; 24 new, 11 of which failed before the repairs)
+    browser check            npm run check:builder: 19 of 19 pass. Against an export of
+                             HEAD before the repairs, 10 failed, each for the reason above
+    mutations                ten single fix reversions run against the browser check, each
+                             caught by the case that guards it and by no other
+    micro:check              267 pass, exit 0
+    whoop:gates              21 of 21
+    lint:presets             4 of 4
+    node --check             every edited file
+    not run                  `npm run verify` (no physics, plant, ABI or build change),
+                             `shots.js` (Stage 0 changes framing only, and the flow check
+                             measures the framing directly), `lint:responsive` (run at the end
+                             of Stage 3, once the layout has stopped moving)

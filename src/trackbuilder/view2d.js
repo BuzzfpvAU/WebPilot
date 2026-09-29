@@ -43,6 +43,7 @@ import {
   aperturesOf, elementById, kindOf, apertureCenter, logoForDecal,
 } from './model.js';
 import { sequenceNumbers } from './sequence.js';
+import { frameRectFor } from './snap.js';
 import { figureCue } from './figures.js';
 import { travelDirection, markerPassDir } from './faces.js';
 import { guideFromKnots, knotsFromPath, tessellateGuide } from '../game/guide.js';
@@ -502,9 +503,11 @@ export class View2D {
     this.cam.y = cy - (this.h / 2) / this.cam.scale;
   }
 
-  frameField() {
-    const f = this.host.doc.field;
-    this.frame(0, 0, f.width, f.depth);
+  /* What Fit and every load show: the whole field, except on a whoop canvas,
+   * where it is the track. See frameRectFor in snap.js for why. */
+  frameTrack() {
+    const r = frameRectFor(this.host.doc);
+    this.frame(r.minX, r.minY, r.maxX, r.maxY);
   }
 
   /* Centre on a set of elements without changing the zoom, which is what

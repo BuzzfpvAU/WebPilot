@@ -50,6 +50,7 @@ import { collectWarnings, freestyleReport, labeller, sortWarnings } from './warn
 import { hasRaised, seatFloating, seatedNote, standsOnGround } from './seat.js';
 import { seatDocument } from '../maps/built/place.js';
 import { History } from './history.js';
+import { docFromQuery } from './sharelink.js';
 /* The road tool: every rule about nodes and where a car goes is in here,
  * pure, and this file only applies them as edits. */
 import {
@@ -462,8 +463,8 @@ export class App {
     this.bindModalBackdrop();
 
     this.view2d.resize();
-    this.view2d.frameField();
-    this.view3d.frameField();
+    this.view2d.frameTrack();
+    this.view3d.frameTrack();
     this.refresh();
     if (asking) {
       this.openChooser();
@@ -713,7 +714,7 @@ export class App {
     const before = deepClone(this.doc);
     mutate(this.doc);
     this.settle();
-    this.history.record(before, this.doc, label);
+    this.stampIfChanged(this.history.record(before, this.doc, label));
     this.refresh();
   }
 
@@ -724,8 +725,22 @@ export class App {
 
   endEdit() {
     this.settle();
-    this.history.commit(this.doc);
+    this.stampIfChanged(this.history.commit(this.doc));
     this.refresh();
+  }
+
+  /*
+   * THE STAMP SAYS WHEN THE TRACK LAST CHANGED, so it moves only when the
+   * history found a change. It used to move inside settle() on every edit,
+   * which made a click that merely selected an element look like an edit to
+   * everything that compares documents: the undo history recorded a step
+   * called "move" for it, and the autosave and the Load list were told the
+   * track had changed when it had not.
+   */
+  stampIfChanged(changed) {
+    if (changed) {
+      touch(this.doc);
+    }
   }
 
   cancelEdit() {
@@ -741,7 +756,6 @@ export class App {
     const said = this.seat();
     clampSequenceToApertures(this.doc);
     applyAutoFaces(this.doc);
-    touch(this.doc);
     if (said) {
       this.toast(said);
     }
@@ -1749,9 +1763,9 @@ export class App {
 
   frameAll() {
     if (this.mode === '2d') {
-      this.view2d.frameField();
+      this.view2d.frameTrack();
     } else {
-      this.view3d.frameField();
+      this.view3d.frameTrack();
     }
     this.requestDraw();
   }
@@ -1825,6 +1839,42 @@ export class App {
     };
   }
 
+  /*
+   * A DOCUMENT THAT ARRIVES FROM OUTSIDE, a file that was imported or a
+   * ?track= link, TAKES THE CANVAS, AND WHAT IT TAKES IT FROM IS KEPT.
+   *
+   * Both used to replace whatever was on the canvas with nothing said, and
+   * neither can be undone, because a new document starts its own history. The
+   * documented rule for a link is that it opens that track, so asking first
+   * would contradict it; keeping what it displaces honours it and loses
+   * nothing. What was on the canvas goes into Load by the rule the other
+   * canvases already use (keepSeat), the toast says where it went, and when
+   * the same track comes back with less than the canvas holds, the canvas's
+   * version is kept beside it as a copy. Nothing is kept for an empty canvas.
+   * Returns whether the document opened; when what it would replace could not
+   * be kept, nothing is replaced.
+   */
+  openIncoming(doc, message) {
+    const seated = this.seatedFor(doc);
+    let keep = this.keepSeat(doc);
+    if (keep.ok && !keep.said && !isEmptyCanvas(seated) && seated.id === doc.id && localDrift(seated, doc)) {
+      /* The same track with changes the incoming one does not have: keepSeat
+       * leaves a document of the same id alone, and here that would lose them. */
+      const kept = keepDisplaced(seated);
+      keep = kept.ok
+        ? { ok: true, said: kept.saved ? `"${seated.name}" had changes made after it was saved, so they are in Load as "${kept.saved.name}".` : '' }
+        : { ok: false, said: `Nothing was opened: "${seated.name}" has changes the incoming track does not, and they could not be kept, because local storage is unavailable or full. Export it first.` };
+    }
+    if (!keep.ok) {
+      this.toast(keep.said);
+      return false;
+    }
+    /* Another canvas's keep is said by loadDocument, which is handed it; on
+     * the same canvas loadDocument does not look, so it is said here. */
+    const sameCanvas = canvasOf(doc) === canvasOf(this.doc);
+    return this.loadDocument(doc, sameCanvas ? [message, keep.said].filter(Boolean).join(' ') : message, keep);
+  }
+
   loadDocument(doc, message, keep = null) {
     /* A document of another canvas moves the author to that canvas, so the
      * one being left is written to its own seat first, the same as the
@@ -1876,8 +1926,8 @@ export class App {
     this.warnings = [];
     this.pathVisible = false;
     writeAutosave(this.doc);
-    this.view2d.frameField();
-    this.view3d.frameField();
+    this.view2d.frameTrack();
+    this.view3d.frameTrack();
     this.view3d.markDirty();
     this.refresh();
     const said = [message, kept, seated].filter(Boolean).join(' ');
@@ -2848,7 +2898,7 @@ export class App {
         this.toast(`Could not import: ${error}`);
         return;
       }
-      this.loadDocument(doc, repairs.length
+      this.openIncoming(doc, repairs.length
         ? `Imported "${doc.name}" with ${repairs.length} repair${repairs.length === 1 ? '' : 's'}: ${repairs[0]}`
         : `Imported "${doc.name}".`);
     } catch (e) {
@@ -3708,13 +3758,6 @@ export class App {
  * by index.html at boot and kept here so app.js owns every way a document
  * can arrive. */
 export function docFromLocation() {
-  try {
-    const raw = new URLSearchParams(window.location.search).get('track');
-    if (!raw) {
-      return null;
-    }
-    return normalize(JSON.parse(decodeURIComponent(raw))).doc;
-  } catch (e) {
-    return null;
-  }
+  /* Decoded once, by the module that owns the link's format: see sharelink.js. */
+  return docFromQuery(window.location.search);
 }
