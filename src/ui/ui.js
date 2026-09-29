@@ -1322,6 +1322,10 @@ export function loadSettings() {
   } catch (e) {
     stored = {};
   }
+  /* "null", a number or a string parses without throwing and is no settings. */
+  if (!stored || typeof stored !== 'object') {
+    stored = {};
+  }
   const s = { ...DEFAULTS };
   const hadGraphics = typeof stored.graphics === 'string';
   for (const k of Object.keys(DEFAULTS)) {

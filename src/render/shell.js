@@ -76,6 +76,15 @@ export function disposeSceneGraph(root, keepTextures) {
     if (obj.geometry) {
       geometries.add(obj.geometry);
     }
+    /*
+     * An InstancedMesh owns its instanceMatrix and instanceColor buffers, and
+     * geometry.dispose() does not reach them: the renderer frees them on the
+     * mesh's own dispose event. The city makes many, and each map swap left
+     * theirs behind.
+     */
+    if (obj.isInstancedMesh) {
+      obj.dispose();
+    }
     const m = obj.material;
     if (!m) {
       return;

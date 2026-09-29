@@ -59280,3 +59280,14 @@ Everything: this was a report only. Findings 4, 5, 17, 19 touch the physics mode
 
 ### Not covered
 Reviewers did not read every line of trickdetect.js (5k), the collide.js `hit()` body, the vendored city world, catalog.js, plan.js, or the harness hooks after main.js:9950. The two ui.js halves and main.js were read in full; the first ui.js pass only grepped and was redone. Nothing here is a claim that unlisted code is clean.
+
+### Sweep follow-up: the four confirmed findings fixed, 2026-09-29
+
+The owner asked for the four confirmed findings to be fixed, with the cheap scale of checks. None touches the physics model, the module ABI or the build, so the owner rule did not apply.
+
+- Finding 1, `src/trackbuilder/geometry.js` `wrapAngle`: an angle beyond 1e3 rad is first taken `% tau` (exact), then the existing loops finish the wrap, so the boundary rule at plus and minus pi is unchanged. Probe: `wrapAngle(1e20)` returned 1.8956 where it had hung past a 10 s timeout; Infinity gives NaN, as NaN always did; 0, pi, minus pi, 3 pi and 7 return what the loops gave. One difference, and an improvement: for 1e6 the old loop returned -0.357563 and this returns -0.357564, the loop having accumulated rounding over 160 thousand additions.
+- Finding 7, `src/ui/ui.js` `loadSettings`: a parsed non-object is now `{}`. Probe with a stubbed localStorage: stored `null` threw "Cannot read properties of null (reading 'graphics')" before, and returns defaults now; `5`, `"x"`, `{bad`, unset and a real object still work.
+- Finding 15, `src/render/shell.js` `disposeSceneGraph`: `obj.dispose()` on an InstancedMesh. three@0.160.0 (the import map's pin) has it. NOT exercised: Node has no `three` package here, so the probe could not import shell.js. What is known is the code read and the version pin; that the leak is gone is not measured. `__budget` across a few city swaps in a browser would measure it.
+- Finding 20, `src/ui/fc.js` `downloadCli`: revoke after 4 s, as `saveRunCard` does. Not run in a browser, and it is a Safari and old Firefox timing, so a headless Chromium would not have shown it either way.
+
+Checks run this turn: `node --check` on the four files clean; `check:clip` 951 passed, 0 failed (the trackbuilder selftest, which imports `wrapAngle`); `lint:preload` up to date. Not run: `lint:shell`, `lint:devices` and `shots` (browser scale, not asked for, and ui.js changed by four lines outside any layout), and `npm run verify`.

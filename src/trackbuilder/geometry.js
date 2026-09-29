@@ -115,6 +115,16 @@ const WRAP_SLACK = 1e-6;
 export function wrapAngle(a) {
   const tau = Math.PI * 2;
   let x = a;
+  /*
+   * Past about 1e16 adding tau changes nothing, so the loops below never end
+   * (and Infinity never leaves them): a track with "yaw": 1e20 froze the tab.
+   * `%` is exact, so a large angle is brought near the circle first and the
+   * loops then finish the wrap and its boundary rule as before. Infinity
+   * becomes NaN here, which the loops already pass through.
+   */
+  if (x > 1e3 || x < -1e3) {
+    x %= tau;
+  }
   while (x <= -Math.PI - WRAP_SLACK) {
     x += tau;
   }

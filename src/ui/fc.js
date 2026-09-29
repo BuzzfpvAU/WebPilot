@@ -1199,5 +1199,6 @@ export function downloadCli(filename, text) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  /* Safari and older Firefox start the download after click() returns. */
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
