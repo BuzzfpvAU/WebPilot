@@ -41,6 +41,7 @@ import {
   SCENE_TIMES, SCENE_GROUNDS, sceneOf,
 } from './model.js';
 import { gateNumbers, gateNumberOf, sequenceLabel, faceLabel, unsequencedElements } from './sequence.js';
+import { standsOnGround } from './seat.js';
 import { figuresFor, matchingFigure, figureBlurb, levelName } from './figures.js';
 import { elevationProfile } from './path.js';
 import { drawProfile } from './profile.js';
@@ -587,8 +588,11 @@ export class Panels {
 
     /* Paint has no base height: it is on the ground or it is not paint. A
      * Base field that changed a number nothing reads is a bug report
-     * waiting to be filed, so a decal gets two columns rather than three. */
-    const flat = def.kind === KIND.DECAL;
+     * waiting to be filed, so a decal gets two columns rather than three.
+     * So does a built thing on a track, whose base is the ground and cannot
+     * be anything else (standsOnGround in ./seat.js): a gate is lifted on its
+     * legs with Sill height, not off them. */
+    const flat = def.kind === KIND.DECAL || standsOnGround(doc, element);
     const grid = el('div', flat ? 'tb-grid2' : 'tb-grid3');
     grid.append(
       this.field(`x-${element.id}`, 'X', element.position.x, (val) => {

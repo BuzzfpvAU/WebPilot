@@ -56,10 +56,11 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ELEMENTS, KIND, GATE_FLAG_POLE_R, flagLeanSign, flagSideOf, flagSideSigns, frameSidesOf, gateFlagHeight, hasMissingSides, isUnbuilt, trackClassOf, virtualApertureDims } from '../trackbuilder/elements.js';
+import { ELEMENTS, KIND, GATE_FLAG_POLE_R, docModeOf, flagLeanSign, flagSideOf, flagSideSigns, frameSidesOf, gateFlagHeight, hasMissingSides, isUnbuilt, trackClassOf, virtualApertureDims } from '../trackbuilder/elements.js';
 import {
   normalize, elementById, aperturesOf, startPadsOf, logosOf, logoForDecal, dressOrder,
 } from '../trackbuilder/model.js';
+import { seatFloating } from '../trackbuilder/seat.js';
 import { buildPath } from '../trackbuilder/path.js';
 import { apertureFrame } from '../trackbuilder/geometry.js';
 import { wrapBetween, figureCueOf, upgradeStackedFigures } from '../trackbuilder/figures.js';
@@ -325,6 +326,21 @@ function buildCourse(raw) {
   const { doc, repairs } = normalize(raw);
   upgradeStackedFigures(doc);
   plantImportedHeights(doc);
+  /*
+   * NOTHING BUILT STANDS IN THE AIR (src/trackbuilder/seat.js). Four flags
+   * 20 m up and a gate 15 m up on FAI Turkiye 2024 hung in the sky with
+   * nothing under them, because the Velocidrone map they came from has a
+   * rooftop and the field has not, and a pilot could clear them neither where
+   * they hung nor where they should have stood. AFTER the dive hoops above,
+   * which read a height off position.z that this would otherwise take away.
+   * Silent, as that fold is: what is stored is not touched, so the board's
+   * layout and the times set on it stay as they are, and the builder is where
+   * an author is told. A track has only the ground to stand on; a map is
+   * seated with what is under it by buildMap.
+   */
+  if (docModeOf(doc) !== 'freestyle') {
+    seatFloating(doc);
+  }
   const field = doc.field;
   /*
    * The track class travels with the course into the game, because almost

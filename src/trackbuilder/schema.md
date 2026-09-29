@@ -224,7 +224,7 @@ course; that is what `sequence` is for.
 | `id` | string | `el-` and a number. Unique within the document. Referenced by `sequence[].elementId`. |
 | `type` | string | One of the element types below. An unknown type means the whole element is dropped on read. |
 | `name` | string | The author's label for it. May be empty, in which case the tool shows the type's name. |
-| `position` | object | Where the element's **base** sits: `x` and `y` on the ground, `z` the height of the base above the ground. Almost always `z: 0`; the 3D view's one editing gesture raises it. |
+| `position` | object | Where the element's **base** sits: `x` and `y` on the ground, `z` the height of the base above what it stands on. `0` for nearly everything: a bar, a waypoint, a named gap, an opening with no pipe and, on a map, something stood on a roof or on another asset are the only ones with any other. Anything else with a `z` over 5 cm and nothing under it is set down when it is read: see **Nothing floats**. |
 | `yaw` | number, radians | Which way the element faces. See the conventions above. |
 | `pitch` | number, radians | Tilt of the aperture plane. Meaningful only for aperture elements; written as `0` for everything else. |
 | `yawOverridden` | boolean | `true` when the AUTHOR set the heading, which stops the tool re-deriving it. See **Faces and pass sides**. |
@@ -241,6 +241,44 @@ course; that is what `sequence` is for.
 | `logoId` | string | **Ground logos only.** The `id` of the entry in `branding.logos` this footprint is painted with. Empty means the course's first logo. Not a dimension. |
 | `unbuilt` | `true`, or absent | **Apertures only.** The opening is a GAP IN THE LATTICE rather than a gate with a frame of its own: it scores, it lights, it carries its number and it pins the racing line, and no pipe is built for it in the world, the export, the preview or the card. The pipe that bounds it belongs to the structures around it. Written only when true, so an ordinary gate's JSON is unchanged. RaceGOW builds this way wherever a leg is carried up past a bar: the opening over the bar has the bar below and a pole beside and nothing else, and drawing a square there puts PVC in mid air. See `isUnbuilt` in `elements.js` and `TRACK-FROM-GIF.md`. |
 | `unbuiltSides` | array of strings, or absent | **Apertures only.** The sides of the frame that have no pipe, taken away one at a time: any of `"top"`, `"bottom"`, `"left"`, `"right"`, each once, written in that order. The opening still scores, lights, carries its number and pins the racing line; only the pipe is gone, along with what belongs to it (an upright's foot, fittings and printed sleeve, the top bar's header board). Four sides per STRUCTURE: `left` and `right` are the two uprights, the whole height of a stack, `top` is the bar over the top opening and `bottom` the bar under the lowest. A bar between two openings of a stack holds both up and is not one of the four. Left and right are as seen facing the gate, the same reading `flagSide` has: `left` is the `-widthAxis` upright and `top` the `+heightAxis` bar. Written only when at least one side is missing, so a gate with all four is the same JSON it was before this existed; a name that is not a side is dropped on read with a repair note. `unbuilt: true` means all four and more (no pipe at all), and wins when both are present. See `FRAME_SIDES` in `elements.js`, and `meshSidesFor` in `src/game/trackdoc.js` for how the race field, which builds each gate facing its first pass, turns these into its own frame. |
+
+### Nothing floats
+
+`position.z` is the height of an element's base over what it stands on, and
+nothing built stands in the air. A gate, a flag, a cone, a pole, a barrier, the
+start pads and a map's assets stand on the ground, or, on a map, on the top of
+another element's solid box under their origin: a roof, a container, a deck, a
+ledge. Only a box counts, because that is all the physics stands a craft on.
+An element is where its origin is, the middle of its footprint, so one that is
+half off the edge of what it stands on still stands on it, and one whose middle
+is off it falls.
+
+An element whose base is more than 5 cm over that is **set down** when the
+document is read by anything that draws or flies it: the builder when it opens
+a document and after every edit, and the simulator when it builds the course or
+the map. A stack of assets comes down a storey at a time when the one under it
+goes. The stored file is not rewritten, so a track on the board keeps the layout
+its times were set on, and the builder says what it set down. Lifting a gate's
+opening off the ground is what `sillH` is for: the legs stand on the ground and
+the opening is up on them.
+
+Four kinds of thing are left alone, because nothing built is held up:
+
+- a `waypoint` and a named gap (`zone`), which are a point and a window in the
+  air and are drawn nowhere in the world;
+- a `horizontalPole`, whose legs reach down to the ground from the bar, so its
+  `z` is the bar's height;
+- an opening with no pipe at all, `unbuilt` or with all four `unbuiltSides`,
+  which is a hole in a lattice held by its neighbours;
+- a label, a ground logo, a road and a vehicle, which have no height of their
+  own.
+
+The rule is `needsSeat` and `seatFloating` in `src/trackbuilder/seat.js`, and a
+map's half, which needs the solids, is `seatDocument` in
+`src/maps/built/place.js`. FAI Turkiye 2024, imported from Velocidrone, was
+stored with four flags 20 m up and a gate 15 m up over a rooftop that the field
+does not have, and a pilot could clear them neither where they hung nor where
+they should have stood (29 September 2026).
 
 ### The element types
 

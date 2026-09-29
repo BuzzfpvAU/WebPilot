@@ -49,6 +49,10 @@ import {
   POLE_FROM_GATE_MIN, POLE_FROM_POLE_MIN, PIPE_OD, ROOM_HEIGHT, envelopeFor, inches,
 } from './racegow.js';
 import { elementById, elementNormal, kindOf, startPadsOf } from './model.js';
+/* How far the pads' Base may be from their seat before the builder says so.
+ * The same number is how far any base may be over what it stands on before
+ * it floats, which is why it is owned there. */
+import { SEAT_SLACK } from './seat.js';
 import { gateNumberOf, sequenceLabel, unsequencedElements } from './sequence.js';
 import { dist, insideYawedBox, lerp, wrapAngle, yawVector } from './geometry.js';
 import { markerSquare } from './path.js';
@@ -833,11 +837,6 @@ export const SLOT_FLOOR = 0.05;
  * src/maps/built/place.js), so it is one number, owned there. */
 export const SPAWN_CLEAR = OPEN_CLEAR;
 
-/* How far the pads' Base may be from their seat before the builder says
- * so: more than a mat's thickness and less than anything that reads as a
- * step when the pads are drawn on the seat. */
-const SEAT_SLACK = 0.05;
-
 /*
  * Where the pilot starts with no start pads, in the builder's words, for
  * fs-no-start: the point OPEN_POINT_IN in from the left edge when it is in
@@ -1433,7 +1432,7 @@ export function crowdOf(solids) {
  * its type, numbered in document order when there is more than one of it,
  * so "Building 2 and Building 5" says which two.
  */
-function labeller(doc) {
+export function labeller(doc) {
   const count = new Map();
   const nth = new Map();
   for (const el of doc.elements) {

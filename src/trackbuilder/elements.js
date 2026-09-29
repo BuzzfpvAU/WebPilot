@@ -717,6 +717,9 @@ export const ELEMENTS = {
     group: 'track',
     kind: KIND.MARKER,
     note: 'Nothing is standing here. The line is required to pass through this point, at this height. Not drawn on the track.',
+    /* Nothing is built, so nothing can float: its height is where the line
+     * passes, and it may be anywhere. See needsSeat in ./seat.js. */
+    standsFree: true,
     /*
      * NOT AN OBSTACLE, AND THAT IS THE WHOLE POINT.
      *
@@ -810,6 +813,10 @@ export const ELEMENTS = {
     kind: KIND.OBSTACLE,
     note: 'A single bar across the track on two legs. Solid: fly over it or under it.',
     dims: { width: 3.0, depth: 0.08, height: 0.08 },
+    /* Its legs reach down to the ground from the bar (hpoleLayout in
+     * src/props/course.js), so position.z is the bar's height and not a base
+     * with nothing under it. See needsSeat in ./seat.js. */
+    standsFree: true,
     defaultZ: 1.60,
     /* One pipe section wide and one pipe thick, raised to where a RaceGOW
      * build puts one: a shade under the second gate of a stack, so the two

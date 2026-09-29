@@ -44,6 +44,7 @@
  */
 
 import { ELEMENTS, KIND } from '../../trackbuilder/elements.js';
+import { SEAT_SLACK, hasRaised, seatFloating } from '../../trackbuilder/seat.js';
 import { assetOf, partsOf } from '../../props/catalog.js';
 import { placeSolids, placedYaw } from '../../props/solids.js';
 import { sincos, turnY } from '../../props/trig.js';
@@ -723,4 +724,72 @@ export function placeDocument(doc) {
     spawn = openSpawn(W, D, solids, roads, tops);
   }
   return { W, D, items, solids, tops, zones, spawn, stats };
+}
+
+/*
+ * PLACE A DOCUMENT AND SET DOWN WHAT FLOATS IN IT. src/trackbuilder/seat.js
+ * says what floats and why; this is the half that needs the solids, which
+ * that file cannot import without dragging the props into the race field.
+ *
+ * A raised element stands on the highest box top under its origin that is no
+ * more than SEAT_SLACK over its base, taken from every OTHER element's solids
+ * (an element does not hold itself up), or on the paving. `doc` is changed in
+ * place, so it must be a normalized copy the caller owns: the builder's own,
+ * or what normalize() just returned. The returned `placed` is the placement of
+ * the document as it now is, so a map with nothing floating pays for exactly
+ * the one placement it always did.
+ *
+ * ROUNDS. A stack settles a storey a round: the container on top of two is
+ * not floating until the one under it has fallen, so the pass runs again
+ * until nothing moves. Each round moves at least one element down and an
+ * element only ever moves down, and a stack is never more storeys than the
+ * document has elements, so that many rounds is a bound and not a guess.
+ *
+ * ARITHMETIC ONLY, like the rest of this file: comparisons against box
+ * edges, and the document's own numbers written back.
+ */
+const SEAT_AT = { x: 0, y: 0, z: 0 };
+
+function supportsOf(doc, placed) {
+  const boxes = [];
+  for (const it of placed.items) {
+    for (const s of placeSolids(it.parts, it.x, it.y, it.z, it.yaw, it.turns, [])) {
+      if (s.box && s.box[4] > 0) {
+        boxes.push({ owner: it.el, box: s.box });
+      }
+    }
+  }
+  const W = doc.field.width;
+  const D = doc.field.depth;
+  return {
+    seatFor(el, z) {
+      docToWorld(W, D, el.position.x, el.position.y, 0, SEAT_AT);
+      const reach = z + SEAT_SLACK;
+      let best = null;
+      for (const { owner, box: b } of boxes) {
+        if (owner !== el && b[4] <= reach && (!best || b[4] > best.top)
+          && SEAT_AT.x > b[0] && SEAT_AT.x < b[3] && SEAT_AT.z > b[2] && SEAT_AT.z < b[5]) {
+          best = { top: b[4], on: owner.id };
+        }
+      }
+      return best;
+    },
+  };
+}
+
+export function seatDocument(doc) {
+  let placed = placeDocument(doc);
+  const moved = [];
+  for (let round = 0; round <= doc.elements.length; round += 1) {
+    if (!hasRaised(doc)) {
+      break;
+    }
+    const fell = seatFloating(doc, supportsOf(doc, placed));
+    if (!fell.length) {
+      break;
+    }
+    moved.push(...fell);
+    placed = placeDocument(doc);
+  }
+  return { placed, moved };
 }

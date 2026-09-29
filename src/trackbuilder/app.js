@@ -44,7 +44,11 @@ import {
 } from './sequence.js';
 import { applyFigure, defaultFigure, upgradeStackedFigures } from './figures.js';
 import { buildPath, passYawOf } from './path.js';
-import { collectWarnings, freestyleReport, sortWarnings } from './warnings.js';
+import { collectWarnings, freestyleReport, labeller, sortWarnings } from './warnings.js';
+/* Nothing built stands in the air: see seat.js. A map is seated with what is
+ * under it, which needs the map placed, so that half is place.js's. */
+import { hasRaised, seatFloating, seatedNote, standsOnGround } from './seat.js';
+import { seatDocument } from '../maps/built/place.js';
 import { History } from './history.js';
 /* The road tool: every rule about nodes and where a car goes is in here,
  * pure, and this file only applies them as edits. */
@@ -477,8 +481,15 @@ export class App {
       setActiveTrackClass('full');
       const held = readAutosave('full', 'freestyle');
       this.doc = (held && held.doc) || newMap();
-      if (held && held.repairs.length) {
-        this.toast(`Recovered the working map. ${held.repairs.length} thing${held.repairs.length === 1 ? '' : 's'} needed repairing.`);
+      /* What floated when it was saved is on the ground or a roof when it
+       * comes back, and the toast says so beside the repairs it already
+       * counts, because a second toast would replace the first. */
+      const said = this.seat();
+      const fixed = held && held.repairs.length
+        ? `Recovered the working map. ${held.repairs.length} thing${held.repairs.length === 1 ? '' : 's'} needed repairing.`
+        : '';
+      if (fixed || said) {
+        this.toast([fixed, said].filter(Boolean).join(' '));
       }
       return;
     }
@@ -489,9 +500,13 @@ export class App {
        * before stacked figures existed came back without one, so a reopened
        * session flew a stack differently from the file it was saved to. */
       upgradeStackedFigures(this.doc);
+      const said = this.seat();
       applyAutoFaces(this.doc);
-      if (saved.repairs.length) {
-        this.toast(`Recovered the working track. ${saved.repairs.length} thing${saved.repairs.length === 1 ? '' : 's'} needed repairing.`);
+      const fixed = saved.repairs.length
+        ? `Recovered the working track. ${saved.repairs.length} thing${saved.repairs.length === 1 ? '' : 's'} needed repairing.`
+        : '';
+      if (fixed || said) {
+        this.toast([fixed, said].filter(Boolean).join(' '));
       }
       return;
     }
@@ -719,12 +734,45 @@ export class App {
   }
 
   /* Everything that has to be true after any change, in the order it has to
-   * be true in: apertures first, because a face cannot be derived for a
-   * level that no longer exists. */
+   * be true in: what floats is set down first, because a base moves the line
+   * and every face derived from it; then apertures, because a face cannot be
+   * derived for a level that no longer exists. */
   settle() {
+    const said = this.seat();
     clampSequenceToApertures(this.doc);
     applyAutoFaces(this.doc);
     touch(this.doc);
+    if (said) {
+      this.toast(said);
+    }
+  }
+
+  /*
+   * NOTHING BUILT STANDS IN THE AIR (./seat.js). Set down whatever floats in
+   * the live document, and return the sentence that says so, or the empty
+   * string when nothing moved. On a track that is only ever the ground; on a
+   * map it is the roof, the deck or the container under the element's middle,
+   * which needs the map placed, so a map is placed for this only when
+   * something in it is raised. This is the one door every edit and every
+   * document that arrives goes through: settle(), restore() and
+   * loadDocument() all come here, so a drag, a typed Base, a deleted roof, an
+   * import and a board link cannot leave one hanging.
+   */
+  seat() {
+    if (!hasRaised(this.doc)) {
+      return '';
+    }
+    const moved = docModeOf(this.doc) === 'freestyle'
+      ? seatDocument(this.doc).moved
+      : seatFloating(this.doc);
+    return seatedNote(moved, labeller(this.doc), (id) => elementById(this.doc, id));
+  }
+
+  /* Whether this element's base is the ground and nothing else in this
+   * document, so it has no height to edit: the 3D view asks, and the
+   * inspector asks seat.js the same question directly. */
+  isGrounded(element) {
+    return standsOnGround(this.doc, element);
   }
 
   refresh() {
@@ -1453,11 +1501,14 @@ export class App {
     this.panels.renderInspector();
   }
 
-  /* The one edit the 3D view is allowed to make. */
+  /* The one edit the 3D view is allowed to make. A built thing on a track
+   * stands on the ground and has no height to change (seat.js), so a
+   * selection that holds one leaves it where it is and moves the rest. What
+   * is let go over nothing on a map is set down by settle() on release. */
   raiseSelected(origin, dz, fine) {
     for (const [id, fromZ] of origin) {
       const element = elementById(this.doc, id);
-      if (!element) {
+      if (!element || this.isGrounded(element)) {
         continue;
       }
       const wanted = Math.max(0, fromZ + dz);
@@ -1811,6 +1862,10 @@ export class App {
      */
     setActiveTrackClass(trackClassOf(this.doc));
     upgradeStackedFigures(this.doc);
+    /* A course that arrives with something hanging in the air (a Velocidrone
+     * rooftop the field has not got, a map made before this rule) is put
+     * right here and told so, before faces are derived off its heights. */
+    const seated = this.seat();
     applyAutoFaces(this.doc);
     this.selection.clear();
     this.activeNode = null;
@@ -1825,7 +1880,7 @@ export class App {
     this.view3d.frameField();
     this.view3d.markDirty();
     this.refresh();
-    const said = [message, kept].filter(Boolean).join(' ');
+    const said = [message, kept, seated].filter(Boolean).join(' ');
     if (said) {
       this.toast(said);
     }
@@ -3047,7 +3102,7 @@ export class App {
     this.undoBtn = btn('Undo', () => this.undo(), 'Control Z');
     this.redoBtn = btn('Redo', () => this.redo(), 'Control Shift Z');
     this.mode2d = btn('2D', () => this.setMode('2d'), 'Top down authoring view');
-    this.mode3d = btn('3D', () => this.setMode('3d'), 'Preview. Drag an element to change its height.');
+    this.mode3d = btn('3D', () => this.setMode('3d'), 'Preview. Drag a horizontal pole or a waypoint to change its height. Everything else stands on the ground, or on what is under it on a map.');
     /* Plain, not primary. There is one green button on this bar and it is
      * the one that leaves for the air; a second would make neither read as
      * the thing to press. Show line goes amber while a line is showing,

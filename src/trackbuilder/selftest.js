@@ -45,7 +45,7 @@ import { applyFigure, matchingFigure, defaultFigure, upgradeStackedFigures } fro
 import {
   buildPath, elevationProfile, sequencedElementCount, knotForSeq, markerSquare, passYawOf,
 } from './path.js';
-import { collectWarnings, freestyleReport, FREESTYLE_SOLIDS_MAX } from './warnings.js';
+import { collectWarnings, freestyleReport, labeller, FREESTYLE_SOLIDS_MAX } from './warnings.js';
 import { History } from './history.js';
 import {
   RAD, DEG, wrapAngle, gateSupportFeet, apertureFrame, GATE_POST_R_SCALE,
@@ -67,7 +67,8 @@ import { partsOf } from '../props/catalog.js';
 import { GAP_MIN } from '../props/parts.js';
 import { startBlockDims, startBlockHeight, startBlockLaneOffset } from '../art/startblock.js';
 import { padsLayout } from '../props/course.js';
-import { placeDocument, topUnder, groundUnder, SUPPORT_TIE, OPEN_CLEAR } from '../maps/built/place.js';
+import { placeDocument, seatDocument, topUnder, groundUnder, SUPPORT_TIE, OPEN_CLEAR } from '../maps/built/place.js';
+import { SEAT_SLACK, hasRaised, needsSeat, seatFloating, seatedNote, standsOnGround } from './seat.js';
 import { addSolids } from '../props/solids.js';
 import { roadOf, nearestOn } from '../maps/built/road.js';
 import { trafficOf, DRIFT, roadKeepOut } from '../maps/built/traffic.js';
@@ -112,7 +113,7 @@ import { publishTrack } from '../share/board.js';
 import { keepDisplaced, readAutosave } from './storage.js';
 import { FPV_FLOOR_CLEAR, FPV_NEAR_CLEAR, fpvLensClear } from '../render/lens.js';
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -5164,8 +5165,25 @@ function suiteScoring() {
   addToSequence(roof, rf1.id, 0);
   const roofCourse = courseFromDocument(roof);
   const roofSt = roofCourse.structures.find((s) => s.type === 'flag');
-  check('a rooftop flag keeps its elevation', roofSt && Math.abs(roofSt.baseY - 20) < 1e-9,
-    roofSt ? `baseY ${roofSt.baseY}` : 'missing');
+  /*
+   * THE ASSERTION THAT WAS HERE WAS THE DEFECT. It said a flag 20 m up keeps
+   * its elevation, on the reading that the Velocidrone map it came from has a
+   * rooftop under it. This is a TRACK, which is a field: there is no roof, so
+   * the flag hung in the sky with a pole and nothing under it. FAI Turkiye
+   * 2024 shipped four of them and a gate 15 m up, and a pilot reported that
+   * they could be cleared neither where they hung nor where they should have
+   * stood (29 September 2026). Owner, the same day: no gate and no asset is
+   * left floating. A flag with nothing under it is set on the ground
+   * (src/trackbuilder/seat.js); one on a real roof keeps the roof's height,
+   * which needs a map to have a roof, and suiteSeat checks it there.
+   */
+  check('a flag 20 m up over nothing is set on the ground, not left in the sky',
+    roofSt && roofSt.baseY === 0, roofSt ? `baseY ${roofSt.baseY}` : 'missing');
+  const roofStation = roofCourse.stations.find((s) => s.type === 'flag');
+  check('and its scoring square stands on the ground with it',
+    roofStation && roofStation.baseY === 0, roofStation ? `baseY ${roofStation.baseY}` : 'missing');
+  check('while the document it was read from is left as it was written',
+    rfFlag.position.z === 20, `z ${rfFlag.position.z}`);
 
   const stile = createTrack();
   const stileLead = place(stile, 'gate', 0, 0);
@@ -5327,6 +5345,202 @@ function suiteDiveSupports() {
     check(`a ${deg} deg dive has no post on the opening centreline`,
       widths.every((w) => Math.abs(w) > d.clearW * 0.4));
   }
+}
+
+/*
+ * NOTHING BUILT STANDS IN THE AIR (src/trackbuilder/seat.js). A pilot, on 29
+ * September 2026, on FAI Turkiye 2024: four flags 20 m up and a gate 15 m up
+ * with nothing under them. This is the rule, what it leaves alone, every
+ * course that ships, and a map with real roofs to stand on. The pure half:
+ * the builder's own doors (settle, restore, loadDocument) call the same
+ * functions and are left to the screenshots with the rest of the tool's DOM.
+ */
+function suiteSeat() {
+  console.log('\nnothing built stands in the air');
+  const mk = (doc, type, opts) => place(doc, type, 5, 5, opts);
+
+  /* ---- what has to stand on something ---- */
+  const probe = createTrack();
+  const built = ['gate', 'flaggedGate', 'doubleStack', 'flaggedDoubleStack', 'ladder', 'tower', 'diveGate',
+    'flag', 'cone', 'pole', 'barrier', 'startPads'];
+  check('every built thing on a track needs a seat',
+    built.every((t) => needsSeat(mk(probe, t))), built.filter((t) => !needsSeat(mk(probe, t))).join(', '));
+  const free = ['waypoint', 'horizontalPole', 'label', 'groundLogo'];
+  check('a waypoint, a horizontal pole, a label and a decal do not',
+    free.every((t) => !needsSeat(mk(probe, t))), free.filter((t) => needsSeat(mk(probe, t))).join(', '));
+  const noPipe = mk(probe, 'gate');
+  noPipe.unbuilt = true;
+  const allSides = mk(probe, 'gate');
+  allSides.unbuiltSides = ['top', 'bottom', 'left', 'right'];
+  const oneSide = mk(probe, 'gate');
+  oneSide.unbuiltSides = ['bottom'];
+  check('nor does an opening with no pipe at all, however that was said',
+    !needsSeat(noPipe) && !needsSeat(allSides));
+  check('but a gate short of one side is still built, and needs its seat', needsSeat(oneSide));
+
+  const map = createTrack(undefined, 'full', 'freestyle');
+  const building = freestylePlace(map, 'building', 40, 40);
+  const gap = freestylePlace(map, 'gap', 20, 20, { z: 6 });
+  const road = place(map, 'road', 60, 60);
+  const car = place(map, 'vehicle', 0, 0);
+  check('on a map an asset needs a seat, and a gap, a road and a car do not',
+    needsSeat(building) && !needsSeat(gap) && !needsSeat(road) && !needsSeat(car));
+  check('a gate on a track has the ground and nothing else, a bar and an asset on a map are free',
+    standsOnGround(probe, probe.elements[0]) && !standsOnGround(probe, mk(probe, 'horizontalPole'))
+    && !standsOnGround(map, building));
+
+  /* ---- a track: the ground is all there is ---- */
+  const track = createTrack();
+  const hi = place(track, 'gate', 10, 0, { z: 15 });
+  const flagHi = place(track, 'flag', 20, 0, { z: 20.06 });
+  const near = place(track, 'gate', 30, 0, { z: SEAT_SLACK - 0.01 });
+  const bar = place(track, 'horizontalPole', 40, 0, { z: 1.6 });
+  const wp = place(track, 'waypoint', 50, 0, { z: 7.5 });
+  const lifted = place(track, 'gate', 60, 0, { dims: { sillH: 2 } });
+  const lattice = place(track, 'gate', 70, 0, { z: 1.2 });
+  lattice.unbuilt = true;
+  check('a track with a gate in the air is raised', hasRaised(track));
+  const moved = seatFloating(track);
+  check('a gate 15 m up and a flag 20 m up are set down, and nothing else is',
+    moved.length === 2 && moved.map((m) => m.id).sort().join() === [hi.id, flagHi.id].sort().join(),
+    moved.map((m) => `${m.id}@${m.from}`).join(' '));
+  check('both stand on the ground now, and the move says how high each was', hi.position.z === 0
+    && flagHi.position.z === 0 && moved.find((m) => m.id === hi.id).from === 15
+    && moved.every((m) => m.to === 0 && m.on === null));
+  check('a base within the slack is left exactly as it was', near.position.z === SEAT_SLACK - 0.01);
+  check('a bar, a waypoint and an opening with no pipe keep their height',
+    bar.position.z === 1.6 && wp.position.z === 7.5 && lattice.position.z === 1.2);
+  check('a lifted opening keeps its sill, which is how a gate goes up',
+    lifted.dims.sillH === 2 && lifted.position.z === 0);
+  check('seating twice moves nothing the second time', seatFloating(track).length === 0 && !hasRaised(track));
+  const over = mk(createTrack(), 'gate', { z: SEAT_SLACK + 0.01 });
+  check('a base just over the slack does float', hasRaised({ elements: [over] })
+    && seatFloating({ elements: [over] }).length === 1 && over.position.z === 0);
+
+  /* ---- the ticket: every course that ships ---- */
+  const here = dirname(fileURLToPath(import.meta.url));
+  const jsonDir = join(here, '..', '..', 'tracks', 'json');
+  const shipped = PRESETS.map((p) => [`preset ${p.id}`, p]);
+  for (const f of readdirSync(jsonDir).filter((n) => n.endsWith('.json'))) {
+    shipped.push([f, JSON.parse(readFileSync(join(jsonDir, f), 'utf8'))]);
+  }
+  const hanging = [];
+  for (const [name, raw] of shipped) {
+    const course = courseFromDocument(raw);
+    for (const s of course.structures) {
+      if (!ELEMENTS[s.type].standsFree && !s.unbuilt && s.baseY > 0) {
+        hanging.push(`${name}: ${s.id}@${s.baseY.toFixed(1)}`);
+      }
+    }
+  }
+  check(`no course that ships flies with anything in the air (${shipped.length} read)`,
+    hanging.length === 0, hanging.join('; '));
+  /* Here so the loop above cannot pass by there being nothing to set down.
+   * The stored course is faithful to the Velocidrone file, rooftop and all,
+   * and it is what the sim folds on read. If the stored data is ever planted
+   * at rest, this line is the one to drop. */
+  const fai = JSON.parse(readFileSync(join(jsonDir, 'trk-c149e98e.json'), 'utf8'));
+  const faiAir = fai.elements.filter((e) => needsSeat(e) && e.position.z > SEAT_SLACK);
+  check('FAI Turkiye 2024, the course reported, is stored with four flags and a gate in the air',
+    fai.name === 'FAI Turkiye 2024' && faiAir.length === 5
+    && faiAir.filter((e) => e.type === 'flag').length === 4 && faiAir.filter((e) => e.type === 'gate').length === 1,
+    faiAir.map((e) => `${e.type}@${e.position.z.toFixed(1)}`).join(' '));
+  const faiCourse = courseFromDocument(fai);
+  check('and it flies with all thirty two of its stations on the ground',
+    faiCourse.stations.length === 32 && faiCourse.stations.every((s) => s.baseY === 0),
+    faiCourse.stations.filter((s) => s.baseY > 0).map((s) => `${s.elementId}@${s.baseY.toFixed(1)}`).join(' '));
+  check('and the stored document is not touched by reading it',
+    fai.elements.filter((e) => needsSeat(e) && e.position.z > SEAT_SLACK).length === 5);
+  const barTrack = createTrack();
+  const hp = place(barTrack, 'horizontalPole', 10, 0, { z: 1.6 });
+  const g0 = place(barTrack, 'gate', 0, 0);
+  addToSequence(barTrack, g0.id, 0);
+  const hpSt = courseFromDocument(barTrack).structures.find((s) => s.type === 'horizontalPole');
+  check('a horizontal pole still flies at its own height, on its legs',
+    hpSt && Math.abs(hpSt.baseY - hp.position.z) < 1e-9, hpSt ? `baseY ${hpSt.baseY}` : 'missing');
+
+  /* ---- a map: what is under it holds it up ---- */
+  const d = createTrack(undefined, 'full', 'freestyle');
+  const bld = freestylePlace(d, 'building', 40, 40);
+  const wx = 40 - d.field.width / 2;
+  const wz = -(40 - d.field.depth / 2);
+  const roof = topUnder(placeDocument(d).solids, wx, wz);
+  check('the building has a roof to stand on', roof > 3, `roof ${roof}`);
+  const gateOn = freestylePlace(d, 'gate', 40, 40, { z: roof });
+  let r = seatDocument(d);
+  check('a gate on the roof stays on it', gateOn.position.z === roof && r.moved.length === 0,
+    `z ${gateOn.position.z}, ${r.moved.length} moved`);
+  gateOn.position.z = roof + 0.03;
+  r = seatDocument(d);
+  check('and a gate 3 cm over it is on it', gateOn.position.z === roof + 0.03 && r.moved.length === 0);
+  gateOn.position.z = roof + 3;
+  r = seatDocument(d);
+  check('a gate 3 m over the roof is set down on it, and the move names the building',
+    gateOn.position.z === roof && r.moved.length === 1 && r.moved[0].on === bld.id
+    && r.moved[0].from === roof + 3, JSON.stringify(r.moved));
+  check('the placement it returns is of the map as it now is',
+    r.placed.items.find((it) => it.el === gateOn).y === roof);
+  gateOn.position.x = 120;
+  r = seatDocument(d);
+  check('a gate carried off the roof falls to the ground', gateOn.position.z === 0
+    && r.moved.length === 1 && r.moved[0].on === null, JSON.stringify(r.moved));
+  const tower = freestylePlace(d, 'building', 100, 100, { z: 8 });
+  r = seatDocument(d);
+  check('an asset hanging in the air is set down like a gate is', tower.position.z === 0 && r.moved.some((m) => m.id === tower.id));
+  const pads = freestylePlace(d, 'startPads', 40, 40, { z: roof });
+  r = seatDocument(d);
+  check('start pads raised onto the roof they stand on are left there', pads.position.z === roof
+    && !r.moved.some((m) => m.id === pads.id), `z ${pads.position.z}`);
+  pads.position.x = 140;
+  r = seatDocument(d);
+  check('and pads raised over nothing are on the ground', pads.position.z === 0
+    && r.moved.some((m) => m.id === pads.id));
+  const window6 = freestylePlace(d, 'gap', 20, 20, { z: 6 });
+  seatDocument(d);
+  check('a named gap is a window in the air and stays where it is', window6.position.z === 6);
+
+  const s = createTrack(undefined, 'full', 'freestyle');
+  const ledge = (z) => freestylePlace(s, 'ledge', 80, 80, { z, dims: { length: 6, height: 1, depth: 2 } });
+  const a = ledge(0);
+  const b = ledge(1);
+  const c = ledge(2);
+  r = seatDocument(s);
+  check('a stack standing on each other is left alone', r.moved.length === 0
+    && b.position.z === 1 && c.position.z === 2, JSON.stringify(r.moved));
+  s.elements.splice(s.elements.indexOf(a), 1);
+  r = seatDocument(s);
+  check('take the bottom one away and the stack comes down a storey at a time',
+    r.moved.length === 2 && b.position.z === 0 && Math.abs(c.position.z - 1) < 1e-9
+    && r.moved[0].id === b.id && r.moved[1].id === c.id && r.moved[1].on === b.id,
+    `${JSON.stringify(r.moved)} b ${b.position.z} c ${c.position.z}`);
+
+  const calm = createTrack(undefined, 'full', 'freestyle');
+  freestylePlace(calm, 'building', 40, 40);
+  const asked = placeDocument(calm);
+  const seated = seatDocument(calm);
+  check('a map with nothing raised is placed exactly as it always was',
+    seated.moved.length === 0 && seated.placed.solids.length === asked.solids.length
+    && JSON.stringify(seated.placed.spawn) === JSON.stringify(asked.spawn));
+
+  /* ---- what the builder says ---- */
+  const nameOf = labeller(track);
+  const said = seatedNote([{ id: hi.id, type: 'gate', from: 15.01, to: 0, on: null }], nameOf,
+    (id) => elementById(track, id));
+  check('the note names what was set down, how high it was, and where it stands now',
+    /^Gate \d+ was 15\.0 m up with nothing under it, so it now stands on the ground\.$/.test(said), said);
+  const onRoof = seatedNote([{ id: gateOn.id, type: 'gate', from: roof + 3, to: roof, on: bld.id }], labeller(d),
+    (id) => elementById(d, id));
+  check('and on a map it names what it now stands on', /^Gate \d* ?was 14\.6 m up and now stands on Building \d\.$/.test(onRoof), onRoof);
+  const five = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id: hi.id, type: 'gate', from: 9, to: 0, on: null }));
+  const many = seatedNote(five, nameOf, (id) => elementById(track, id));
+  check('several are counted, three are named, and the rest are said to be more',
+    /^5 things were up in the air/.test(many) && /and 2 more/.test(many), many);
+  const numbered = place(track, 'flag', 25, 0, { name: '15', z: 20 });
+  const numberedNote = seatedNote([{ id: numbered.id, type: 'flag', from: 20.06, to: 0, on: null }], nameOf,
+    (id) => elementById(track, id));
+  check('an element an author or an import named is called by its type and its name',
+    /^Flag "15" was 20\.1 m up with nothing under it/.test(numberedNote), numberedNote);
+  check('and nothing moved says nothing', seatedNote([], nameOf, () => null) === '');
 }
 
 function inClubBox(solids, x, y, z) {
@@ -5996,6 +6210,7 @@ async function main() {
   suiteFlagShape();
   suiteStartBlock();
   suiteDiveSupports();
+  suiteSeat();
   suiteClubhouseShell();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exitCode = failed ? 1 : 0;

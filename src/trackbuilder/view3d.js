@@ -11,8 +11,11 @@
  * rotation is the only line that can be responsible.
  *
  * The preview is read only except for one thing the task allows: dragging an
- * element's height. Drag on empty space orbits, drag on an element raises or
- * lowers it, middle or right drag pans, the wheel zooms.
+ * element's height. Drag on empty space orbits, drag on an element that can
+ * hold a height raises or lowers it (a bar, a waypoint, and on a map any
+ * asset, which is set down on what is under it when let go: see seat.js),
+ * drag on anything that stands on the ground orbits, middle or right drag
+ * pans, the wheel zooms.
  *
  * The scene is rebuilt wholesale whenever the document changes. A track is
  * tens of objects, not thousands, and a rebuild that cannot get out of step
@@ -374,6 +377,9 @@ const PICK_R = 0.3;
  * far a press has to travel before it bends it rather than being a click. */
 const LINE_GRAB_PX = 9;
 const BEND_START_PX = 4;
+/* How far a pull upward on something that stands on the ground travels before
+ * it is told why nothing rose: more than a click's wobble, less than a drag. */
+const GROUNDED_PULL_PX = 12;
 let pickUnit = null;
 let pickMaterial = null;
 
@@ -1116,9 +1122,21 @@ export class View3D {
       }
       const el = elementById(this.host.doc, id);
       /*
+       * A BUILT THING ON A TRACK STANDS ON THE GROUND and has no height to
+       * drag (seat.js), so the drag orbits, as it does on a car. The first
+       * real pull upward says why, once: a click to select one must stay
+       * quiet, and a pilot who does pull is owed the reason and the way to
+       * what they wanted.
+       */
+      if (el && this.host.isGrounded(el)) {
+        this.drag = { kind: 'orbit', last: at, grounded: el.type, pulled: 0 };
+        return;
+      }
+      /*
        * A WAYPOINT IS A HANDLE ON THE LINE, so a drag on one moves it across
        * the level it is at, the same gesture as pulling the line itself, and
-       * Alt moves it up and down. Every other element keeps the height drag.
+       * Alt moves it up and down. Every other element that can hold a height
+       * keeps the height drag.
        */
       if (el && el.type === 'waypoint' && !e.shiftKey && docModeOf(this.host.doc) !== 'freestyle') {
         const g = this.levelPoint(e.clientX, e.clientY, el.position.z);
@@ -1218,6 +1236,15 @@ export class View3D {
     }
 
     if (this.drag.kind === 'orbit') {
+      if (this.drag.grounded && !this.drag.told) {
+        /* Screen up is height up, so up is negative. */
+        this.drag.pulled += dy;
+        if (this.drag.pulled < -GROUNDED_PULL_PX) {
+          this.drag.told = true;
+          const def = ELEMENTS[this.drag.grounded];
+          this.host.toast(`${def ? def.label : 'That'} stands on the ground, so it has no height to drag.${def && def.kind === KIND.APERTURE ? ' To lift the opening on its legs, set Sill height.' : ''}`);
+        }
+      }
       this.orbit.theta += dx * 0.006;
       this.orbit.phi += dy * 0.006;
       this.dirty = true;

@@ -445,6 +445,7 @@
       'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js',
       'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/shaders/LuminosityHighPassShader.js',
       'src/game/trackdoc.js',
+      'src/trackbuilder/seat.js',
       'src/trackbuilder/path.js',
       'src/trackbuilder/faces.js',
       'src/trackbuilder/figures.js',

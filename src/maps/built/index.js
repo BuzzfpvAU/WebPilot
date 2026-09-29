@@ -96,7 +96,7 @@ import { sincos } from '../../props/trig.js';
 import { makeStfMark } from '../../art/stf.js';
 import { makePartnerMark, signAspect } from '../../art/partnermark.js';
 import { PARTNERS } from '../../partners/roster.js';
-import { placeDocument, groundUnder, topUnder, PLATFORM_REACH } from './place.js';
+import { seatDocument, groundUnder, topUnder, PLATFORM_REACH } from './place.js';
 import { starterMap } from './starter.js';
 import { lookOf, kitLook, paintLights, paintSky, paintPost } from './looks.js';
 import { chooseStfSpot, choosePartnerSpots } from './egg.js';
@@ -982,10 +982,14 @@ export async function buildMap(shell, onProgress, options) {
   const opts = options || {};
   const q = qualityFor(opts.quality);
 
-  /* The document, repaired the way every read of one is, then placed. */
+  /* The document, repaired the way every read of one is, then placed, with
+   * whatever was floating in it set down on what is under it first: a map
+   * built before the builder stopped letting an asset hang in the air still
+   * flies with its assets on the ground or on a roof (src/trackbuilder/seat.js).
+   * Silent, and what is stored is not touched. */
   const chosen = chooseDocument(opts);
   const { doc, repairs } = normalize(chosen.raw);
-  const placed = placeDocument(doc);
+  const { placed } = seatDocument(doc);
   /* Its roads and the cars on them (./traffic.js), worked out once: the
    * same lanes, offsets and bodies go to the plant (the shell uploads them,
    * see uploadTraffic below) and to the drawing, so the car drawn is the
