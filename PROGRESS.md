@@ -59321,3 +59321,7 @@ Results:
     check:world-golden:selftest, check:world-engines:selftest   pass
 
 Not run, and why: `lint:catalog` (needs the empty vendor/betaflight), `lint:board` (SKIP: the LeaderBoard repo is not checked out beside this one), `build:wasm`, `gen:*`, and the longer manual drivers (`park:fly`, `trick:sweep`, `gates`, `micro:check`, `whoop:gates`, `shots`). A green run here is therefore not evidence about the build or the vendored tree.
+
+### Mantis FPV's card, 2026-09-29
+
+The owner asked for "Australian based, with worldwide shipping." in Mantis FPV's bio. Appended to `about` in `src/partners/roster.js` in the owner's words. This is the owner's direct instruction, which overrides the roster's rule of saying only what the partner says on its own site; it is a plain statement and carries none of the conditions the 2026-09-27 pass took out. Copied to the board with `scripts/vendor.js`. On the front door only the roster and its manifest hash were updated: a full `vendor.js` there also pulls in a large unrelated resync (`art/cars.js` +2351 lines, `place.js`, `geometry.js`) that was not asked for and needs the yard regenerated and looked at. Only a text change, so no check run beyond reading the diff.
