@@ -59558,3 +59558,99 @@ Found and not touched.
 Cross repo. The landing page vendors `src/maps/built/place.js` (its yard is drawn with it) and pins it by SHA-256, so its copy is now behind the simulator's. Nothing is wrong: the yard is drawn with `placeDocument`, which did not change. The next `node scripts/vendor.js ../WebFPVSimulator` will copy `seat.js` in with it, because it copies the import closure. The board's copies are untouched, as above.
 
 To main. The owner said "push to main" on 2026-09-29, after the summary above: the decisions taken by default, what was run and what was not. That ships the fold as written. It does not answer the one open question, whether to republish the three courses on the board, which clears the times set on their sky layout: nothing was republished, and that stays the owner's. No further verification scale was chosen, so none was run beyond a short gate on the final merged tree, all exit 0: `check:fresh` 18 of 18, `lint:preload` up to date (boot 122, 231 served), `lint:boot` 9 of 9, `check:props`, `check:orbit` 17 of 17, and the trackbuilder selftest 990 of 990. It goes to main as a fast forward of origin/main (ec0c8ec), and never with force, as the git section of CLAUDE.md says.
+
+## 2026-09-29 | plan, builder | The whoop builder plan: build it in 3D, keep the brain (the owner's ask)
+
+The owner compared our whoop builder with FPV Track Designer (designer.fpv-events.com,
+which looks to be the MIT licensed github.com/TuxRich/Track-Designer) and said: "i find
+the top down buidling of ours very hard to understand and build a track, i find their
+super easy and intuative, make a plan to overhaul our micro track builder to allow for
+all the best stuff theirs has".
+
+Changed: `WHOOP-BUILDER-PLAN.md` at the root, and this entry. No code changed and
+nothing in the source moved. The plan is written to be argued with, in the shape of
+WHOOP-ROOM-PLAN.md and FREESTYLE-MAPS-PLAN.md, and section 8 lists what it is waiting on.
+
+### What the plan rests on, found by reading and by running
+
+- The 3D view cannot build. Its header says it is a read only preview, a drag on any
+  gate orbits the camera and toasts "has no height to drag" (`view3d.js:1131`, `1245`),
+  and nothing in it places anything: `placeAt` has one caller, `view2d.js:694`. So the
+  hard to read plan is the only place a track can be made.
+- New gates take whatever heading the line gives them (`defaultYawFor`, `applyAutoFaces`)
+  and RaceGOW wants two axes. Only the gates' pipes can be clicked in 3D, so a gate is
+  26.7 mm to hit. The whoop canvas opens framed on the 10 by 12 m hall, not the track.
+- Four defects, reproduced with real pointer events and a real import, and all finding 14
+  of the 2026-09-29 sweep: a click that only selects records an undo step "move"; a
+  resized whoop field snaps back to 10 by 12 and moves every element 1 m on export and
+  import; a gate of zero size is accepted; Import replaces the canvas with no confirm.
+- The builder does not fit a tablet or a phone: the drawing area is 0 px wide at 390,
+  320 at 820, 524 at 1024. `device-check.js` only looks at the top bar on a laptop.
+- The physics ABI is generic (`sim_world_box`, `sim_world_capsule`, 49,152 shapes), so the
+  parts theirs has (hoop, hex, cube, table, chair, banner) can be built from what is
+  there. The plan therefore proposes no plant, ABI or build change, and says what would
+  bring one back to the owner (a table or banner at any heading needs a turned box).
+- A cube cannot be one element with six openings: every opening on a structure shares one
+  plane (`model.js:694`), and 60 call sites assume it. The plan recommends a group of six
+  ordinary face gates, after a spike.
+- The board counts gates and derives its lap floor from a fixed type list
+  (`validate.js:338`), so new gate types need a board change first, and would soften the
+  lap floor until it lands. `schemaVersion` can stay 3, as freestyle maps did.
+- A whole rebuild of the 3D scene is 7.8 ms median and 20 ms p95 on Track 1, 10.8 and
+  53 ms on Track 6, against a 16.7 ms frame, so a drag needs a fast path.
+- A share link that carries the track in its fragment is 1,594 to 2,488 characters for
+  the eight shipped whoop presets.
+- Their track "Cream First #1", run through our modules in a scratch script (not in the
+  repository): 13 of its 16 pieces map, the two cubes only as waypoints, the banner not
+  at all, and our engine flags nine 750 mm gates over the 28 in maximum, one under the
+  24 in minimum, mixed sizes and a footprint 3.7 times the RaceGOW envelope in width.
+
+### Waiting on the owner
+
+The twelve decisions in section 8 of the plan. The ones that move most: whether the whoop
+canvas builds in 3D with the plan as a camera (1); whether it gains a club profile so a
+track like theirs can be held at all (3); and the board change and its deploy order (6).
+Nothing is started, and Stage 0, the four repairs, is the one part that needs no answer
+beyond "go".
+
+### What went wrong
+
+- The first `git fetch` printed `forced update` on main, and `git merge-base` between the
+  old and new origin/main came back empty, which CLAUDE.md says to stop on. I stopped.
+  The clone is shallow (`--depth 50`), so the two tips were in separate graphs. Deepening
+  by 100 commits found 716562b as an ancestor of a6766a4, 189 commits on: a plain
+  fast forward, no history rewritten. An earlier session hit the same false alarm. The
+  check that settles it is `git fetch --deepen=N` and `git merge-base`, never `--force`.
+- In the chat comparison that led here I said "eleven of 16 pieces map cleanly". Eleven
+  is the number of elements they became; thirteen pieces map, because a three high stack is
+  three pieces and one element. The plan has the right figure. I also called the `set` on a
+  flying order row a button; it is a badge meaning the face was fixed by hand, and the
+  buttons are `X` and `-`.
+- My first conversion of their track left every heading unpinned, so our engine re-derived
+  them and reported seven `rg-square-headings` warnings that were mine, not theirs. Redone
+  with the headings pinned; the plan cites only the warnings that are properties of their
+  track, and says the seven were the tool's own re-derivation.
+- A `pkill -f` on a pattern that also appeared in my own command line killed my shell. The
+  scratch servers were stopped by port and pid after that.
+- The first draft of the plan was 7,800 words, 42 percent longer than the largest earlier
+  plan. Merged and cut to 7,000. It is still the longest; the scope is wider than any
+  earlier plan's, but it is the first thing to trim if it is too much to argue with.
+
+### RUN LOG
+
+    code                     unchanged; a new document and this entry
+    checks                   none of the repository's checks were needed: nothing they
+                             read changed. `node src/trackbuilder/selftest.js` was run
+                             read only for the plan's baseline: 990 passed, 0 failed
+    dashes and non ASCII     none in WHOOP-BUILDER-PLAN.md (Node, every character above 127)
+    line citations           24 of 24 in the plan read against the files (view3d, view2d,
+                             app, model, faces, ui, history, race, world.c, the board's
+                             validate.js); every file and npm script it names exists,
+                             except `check:builder`, which the plan proposes
+    git merge-base           716562b is an ancestor of a6766a4 after `--deepen=100`, one
+                             history
+    git diff --stat vendor/betaflight   empty
+    not run                  `npm run verify` (no physics, plant, ABI or build change),
+                             `shots.js` (nothing on screen changed)
+    scratch                  the mirror of their site, the conversion script and the
+                             screenshots are in the session's scratchpad, not committed
