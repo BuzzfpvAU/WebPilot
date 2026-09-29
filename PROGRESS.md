@@ -59492,3 +59492,17 @@ On the merged tree:
 
 main then goes forward to this merge as a fast-forward, fetched and checked
 just before the push.
+
+### Live on webfpv.org
+
+main moved e4210f4..50ea1ba at about 10:02 UTC, and webfpv.org/sim served
+it at 10:03:37 UTC: src/render/quality.js, src/main.js and src/ui/ui.js,
+read off the live site with a cache busting query, each hash the same as the
+commit. The polls from 10:02:33 until then did not match, so the comparison
+can tell the two apart. index.html comes back max-age=0, the scripts carry
+four hours at the edge, and src/fresh.js gives a reloaded page this
+deploy's scripts whole.
+
+For the owner's flight: reload once, then Settings, Screen, Manga and
+scoring, Off, at Medium or High, and fly Hibari Yard from the start pad. What
+would count as wrong is written under "For the owner" above.
