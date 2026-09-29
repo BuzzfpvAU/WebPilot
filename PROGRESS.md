@@ -59322,6 +59322,10 @@ Results:
 
 Not run, and why: `lint:catalog` (needs the empty vendor/betaflight), `lint:board` (SKIP: the LeaderBoard repo is not checked out beside this one), `build:wasm`, `gen:*`, and the longer manual drivers (`park:fly`, `trick:sweep`, `gates`, `micro:check`, `whoop:gates`, `shots`). A green run here is therefore not evidence about the build or the vendored tree.
 
+### Mantis FPV's card, 2026-09-29
+
+The owner asked for "Australian based, with worldwide shipping." in Mantis FPV's bio. Appended to `about` in `src/partners/roster.js` in the owner's words. This is the owner's direct instruction, which overrides the roster's rule of saying only what the partner says on its own site; it is a plain statement and carries none of the conditions the 2026-09-27 pass took out. Copied to the board with `scripts/vendor.js`. On the front door only the roster and its manifest hash were updated: a full `vendor.js` there also pulls in a large unrelated resync (`art/cars.js` +2351 lines, `place.js`, `geometry.js`) that was not asked for and needs the yard regenerated and looked at. Only a text change, so no check run beyond reading the diff.
+
 ## 2026-09-29 | render, ui | Manga and scoring off also takes the black outline off Medium and High
 
 ### The ask
@@ -59446,3 +59450,45 @@ Low should look the same either way. What would count as wrong: an outline
 left on the tree or the building with it off, the picture flickering when the
 switch is thrown, the race track losing its smoothed edges with it off (its
 antialiasing is meant to stay), or Low gaining an outline with it on.
+
+### The owner's answer, 2026-09-29, and the merge
+
+"push to main i'll fly it". So the verification scale is the owner's own
+flight, on top of the checks above.
+
+main had moved by one commit while this was built, 40258cd to e4210f4,
+Mantis FPV's bio ("Australian based, with worldwide shipping.", in
+src/partners/roster.js) and a note. It was merged in with a merge commit:
+no rebase and no force. PROGRESS.md was the only conflict, both sides having
+appended at the end; main's lines go first, as they landed first.
+
+On the merged tree:
+
+    node --check                 src/ui/ui.js, src/main.js and
+                                 src/partners/roster.js clean
+    npm run lint:partners        45 passed, 0 failed
+    npm run lint:preload         up to date, boot 121 modules, city 75,
+                                 built 35; 230 served
+    npm run lint:devices         PASS, every row and note on five devices
+    npm run lint:shell           FAIL, 1 problem: "credits: the list hangs
+                                 1540 px off the bottom of the window, was
+                                 1518 px". NOT THIS CHANGE'S. The same code
+                                 without main's commit passed lint:shell
+                                 with credits at 1518 (this branch at
+                                 47abcde, run above), and the one thing the
+                                 merge added is Mantis FPV's longer bio,
+                                 which sets one more line on the credits
+                                 page, 22 px. That commit's own note says no
+                                 check was run beyond reading its diff, so
+                                 main was already red here before this
+                                 merge. tests/shell-baseline.json is not
+                                 moved by this change: the growth is that
+                                 change's to argue, and the rule is that a
+                                 threshold does not move to make a check
+                                 pass without the argument. It is one
+                                 number, credits belowFold 1518 to 1540, and
+                                 it is put to the owner.
+    npm run verify               not run, for the reason above
+
+main then goes forward to this merge as a fast-forward, fetched and checked
+just before the push.
