@@ -46,7 +46,7 @@
 
 import * as THREE from 'three';
 import { buildShell } from './render/shell.js';
-import { applyPixelRatio, autoMinPixels, bootGuessGraphics, graphicsLabel, internalScale, normalizeGraphics, pixelRatioFor, qualityFor } from './render/quality.js';
+import { applyPixelRatio, autoMinPixels, bootGuessGraphics, graphicsLabel, inkLinesOn, internalScale, normalizeGraphics, pixelRatioFor, qualityFor, setInkLines } from './render/quality.js';
 import { readGpuInfo } from './render/gpuinfo.js';
 import { makeAttractCamera } from './render/attract.js';
 import { MangaLayer } from './render/manga.js';
@@ -1788,8 +1788,18 @@ export async function boot({ loading, bootStart, mapId }) {
    * lines from the craft's velocity turned into the camera's frame, the
    * impact frame's clock, and the screentone's switch. A race track's chain
    * has no manga edit and is left alone; a freestyle map's gets zeros when
-   * ui.manga is false. */
+   * ui.manga is false.
+   *
+   * THE INK LINES ARE SET HERE TOO, though they are not the manga layer's
+   * strokes: Manga and scoring off takes the black outline off every world
+   * on Medium and High, as Low has it (setInkLines in src/render/quality.js).
+   * Here because this runs once a frame for whichever world is live, the
+   * title's included, so a world swapped in is given the switch without a
+   * call of its own. Not while the Freestyle room's cards are being filmed:
+   * a clip is cached in this browser for good, and one recorded with the
+   * switch off would keep no outline after it was turned back on. */
   function mangaFrame(dt) {
+    setInkLines(view.post, filmNow || ui.settings.mangaAndScoring !== false);
     const on = Boolean(ui.manga) && view.mode === 'freestyle';
     const fpv = on && mode === 'flight' && introMs < 0 && !replayMode && Boolean(stateCurr);
     let speed = 0;
@@ -9898,6 +9908,9 @@ export async function boot({ loading, bootStart, mapId }) {
         impacts: manga.impacts,
         clockMs: manga.clockMs,
         edit: m ? { lines: Boolean(m.ok), tone: Boolean(m.tone) } : null,
+        /* Whether the world's post chain draws its black ink lines now:
+         * see setInkLines. */
+        ink: inkLinesOn(view && view.post),
         impactOn: impactFrameOn(),
         reduced: reducedMotion(),
       };

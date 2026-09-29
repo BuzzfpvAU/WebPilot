@@ -1200,6 +1200,9 @@ export async function buildMap(shell, onProgress, options) {
     userScale: opts.renderScale,
   });
   pipeline.enabled.ink = q.city.ink;
+  /* What the preset gave, which the pilot's Manga and scoring switch may
+   * only narrow: see setInkLines in src/render/quality.js. */
+  pipeline.inkPreset = q.city.ink;
   pipeline.enabled.fxaa = q.city.fxaa;
   paintPost(pipeline, T);
   const dims = shell.resize();

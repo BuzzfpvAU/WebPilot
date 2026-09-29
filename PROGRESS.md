@@ -59321,3 +59321,128 @@ Results:
     check:world-golden:selftest, check:world-engines:selftest   pass
 
 Not run, and why: `lint:catalog` (needs the empty vendor/betaflight), `lint:board` (SKIP: the LeaderBoard repo is not checked out beside this one), `build:wasm`, `gen:*`, and the longer manual drivers (`park:fly`, `trick:sweep`, `gates`, `micro:check`, `whoop:gates`, `shots`). A green run here is therefore not evidence about the build or the vendored tree.
+
+## 2026-09-29 | render, ui | Manga and scoring off also takes the black outline off Medium and High
+
+### The ask
+
+The owner, with three pictures of Hibari Yard from the start pad at Low,
+Medium and High (Low without the black outlines round the cherry tree and
+the building, the other two with them): "add to the things that manga
+graphics off changes toggle off should remove the black outline like we
+see in low graphics setting but for medium and high, in addition to its
+current functionality". So the Manga and scoring switch (entry above) gains
+one more thing to take away, and nothing it did is taken back. Render only:
+no physics, plant, module ABI or build, and nothing under src/game,
+src/native, vendor, patches or dist changed. Not put to the owner first, for
+the reason the switch itself was not.
+
+### Where the outline comes from
+
+The difference between the three pictures is one screen space pass, the
+ink: a second difference of depth that draws a dark line on a silhouette
+and on a crease. Low never runs it (`city.ink` false, `field.outline`
+false in src/render/quality.js), Medium and High do. The world's post chains
+hold it two ways:
+
+- The town's and a built map's Pipeline (a subclass of the vendored one):
+  `enabled.ink`, a flag on a pass of its own. Off is not running the pass,
+  which is exactly what Low is, and saves a full screen pass besides.
+- The race field's composer (src/render/post.js): the outline pass, which
+  is the field's antialiasing as well as its ink. It is left in the chain,
+  because taking it out would take the antialiasing with it and would
+  change how many passes swap, which decides whether a composer target is
+  given a depth buffer (the comment on `swaps` there), and the ink's
+  strength goes to zero instead.
+
+### What changed
+
+- `src/render/quality.js`: `setInkLines(post, on)` and `inkLinesOn(post)`.
+  It can only narrow what the preset gave: on Low there is nothing to
+  take, and on never adds a pass the preset left out. A chain that never
+  said what its preset gave (`inkPreset`, `inkStrength`) is left alone.
+- `src/maps/city/index.js`, `src/maps/built/index.js`: `pipeline.inkPreset
+  = q.city.ink` where the pipeline is built. `src/render/post.js`: the
+  composer returns `inkStrength`, the strength as the preset drew it.
+- `src/main.js`: `mangaFrame` calls `setInkLines(view.post, filmNow ||
+  ui.settings.mangaAndScoring !== false)` once a frame for whichever world
+  is live, the title's included, so a world swapped in (a new map, a new
+  preset, Auto moving it) is given the switch with no call of its own.
+  `filmNow` keeps it out of the Freestyle room's card clips: a clip is
+  cached in this browser for good, and one recorded with the switch off
+  would go on without its outline after the switch came back. The harness
+  `window.__manga.state()` gains `ink`.
+- `src/ui/ui.js`: the row's two notes say it, and so does the setting's
+  comment.
+
+### What it does not do
+
+The inverted hull outline on a few props (a gate post, a tree trunk, a
+vending machine: outlineHull in celmat.js, hullOutline in the vendored
+core/outline.js) is geometry that every preset draws, Low included, so the
+picture this matches keeps it. The world's own cel shading is the map's art
+and stays. Switch on, nothing is different: the pass and the strength are
+written back to what the preset gave (the probes read both), and High's
+picture before and after a round trip through Off looks the same. No
+pixel for pixel comparison against the commit before was made, because the
+yard's clouds and petals move with the clock.
+
+### What went wrong
+
+- The first pictures compared two different views. The flight opens with a
+  camera orbit round the craft for about four seconds of clamped frame time,
+  which under the software rasteriser is many frames, and the probe waited
+  three. Both pictures were of the yard, from different points of the orbit,
+  and looked like a difference of pad. It waits for `__intro().ms < 0` now,
+  and the six pictures are the same view of the pad.
+
+### RUN LOG
+
+    node --check                 src/render/quality.js, post.js, main.js,
+                                 ui.js, maps/city/index.js and
+                                 maps/built/index.js clean
+    npm run lint:quality         71 of 71 checks clean
+    npm run lint:preload         up to date, boot 121 modules, city 75,
+                                 built 35; 230 served
+    npm run lint:boot            9 of 9 checks clean
+    npm run lint:shell           PASS, no baseline moved: the notes are in
+                                 the side column, and the row is where it was
+    npm run lint:devices         PASS, every row and note on five devices
+    scratch probe, Hibari Yard   (tests/lib/page.js, the real shell, 800 by
+      at Low, Medium and High    450, not in the repository) 12 of 12: after
+                                 the intro, ink lines drawn on Medium and
+                                 High and not on Low with the switch on, none
+                                 on any with it off, the preset's own back
+                                 with it on again, no page errors
+    scratch probe, the other     640 by 360, Medium, 10 of 10: the town (city
+      two post chains            Pipeline) and a race track (the composer's
+                                 outline pass): drawn, none with the switch
+                                 off, back on again, no page errors
+    scratch probe, the switch    the 42 checks of the entry above, again with
+                                 the longer notes: 42 of 42, the Off note
+                                 ends at 511 px of the 668 the bottom bar
+                                 starts at
+    pictures                     the yard at Low, Medium switch on and off,
+                                 High switch on, off and on again, cropped to
+                                 the tree and the building at three times;
+                                 the town and the race room at Medium on and
+                                 off. Looked at, every one. Medium and High
+                                 with the switch off match Low's picture with
+                                 no dark line on the blossom polygons or on
+                                 the building's floors; the switch back on
+                                 gives High's picture back. In the
+                                 session's scratchpad, not committed
+    dash scan                    none in any added line
+    npm run verify               not run: nothing in the plant, the module,
+                                 the input path or the build moved
+    node scripts/shots.js        not run; put to the owner
+
+### For the owner
+
+Reload once, then Settings, Screen, Manga and scoring, Off, at Medium or
+High, and fly Hibari Yard from the start pad: the cherry tree and the
+building should have no dark outline, as on Low. On again and they come back.
+Low should look the same either way. What would count as wrong: an outline
+left on the tree or the building with it off, the picture flickering when the
+switch is thrown, the race track losing its smoothed edges with it off (its
+antialiasing is meant to stay), or Low gaining an outline with it on.
