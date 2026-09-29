@@ -146,7 +146,7 @@ function rows() {
      * are relative to it: west along the main straight, south, east to
      * the transition's hump and down again, east, and north to close. */
     ['road', 146, Y_TOP, EAST, { width: 2 * HALF, lanes: 1, radius: 22 }, {
-      name: 'Drift course',
+      name: 'Drift track',
       closed: true,
       nodes: [[0, 0], [-122, 0], [-122, Y_LOW - Y_TOP], [-86, Y_LOW - Y_TOP], [-61, Y_LOW - Y_TOP + 28], [-36, Y_LOW - Y_TOP], [0, Y_LOW - Y_TOP]],
     }],

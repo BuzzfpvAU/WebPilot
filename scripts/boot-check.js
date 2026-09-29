@@ -226,7 +226,17 @@ const loadingSrc = await readFile(join(root, 'src/ui/loading.js'), 'utf8');
  * nothing.
  */
 {
-  const wrapped = /function frame\(nowWall\) \{\s*\n\s*requestAnimationFrame\(frame\);\s*\n\s*try \{\s*\n\s*frameBody\(nowWall\);/.test(mainSrc);
+  /*
+   * The try moved out of frame() into runFrame() when the timer loop arrived,
+   * so that the rAF loop and the timer loop share one catch. What matters is
+   * the same as before: frameBody has exactly one call site, it sits inside
+   * a try in runFrame, and both loops go through runFrame.
+   */
+  const bodyCalls = (mainSrc.match(/\bframeBody\(/g) || []).length - 1;
+  const wrapped = bodyCalls === 1
+    && /function runFrame\(nowWall\) \{\s*\n\s*try \{\s*\n\s*frameBody\(nowWall\);/.test(mainSrc)
+    && /function frame\(nowWall\) \{[^]*?runFrame\(nowWall\);\s*\n\s*\}/.test(mainSrc)
+    && /function frameTimer\([^)]*\) \{[^]*?runFrame\(performance\.now\(\)\);\s*\n\s*\}/.test(mainSrc);
   check(
     'a thrown frame is caught and reported',
     wrapped && mainSrc.includes('window.__frameFault'),
