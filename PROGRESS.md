@@ -59824,3 +59824,240 @@ what a pilot in Safari sees, which is the owner's look: what to do and what
 would count as wrong are under "For the owner" above. The live site was not
 loaded in a browser for this check, so as not to add a visit to its
 statistics.
+
+## 2026-09-30 | input, ui | A pause menu no longer resumes itself off a radio being handled (bug-2d93629e)
+
+### The ask
+
+"see the bug ticket regarding pausing destabilising the menu ui, recreate it,
+find root cause and design and implement a fix". The ticket is bug-2d93629e,
+"Pausing game to change settings leads to unstable interface", kind wrong,
+open, filed 30 September 01:18 UTC: "When pausing a game to change setting,
+the interface/menu is displayed for a second then the 'resume' is
+automatically selected or clicked and the game resumes." Expected: "The
+setting GUI is accessible and does not receive false events." No steps. Nothing
+here touches the plant, the module ABI, the build or the physics.
+
+### What the ticket's report says
+
+Edge 153 on Windows, fullscreen on, a RadioMaster TX15 (eight axes, 24
+buttons, layout none, calibrated, AETR, stick mode 1), a whoop track, 111 s
+flown. In that flight roll never went past 0.51 either way (pitch reached -1,
+throttle 0 to 1). So this pilot's own flying does not cross the 0.55 line the
+menus read as a roll gesture, and whatever resumed the menu came from what
+the hands did around the pause, not from the flight. The report cannot say
+which input it was, and that is why the fix also leaves a record.
+
+### Recreated
+
+Headless Chromium, the real shell, a synthetic TX15 of that shape with an
+empty stored map (which loads as the default AETR one, marked stored, the
+ticket's "map: calibrated"), the craft placed in the air, Escape, then a
+scripted timeline of what a hand does with a radio, while every UI action
+and the stack that made it was logged. Before the fix:
+
+    stick at rest, throttle at hover, noise, aux switches flipped,
+      pitch held, roll held when the menu opened and let go         stayed paused
+    roll let go with an overshoot to -0.6 at 230 ms                 resumed at 247 ms
+    a bump right, 80 ms, at one second                              resumed at 1.02 s
+    a bump left, 80 ms, at one second                               resumed at 1.02 s
+    a switch on button 0, pressed again at one second               resumed at 1.02 s
+    a switch on button 1, pressed at 0.8 s                          resumed at 0.83 s
+
+Every resume was `Ui.pollPad` calling `select` or `back`. Through fullscreen,
+where Escape is the browser's own exit and a handler pauses (main.js, the
+fullscreenchange listener), a quiet radio stayed paused and the same bump
+resumed at 1.02 s, so leaving fullscreen adds no cause of its own. A held or
+repeated Escape is ruled out by the code: handleKey swallows a repeat in a
+menu.
+
+### Root cause
+
+Menu intent from a radio is read off the channels that fly the quad. padNav
+in main.js takes roll past NAV_DEFLECT (0.55) as right, which selects, and
+left, which goes back; pollPad in ui.js acts on each fresh crossing. The
+protection was an edge detector and one poll of seeding when a screen opens
+(show() sets padRearm), which covers a stick already held at that instant and
+nothing after. The pause menu is the worst place for that: it opens because
+the pilot reached for the keyboard with a radio in their hands, the cursor
+opens on Resume, select is Resume and back is Resume. Any excursion of roll
+past 55% after the first poll, or any of buttons 0 to 3 changing, resumes the
+flight. A release with an overshoot, a bump, a regrip, setting the radio
+down: all of them do it. The interval in the ticket, "a second", is how long
+that takes.
+
+### Design, and what was not done
+
+The rule, for a menu that opens FROM FLIGHT and for the rest of that visit to
+the menus (until the pilot is in the air again or on the title): the radio is
+not listened to until roll and pitch have been inside 0.3 for 500 ms in a row
+(any movement restarts the count), and after that a roll has to be held 200 ms
+to count as right or left. Cursor moves and buttons are not held. A menu
+reached from the title keeps the instant flick, which check 5c of lint:input
+pins. It is a small pure module with no clock, src/input/padgate.js, so Node
+can step it by hand.
+
+Considered and not taken: removing stick select from the pause menu (a radio
+only pilot uses the same code on Results, and it is a documented feature);
+a plain timed cooldown (covers the overshoot, not a bump); a dwell on every
+menu (changes every menu, contradicts 5c, and the exposure is menus opened
+under the hands); keyboard and mouse taking priority so the radio must wake
+with a gesture of its own (the most robust, and the next step if reports
+continue, but it needs mouse tracking and changes mixed device use); a
+visible hold-to-confirm bar (good, but interface work).
+
+### What changed
+
+- `src/input/padgate.js`, new: the two rules, PAD_CALM 0.3, PAD_SETTLE_MS 500,
+  PAD_DWELL_MS 200, and padDtMs, which clamps the time credited to one poll to
+  100 ms so a stalled frame or a fullscreen change cannot bank quiet.
+- `src/input/input.js`: navRaw also returns `dev`, how far the worst axis is
+  from where it rested.
+- `src/main.js`: padNav returns `calm`; the stick probe carries `menu`.
+- `src/ui/ui.js`: the gate is opened by show() when the screen being left is
+  flight, closed on flight or the title (the title wins even from flight),
+  and stepped in pollPad before any branch can act, so the waiting goes on
+  under a dialog too. padLogReport: the last five fresh right, left, select
+  and back the radio made once it was listened to, with the time since the
+  screen was shown, and whether the gate is cold, settling or open. One
+  sentence added to How to fly, Radio, In the menus.
+- `src/fresh.js` regenerated after `git add`: padgate.js joined the boot
+  graph, 123 modules, 232 served.
+- Checks: scripts/input-selftest.js 316 to 338; scripts/input-check.js 185 to
+  205, a TX15 page that replays the profiles above through the real pause menu.
+
+### What it does not do
+
+- A switch on buttons 0 to 3 thrown after the settle still selects or goes
+  back, and resumes: measured, 0.81 s and 1.02 s. Those are menu keys by
+  design, so that Fly is one flick away, and nothing separates a flip on
+  purpose from one made by habit. If the TX15 pilot's trigger was a switch
+  mapped to CH9 to CH12, this fix does not stop it. The ticket's report cannot
+  say, and the next one now can (stick.menu).
+- A radio lying on its sticks is a held roll, and a hold counts.
+- Not tried on a real TX15. The timings are reasoned from what a hand does,
+  not measured on hardware.
+- A visit to the menus that began in flight stays gated through Settings and
+  the rest until the title or the air, so a radio pilot adjusting a value there
+  needs the beat on every step.
+
+### Decisions made here, for the owner to overrule
+
+1. 500 ms and 200 ms. The settle is longer than any release, overshoot or
+   regrip the replay could make and short enough that Results answers before
+   anyone has looked at it; the dwell is longer than a bump and shorter than a
+   push. Reasoned, not measured.
+2. The scope: menus opened from flight, for that visit, and not every menu.
+3. Buttons stay instant after the settle.
+4. Every report now carries stick.menu: 25 characters when nothing has
+   happened, 149 with five entries.
+
+### What went wrong
+
+- My own check found my own mistake: the code tested "the screen being left is
+  flight" before "the screen is the title", so flight straight to the title
+  opened the gate on the title and left it there. The rule I had written said
+  the title is never an exposed menu. The code was wrong, not the check.
+- Two faults in my own new tests found by reading them before they ran: a
+  bound one poll too tight (the dwell credits the first poll's 16 ms) and a
+  condition written twice. A third, a check whose label said the opposite of
+  what it asserted, I only saw in the output after it had passed, and
+  rewrote.
+- One pair of literal dash characters got into a test source and the dash scan
+  caught it; it uses escapes now, as the sibling check does.
+- The reproduction runs each scenario as a fresh page loading the source from
+  disk, so I did not edit src while a matrix ran, and the mutation runs were
+  checksummed before and after.
+- A first theory for the French ticket below was wrong and is refuted below.
+
+### RUN LOG
+
+    reproduction, before          11 profiles: 5 resumed by themselves (the
+                                  table above), 6 stayed paused
+    reproduction, after           15 profiles: the 3 stick transients and the
+                                  early and short pushes stay paused; a
+                                  deliberate hold resumes at 1.41 to 1.42 s;
+                                  the 2 switch presses still resume
+    node --check                  padgate, input, main, ui and both check files
+                                  clean, exit 0
+    node scripts/input-selftest.js  all 338 passed (316 before, 22 new), exit 0
+    Node mutations, each          10 of padgate.js: no dwell, no settle,
+      restored, md5 compared      movement not restarting it, a cold gate not a
+                                  pass through, no dwell on left, closing not
+                                  closing, dwell adding up across releases, no
+                                  clamp, a clock read, the first poll credited.
+                                  Each caught
+    node scripts/input-check.js   all 205 passed, 243 s, exit 0 (185 before,
+      (npm run lint:input)        20 new), check 5c among them
+    browser mutations, each       8: the gate never opening (the ticket's own
+      restored, md5 compared      behaviour, 22 checks fail and read like the
+                                  ticket), no dwell, no settle, calm always
+                                  true in padNav, calm ignored in pollPad, the
+                                  title not closing it, an empty record, the
+                                  report field dropped. Each caught
+    npm run lint:preload          up to date, boot 123, city 75, built 35, 232
+                                  served, exit 0
+    npm run lint:shell            FAIL, exit 1, one problem: "credits: the list
+                                  hangs 1540 px off the bottom of the window,
+                                  was 1518 px". NOT THIS CHANGE'S: the same
+                                  single problem, byte for byte, on a pristine
+                                  worktree of main at d60d385, the Mantis FPV
+                                  bio the previous entry already recorded. How
+                                  to fly did not move. tests/shell-baseline.json
+                                  is not touched; that number is the owner's
+    git diff --check              clean, exit 0
+    dash scan (Node)              607 added lines, none
+    npm run verify                not run. CLAUDE.md: for physics, the plant, the
+                                  module ABI or the build, or when asked. The
+                                  verify-flight-model skill names src/input as a
+                                  trigger, but nothing that reads a stick or
+                                  reaches the integrator changed: this is what
+                                  a menu does with a radio. Reasoning, not a
+                                  result
+    node scripts/shots.js         not run; put to the owner
+    lint:devices                  not run
+
+### For the owner
+
+Needs a radio and a keyboard. Fly, press Escape, and handle the radio: let go
+of the sticks, jog them, put it down. The menu should stay up. To resume with
+the radio, wait a moment with the sticks at rest and hold roll right a beat.
+Results, after a race, should answer the radio the same way. What would count
+as wrong: the menu still resuming by itself (then send a report from it:
+`stick.menu.last` says whether it was a roll or a switch and how long after the
+menu opened), a radio that can no longer resume or navigate from Results, or a
+beat that feels too long, in which case PAD_DWELL_MS is one number.
+
+A reply for bug-2d93629e, not posted: "Thanks, this is reproduced. When you
+paused with the radio in your hands the menu was listening to the sticks at
+once, so letting go of them, a small bump or setting the radio down could
+count as select Resume, or as Back, which is also Resume. After a pause the
+menu now waits until the sticks have been still for half a second, and a roll
+has to be held for a fifth of a second to count. If it still happens, send a
+report from the menu: it now records the last thing the radio did to it, a
+stick or a switch."
+
+### The French ticket, read and not touched (bug-a18b2ed9)
+
+Blocking, anonymous, 29 September 21:11 UTC, title "Bug affichages tfy play on
+my phone". Body: "Je ne peux pas voir le drone pendant que je vol je vois
+seulement mes commandes et une image de fond", which is: "I cannot see the
+drone while I fly, I only see my controls and a background image." Android 10,
+Chrome 154, Mali-G72 (the only one on the board), 891 by 411 landscape, Low
+graphics, touch sticks (49 s flown), the timer loop at 125 to 142 fps, the low
+latency canvas granted, and the report sent from the pause menu. So the touch
+sticks, which are page elements, show and the world does not: a rendering
+failure on one phone, not a controls problem.
+
+Ruled out by reading: the GPU guard. Its `held` counter was 6413 for a 49 s
+flight at about 130 fps, which looked like every draw skipped; it is
+cumulative since page load, and the guard never skips two draws in a row, so
+it cannot blank the picture. Not established: whether the low latency canvas
+is the cause. Four other phones with it granted (Adreno 610 and 740, Mali-G710
+and G720) fly, but this is an older design than any of them and the only
+report of no picture. The first test for the pilot is Settings, Screen, Low latency view,
+Off, then reload. Nothing was changed for it. A cheap next step, if wanted, is
+a field in the report that says whether the drawn frame is blank (a few pixels
+read back), which would separate "drawn but not shown" from "not drawn".
+
+Nothing was written to the board. bug-2d93629e and bug-a18b2ed9 are open.

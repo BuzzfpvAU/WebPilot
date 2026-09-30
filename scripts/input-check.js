@@ -23,7 +23,8 @@
  * a radio the guess gets right exercises none of this. A second page with
  * touch emulation on covers the thumb sticks, and a third with no radio at
  * all flies a real race on the keys. A fourth is Safari 27 on a Mac with a
- * radio the browser will not list, which is bug-616cc604. Two more walk the
+ * radio the browser will not list, which is bug-616cc604, and a fifth is a
+ * TX15 flown and paused, which is bug-2d93629e. Two more walk the
  * builder's Fly this map into the air, and a linked map that fails to load,
  * and the last walk the gate's Map builder card into the builder and its
  * chooser.
@@ -123,6 +124,31 @@ const SAFARI_SEED = `Object.defineProperty(Navigator.prototype, 'userAgent', {
   get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15',
 });
 navigator.getGamepads = () => [null, null, null, null];`;
+
+/*
+ * The TX15 of bug-2d93629e: eight axes in AETR order then four aux switches,
+ * twenty four buttons all released, a calibrated map (an empty stored map is
+ * the default AETR one, marked stored, which is what the ticket's "map:
+ * calibrated" is), and fullscreen off because a page with no gesture is
+ * refused it anyway.
+ */
+const TX15_SEED = `window.__pad = {
+  index: 0,
+  id: 'RadioMaster TX15 Joystick (Vendor: 1209 Product: 4f54)',
+  connected: true,
+  mapping: '',
+  timestamp: 1,
+  axes: [0, 0, -0.3, 0, -1, 0, -1, -1],
+  buttons: Array.from({ length: 24 }, () => ({ pressed: false, touched: false, value: 0 })),
+};
+navigator.getGamepads = () => [window.__pad];
+try {
+  localStorage.setItem('webfpv_stick_map_v1', '{}');
+  const k = ${JSON.stringify(SETTINGS_KEY)};
+  const st = JSON.parse(localStorage.getItem(k) || '{}');
+  st.fullscreenFly = false;
+  localStorage.setItem(k, JSON.stringify(st));
+} catch (e) { /* Storage refused. The page then meets an uncalibrated radio and says so. */ }`;
 
 /*
  * The keyboard pilot: no radio, no touch, on the whoop, with one shipped
@@ -1181,6 +1207,172 @@ async function safariPage(page) {
     snap.keys + 5 <= 32 && snap.chars < 8000);
 }
 
+/*
+ * A TX15 flown, and paused: bug-2d93629e, "the interface/menu is displayed for
+ * a second then the resume is automatically selected or clicked and the game
+ * resumes". The pilot's hands are on the radio when Escape is pressed, so what
+ * comes off the sticks in the seconds after it is the whole question, and it
+ * is replayed here through the real pause menu: a release with an overshoot, a
+ * bump either way at one second (each of which resumed the flight before the
+ * fix, at 247 ms and 1.02 s), a roll held when the menu opened, a push made too
+ * soon and a flick too short. Then a push that is meant, which has to still
+ * resume it, because a radio is the only stick some pilots have.
+ *
+ * The replay runs in the page against its own clock so the timings are the
+ * menu's, with the Escape sent as the window key event input.js listens to.
+ */
+async function pausePage(page) {
+  const ev = (expr) => page.evaluate(`(() => { const ui = window.__ui; const input = window.__input; ${expr} })()`);
+  /* Back in the air with the radio at rest and every button released. */
+  const fly = async () => {
+    await ev(`${PAST_GATE}
+      const pad = window.__pad;
+      pad.axes = [0, 0, -0.3, 0, -1, 0, -1, -1];
+      for (let i = 0; i < 24; i += 1) { pad.buttons[i] = { pressed: false, touched: false, value: 0 }; }
+      pad.timestamp += 1;
+      ui.padLog.length = 0;
+      const sp = window.__map().spawn; window.__placeCraft(sp.x + 6, sp.y + 30, sp.z); return 1;`);
+    await page.until("window.__ui.screen === 'flight'", 8000).catch(() => {});
+    await page.sleep(300);
+  };
+  /*
+   * Press Escape with the radio doing `init`, then run `steps`, a list of
+   * [ms after the press, change], and watch the screen for `ms`. Axes are the
+   * device's: 0 roll, 1 pitch, 2 throttle, 3 yaw. Returns when it resumed, if
+   * it did.
+   */
+  const replay = (init, steps, ms) => page.evaluate(`(async () => {
+    const pad = window.__pad; const ui = window.__ui;
+    const apply = (c) => {
+      if (c.axes) for (const [i, v] of Object.entries(c.axes)) pad.axes[i] = v;
+      if (c.buttons) for (const [i, v] of Object.entries(c.buttons)) pad.buttons[i] = { pressed: Boolean(v), touched: Boolean(v), value: v ? 1 : 0 };
+      pad.timestamp += 1;
+    };
+    const todo = ${JSON.stringify(steps)}.slice();
+    apply(${JSON.stringify(init)});
+    const t0 = performance.now();
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Escape', key: 'Escape', bubbles: true }));
+    let pausedAt = null; let resumedAt = null; let hot = null;
+    while (performance.now() - t0 < ${ms}) {
+      const t = performance.now() - t0;
+      while (todo.length && todo[0][0] <= t) apply(todo.shift()[1]);
+      if (ui.screen === 'paused' && pausedAt === null) { pausedAt = Math.round(t); hot = ui.padGate.hot; }
+      if (pausedAt !== null && ui.screen === 'flight' && resumedAt === null) resumedAt = Math.round(t);
+      await new Promise((r) => setTimeout(r, 8));
+    }
+    apply({ axes: { 0: 0, 1: 0 }, buttons: { 0: 0, 1: 0, 2: 0, 3: 0 } });
+    return { pausedAt, resumedAt, hot, screen: ui.screen };
+  })()`);
+  /* Resume with the keyboard, the way the pilot who paused with it would. */
+  const back = async () => {
+    if (await ev('return ui.screen;') === 'paused') {
+      await page.tap('Enter');
+      await page.until("window.__ui.screen === 'flight'", 4000).catch(() => {});
+    }
+  };
+  const WINDOW = 2600;
+
+  section('pause: a radio being handled does not resume the pause menu: bug-2d93629e');
+  await ev(`${PAST_GATE} input.setPadChoice({ kind: 'pad', id: window.__pad.id, index: 0 }); ui.show('title'); return 1;`);
+  await page.sleep(700);
+  const cold = await ev('return JSON.stringify({ usable: input.mapUsable(), stored: input.map.stored, hot: ui.padGate.hot });').then(JSON.parse);
+  check('the page has the ticket\'s radio: a calibrated map the menus can use, and the title is not an exposed menu',
+    cold.usable === true && cold.stored === true && cold.hot === false, JSON.stringify(cold));
+
+  await fly();
+  let r = await replay({}, [], WINDOW);
+  check('Escape pauses, and the visit to the menus is marked as begun in flight',
+    r.pausedAt !== null && r.hot === true, JSON.stringify(r));
+  check('with the radio quiet the menu stays up', r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  await back();
+
+  await fly();
+  r = await replay({}, [[150, { axes: { 0: 0.8 } }], [300, { axes: { 0: 0 } }], [380, { axes: { 0: -0.6 } }], [480, { axes: { 0: 0 } }]], WINDOW);
+  check('a roll let go with an overshoot to the other side, which resumed it at 247 ms: the menu stays up',
+    r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  await back();
+
+  await fly();
+  r = await replay({}, [[1000, { axes: { 0: 0.7 } }], [1080, { axes: { 0: 0 } }]], WINDOW);
+  check('a bump right at one second, which selected Resume at 1.02 s: the menu stays up',
+    r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  const swallowed = await ev('return JSON.stringify(ui.padLogReport());').then(JSON.parse);
+  check('and the bump never reached the menu, which the record of what the radio did to it shows: gate open, nothing on it',
+    swallowed.gate === 'open' && swallowed.last.length === 0, JSON.stringify(swallowed));
+  await back();
+
+  await fly();
+  r = await replay({}, [[1000, { axes: { 0: -0.7 } }], [1080, { axes: { 0: 0 } }]], WINDOW);
+  check('a bump left at one second, which was Back, which is Resume: the menu stays up',
+    r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  await back();
+
+  await fly();
+  r = await replay({ axes: { 0: 0.8 } }, [[400, { axes: { 0: 0 } }]], WINDOW);
+  check('a roll held when the menu opened and let go later: the menu stays up (the old seeding already caught this one)',
+    r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  await back();
+
+  await fly();
+  r = await replay({}, [[200, { axes: { 0: 0.8 } }], [700, { axes: { 0: 0 } }]], WINDOW);
+  check('a push made 200 ms after the menu opened, held for half a second: swallowed, not delayed into an act',
+    r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  await back();
+
+  await fly();
+  r = await replay({}, [[1200, { axes: { 0: 0.8 } }], [1300, { axes: { 0: 0 } }]], WINDOW);
+  check('a flick of 100 ms after the settle is too short to count: the menu stays up',
+    r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  await back();
+
+  await fly();
+  r = await replay({}, [[100, { buttons: { 0: 1 } }], [400, { buttons: { 0: 0 } }]], WINDOW);
+  check('a switch on button 0 thrown while the hand is still on the radio, inside the settle: swallowed',
+    r.resumedAt === null && r.screen === 'paused', JSON.stringify(r));
+  await back();
+
+  /* And the radio still works when it is meant. */
+  await fly();
+  r = await replay({}, [[1200, { axes: { 0: 0.8 } }], [1700, { axes: { 0: 0 } }]], 3200);
+  check('a roll right held for half a second after the settle resumes it, which is what a radio only pilot needs',
+    r.resumedAt !== null && r.resumedAt >= 1300 && r.resumedAt <= 1900 && r.screen === 'flight', JSON.stringify(r));
+  check('and leaving the menus for the air closes the gate again', await ev('return ui.padGate.hot === false;'));
+  const did = await ev('return JSON.stringify(ui.padLogReport());').then(JSON.parse);
+  check('and the record names what resumed it: a roll right, on the pause menu, about 200 ms after the settle',
+    did.gate === 'cold' && did.last.length === 1 && /^right \d+ms on paused$/.test(did.last[0]), JSON.stringify(did));
+  const snap = await ev('const b = ui.bugSnapshot(); return JSON.stringify({ menu: b.stick && b.stick.menu, keys: Object.keys(b).length, chars: JSON.stringify(b).length });').then(JSON.parse);
+  check('a report carries it, inside the board\'s 32 keys and 8000 characters',
+    snap.menu && snap.menu.gate === 'cold' && snap.menu.last.length === 1 && snap.keys + 5 <= 32 && snap.chars < 8000, JSON.stringify(snap));
+
+  await fly();
+  r = await replay({}, [[1200, { axes: { 0: -0.8 } }], [1700, { axes: { 0: 0 } }]], 3200);
+  check('and a roll left held the same way goes back, which on this menu is Resume',
+    r.resumedAt !== null && r.resumedAt >= 1300 && r.resumedAt <= 1900 && r.screen === 'flight', JSON.stringify(r));
+
+  await fly();
+  r = await replay({}, [[1200, { buttons: { 0: 1 } }], [1400, { buttons: { 0: 0 } }]], 3200);
+  check('a button thrown after the settle still selects: switches are menu keys by design, so Fly is one flick away',
+    r.resumedAt !== null && r.screen === 'flight', JSON.stringify(r));
+
+  /* The title is never a menu opened under the pilot's hands, and a visit to
+   * the menus ends there: paused, then Back to the title, then Settings. */
+  await fly();
+  r = await replay({}, [], 400);
+  await ev("ui.show('title'); return 1;");
+  await page.sleep(200);
+  const onTitle = await ev("return JSON.stringify({ hot: ui.padGate.hot, gate: ui.padLogReport().gate });").then(JSON.parse);
+  const inSettings = await ev("ui.show('pilot'); return JSON.stringify({ hot: ui.padGate.hot });").then(JSON.parse);
+  check('paused, then the title, then Settings: the gate was open on the pause and is not on the title or beyond it',
+    r.hot === true && onTitle.hot === false && onTitle.gate === 'cold' && inSettings.hot === false,
+    JSON.stringify({ paused: r.hot, onTitle, inSettings }));
+  await fly();
+  await ev("ui.show('title'); return 1;");
+  const direct = await ev("ui.show('pilot'); return JSON.stringify({ hot: ui.padGate.hot });").then(JSON.parse);
+  check('and straight from the air to the title is the same: the instant flick is there',
+    direct.hot === false, JSON.stringify(direct));
+}
+
 async function touchPage(page) {
   const ev = (expr) => page.evaluate(`(() => { const ui = window.__ui; const input = window.__input; ${expr} })()`);
 
@@ -1928,6 +2120,14 @@ async function main() {
     await safariPage(page);
     const uncaughtS = page.errors.filter((e) => e.startsWith('uncaught:'));
     check('no uncaught exception on the Safari page', uncaughtS.length === 0, uncaughtS.slice(0, 3).join(' | '));
+    await page.close();
+    page = null;
+
+    console.log('\nbooting the shell with a TX15, flown and paused');
+    page = await bootPage({ seed: [SETTINGS_SEED, TX15_SEED] });
+    await pausePage(page);
+    const uncaughtP = page.errors.filter((e) => e.startsWith('uncaught:'));
+    check('no uncaught exception on the pause page', uncaughtP.length === 0, uncaughtP.slice(0, 3).join(' | '));
     await page.close();
     page = null;
 

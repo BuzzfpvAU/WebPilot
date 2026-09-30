@@ -61,6 +61,7 @@ import { CAMERA_MOUNT_FORWARD, CAMERA_MOUNT_UP, cameraTiltRad, clampCameraAngle,
 import { MotorAudio } from './render/audio.js';
 import { LapVoice, lapCall } from './render/voice.js';
 import { InputManager, NAV_DEFLECT } from './input/input.js';
+import { PAD_CALM } from './input/padgate.js';
 import { mountTouchSticks, touchWanted } from './input/touchsticks.js';
 import { RcLink, LINK_DEFAULT, LINK_PRESETS } from './input/link.js';
 import { FlightRecorder, downloadText, flightLogName } from './share/flightlog.js';
@@ -6587,6 +6588,12 @@ export async function boot({ loading, bootStart, mapId }) {
      * so a guess that is behaving like a radio drives the cursor the same
      * way a wizard mapping does. See noteThrottleParked.
      */
+    /*
+     * `calm` is whether the sticks are at rest, which a menu that opened from
+     * flight waits for before it listens: see src/input/padgate.js and
+     * bug-2d93629e, a pause menu that resumed itself off a radio being
+     * handled.
+     */
     if (input.mapUsable()) {
       const c = input.channels;
       return {
@@ -6596,10 +6603,13 @@ export async function boot({ loading, bootStart, mapId }) {
         left: c.roll < -NAV_DEFLECT,
         select: btn.select,
         back: btn.back,
+        calm: Math.abs(c.roll) < PAD_CALM && Math.abs(c.pitch) < PAD_CALM,
       };
     }
     const raw = input.navRaw();
-    return { up: raw.up, down: raw.down, right: false, left: false, select: btn.select, back: btn.back };
+    return {
+      up: raw.up, down: raw.down, right: false, left: false, select: btn.select, back: btn.back, calm: raw.dev < PAD_CALM,
+    };
   }
 
   /* Any real key or pointer press is the user gesture browsers require
@@ -10794,6 +10804,10 @@ export async function boot({ loading, bootStart, mapId }) {
      * pad, and nothing in them said whether the browser had listed nothing
      * or something this page dropped. See browserPads in input.js. */
     pads: input.browserPads(),
+    /* What the radio last did to a menu, which is what a pause that resumed
+     * itself needs a report to say: see padLogReport in ui.js and
+     * bug-2d93629e. */
+    menu: ui.padLogReport(),
     /* padHz, sampleHz and fps above are read at the moment of sending,
      * from a menu with the sticks at rest. This is the flight: its stick
      * refresh ceiling and how far each channel went. See flightRec in

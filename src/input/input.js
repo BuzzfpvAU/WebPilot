@@ -2763,12 +2763,12 @@ export class InputManager {
        * axis count would otherwise be measured against the last one's
        * resting position and read as permanently deflected. */
       this.navRest = null;
-      return { up: false, down: false };
+      return { up: false, down: false, dev: 0 };
     }
     const axes = gp.axes;
     if (!this.navRest || this.navRest.length !== axes.length) {
       this.navRest = Array.from(axes);
-      return { up: false, down: false };
+      return { up: false, down: false, dev: 0 };
     }
     let worst = 0;
     for (let i = 0; i < axes.length; i += 1) {
@@ -2777,7 +2777,10 @@ export class InputManager {
         worst = d;
       }
     }
-    return { up: worst > 0.55, down: worst < -0.55 };
+    /* `dev` is how far the worst axis is from where it rested, for a menu
+     * that opened under the pilot's hands to ask whether the radio is quiet:
+     * see src/input/padgate.js. */
+    return { up: worst > 0.55, down: worst < -0.55, dev: Math.abs(worst) };
   }
 
   /*

@@ -186,6 +186,9 @@ import { mountRatesPanel } from './ratespanel.js';
 import { mountPidsPanel } from './pidspanel.js';
 import { touchWanted } from '../input/touchsticks.js';
 import {
+  closePadGate, newPadGate, openPadGate, padDtMs, stepPadGate,
+} from '../input/padgate.js';
+import {
   capital, channelList, platformHelp, radioBlind, stickBrowser, stickPlatform, stickSay,
 } from './stickhelp.js';
 import {
@@ -2613,6 +2616,10 @@ function padTroubleItem(info, platform = 'other') {
  */
 const SEGMENT_MAX = 4;
 
+/* The pad gestures that act on a menu, for padLogReport. The cursor moving is
+ * not one: it changes nothing. */
+const PAD_ACTS = ['right', 'left', 'select', 'back'];
+
 /* Long enough that a fast typist does not trigger a rebuild per letter,
  * short enough that the list feels live. A bench rebuild is about 57 ms
  * measured on this container, so anything under about 100 would still be
@@ -4193,6 +4200,15 @@ export class Ui {
     /* Seed the edges on the next poll rather than acting on them. Set by
      * every screen change; see show(). */
     this.padRearm = true;
+    /* Whether a radio may drive the menus yet, for a visit to them that
+     * began in flight, and the clock its waiting runs on. See
+     * src/input/padgate.js. */
+    this.padGate = newPadGate();
+    this.padClockAt = 0;
+    /* The last few things the radio did to a menu, and when this screen was
+     * shown, so a report can say what resumed a pause: see padLogReport. */
+    this.padLog = [];
+    this.padShownAt = 0;
     this.dropEl = null;
     this.dropIndex = null;
     this.menuRows = [];
@@ -11337,6 +11353,30 @@ export class Ui {
      * trigger is already paying everywhere else: let go and flick again.
      */
     this.padRearm = true;
+    /*
+     * A MENU THAT OPENS FROM FLIGHT OPENS UNDER THE PILOT'S HANDS.
+     *
+     * The seeding above is for a stick held at this instant. It cannot help
+     * with what a person does with a radio in the seconds after reaching for
+     * the keyboard: the release, the overshoot, a regrip, setting it down.
+     * bug-2d93629e was the pause menu resuming itself off exactly that,
+     * because the cursor opens on Resume and select and back are both Resume
+     * there. So a visit to the menus that begins in flight waits for the
+     * sticks to be quiet, and asks a roll to be held a beat; a visit that
+     * begins on the title does neither. It lasts until the pilot is in the
+     * air again or on the title, and the title wins even from flight: it is
+     * where a radio pilot starts, and never a menu opened under their hands.
+     * this.screen is still the screen being left here. See
+     * src/input/padgate.js.
+     */
+    if (screen === 'flight' || screen === 'title') {
+      closePadGate(this.padGate);
+    } else if (this.screen === 'flight') {
+      openPadGate(this.padGate);
+    }
+    if (this.screen !== screen) {
+      this.padShownAt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    }
     const pinned = locationHashScreen();
     if (pinned && screen === 'title') {
       screen = pinned;
@@ -11827,7 +11867,7 @@ export class Ui {
         ['Before you fly', this.radioBlind
           ? this.radioBlind.howto
           : 'Put the radio in joystick mode before loading this page, then run Calibrate sticks in Settings.'],
-        ['In the menus', 'Pitch moves the cursor, roll right selects, roll left goes back.'],
+        ['In the menus', 'Pitch moves the cursor, roll right selects, roll left goes back. After a pause or a finish, wait a moment with the sticks at rest and hold the roll a beat.'],
         ['Restart', 'R on the keyboard, or a switch on the radio: Settings, Restart switch, then flip it.'],
         ['Acro', 'Hands off holds the attitude you left it in. Every turn has to be flown back out again.'],
         ['Turtle', 'If you end up inverted on the ground, a TURTLE MODE prompt appears. Pitch or roll with the right stick to flip over. You do not have to time it. Centre the stick, then take off.'],
@@ -16037,6 +16077,22 @@ export class Ui {
   }
 
   /*
+   * WHAT THE RADIO LAST DID TO A MENU, for a bug report. bug-2d93629e said a
+   * pause menu resumed itself and could not say what did it: a stick or a
+   * switch, a second in or a tenth. The gate (src/input/padgate.js) closes
+   * the stick half of that, and buttons 0 to 3 are menu keys by design, so
+   * the next report of it has to be able to say which. `gate` is cold on a
+   * visit that began on the title, settling while a menu opened from flight
+   * waits for the sticks, open after; `last` is the fresh right, left, select
+   * and back the radio made once it was listened to, newest last, with the
+   * time since the screen was shown and the screen.
+   */
+  padLogReport() {
+    const g = this.padGate;
+    return { gate: g.hot ? (g.settling ? 'settling' : 'open') : 'cold', last: this.padLog.slice() };
+  }
+
+  /*
    * Stick navigation. nav is { up, down, left, right, select, back },
    * already resolved by the shell from either the calibrated channels or,
    * when the radio has never been calibrated, from any axis at all. Edge
@@ -16065,6 +16121,30 @@ export class Ui {
       this.padRearm = false;
       this.padPrev = now;
       return;
+    }
+    /*
+     * A visit that began in flight is not listened to until the sticks have
+     * been quiet, and then a roll has to be held a beat: see show() and
+     * src/input/padgate.js. The clock is this menu's own wall clock, clamped
+     * so a stalled frame or a tab coming back cannot bank quiet it did not
+     * see, and it is not the physics path. Before the dialog check, so the
+     * waiting goes on under a dialog and the edges are seeded either way.
+     */
+    const clockNow = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now() : Date.now();
+    const dtMs = padDtMs(this.padClockAt, clockNow);
+    this.padClockAt = clockNow;
+    if (!stepPadGate(this.padGate, now, nav.calm !== false, dtMs)) {
+      this.padPrev = now;
+      return;
+    }
+    for (const k of PAD_ACTS) {
+      if (now[k] && !this.padPrev[k]) {
+        this.padLog.push(`${k} ${Math.round(clockNow - this.padShownAt)}ms on ${this.screen}`);
+        if (this.padLog.length > 5) {
+          this.padLog.shift();
+        }
+      }
     }
     /*
      * A dialog swallows the pad exactly as handleKey swallows the keys.

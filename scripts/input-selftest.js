@@ -1935,6 +1935,156 @@ section('what the browser listed: a report says whether it listed anything, and 
 }
 installEnv(null);
 
+/*
+ * bug-2d93629e, a TX15 pilot: "When pausing a game to change setting, the
+ * interface/menu is displayed for a second then the resume is automatically
+ * selected or clicked and the game resumes." Reproduced in the real shell by
+ * replaying what a hand does with a radio just after Escape: a release with an
+ * overshoot to -0.6 resumed it at 247 ms, a bump either way at one second
+ * resumed it, and a switch on button 0 or 1 did. Each was Ui.pollPad calling
+ * select or back, which are both Resume on the pause menu.
+ *
+ * The rule under test is the pure gate in src/input/padgate.js, stepped by
+ * hand at 16 ms so nothing here depends on this machine's clock. The browser
+ * half, the same replays through the real pause menu, is
+ * scripts/input-check.js.
+ */
+section('a menu opened from flight waits for the sticks and asks a roll to be held: bug-2d93629e');
+{
+  const {
+    newPadGate, openPadGate, closePadGate, stepPadGate, padDtMs, PAD_CALM, PAD_SETTLE_MS, PAD_DWELL_MS, PAD_DT_MAX_MS,
+  } = await import('../src/input/padgate.js');
+  const KEYS = ['up', 'down', 'left', 'right', 'select', 'back'];
+  const flags = (over = {}) => ({
+    up: false, down: false, left: false, right: false, select: false, back: false, ...over,
+  });
+  /*
+   * Drive a gate the way pollPad does: one poll per 16 ms, the edge tracker
+   * seeded from the flags while the gate is closed, and an action recorded on
+   * each fresh crossing once it is open. `script` is a list of [from ms,
+   * flags, calm], the last one whose start has passed being the sticks now.
+   */
+  const drive = (gate, script, totalMs) => {
+    const fired = [];
+    let prev = flags();
+    for (let t = 0; t < totalMs; t += 16) {
+      const seg = script.filter((s) => s[0] <= t).pop() || [0, flags(), true];
+      const now = { ...seg[1] };
+      if (stepPadGate(gate, now, seg[2], 16)) {
+        for (const k of KEYS) {
+          if (now[k] && !prev[k]) {
+            fired.push(`${k}@${t}`);
+          }
+        }
+      }
+      prev = now;
+    }
+    return fired;
+  };
+  const opened = () => {
+    const gate = newPadGate();
+    openPadGate(gate);
+    return gate;
+  };
+  const RIGHT = flags({ right: true });
+  const LEFT = flags({ left: true });
+
+  check('the numbers are sane: a settle longer than a release and a dwell longer than a bump, both under a second',
+    PAD_SETTLE_MS >= 300 && PAD_SETTLE_MS <= 1000 && PAD_DWELL_MS >= 100 && PAD_DWELL_MS <= 400
+    && PAD_CALM > 0 && PAD_CALM < 0.55);
+
+  /* The pilot is at the title: nothing about it changes. */
+  let g = newPadGate();
+  check('a gate that was never opened is a pass through: a fresh flick acts at once, as section 5c of lint:input needs',
+    drive(g, [[0, flags(), true], [64, RIGHT, false], [80, flags(), true]], 200).join() === 'right@64');
+
+  /* The reproduction, one profile at a time, against a menu opened from flight. */
+  g = opened();
+  check('a quiet radio does nothing, however long the menu is up', drive(g, [[0, flags(), true]], 5000).length === 0);
+  g = opened();
+  check('a roll HELD when the menu opened and let go: nothing (this one the old seeding caught)',
+    drive(g, [[0, RIGHT, false], [300, flags(), true]], 3000).length === 0);
+  g = opened();
+  check('a release with an overshoot to the other side, which resumed the old menu at 247 ms: nothing',
+    drive(g, [[0, RIGHT, false], [150, flags(), true], [230, LEFT, false], [330, flags(), true]], 3000).length === 0);
+  g = opened();
+  check('a bump right at one second, 80 ms long, which resumed the old menu: nothing',
+    drive(g, [[0, flags(), true], [1000, RIGHT, false], [1080, flags(), true]], 3000).length === 0);
+  g = opened();
+  check('and a bump left, which was Back, which is Resume: nothing',
+    drive(g, [[0, flags(), true], [1000, LEFT, false], [1080, flags(), true]], 3000).length === 0);
+  g = opened();
+  check('bumps do not add up: three of 120 ms with rest between, which together outlast the dwell, do nothing',
+    drive(g, [[0, flags(), true], [1000, RIGHT, false], [1120, flags(), true], [1500, RIGHT, false], [1620, flags(), true],
+      [2000, RIGHT, false], [2120, flags(), true]], 3000).length === 0);
+  g = opened();
+  check('a flick as long as the dwell less one poll: nothing',
+    drive(g, [[0, flags(), true], [1200, RIGHT, false], [1200 + PAD_DWELL_MS - 16, flags(), true]], 3000).length === 0);
+
+  /* And the radio still drives the menu when the pilot means it. */
+  g = opened();
+  const held = drive(g, [[0, flags(), true], [1200, RIGHT, false], [1800, flags(), true]], 3000);
+  check('a roll right held past the dwell after the settle acts, once, however long it is held',
+    held.length === 1 && held[0].startsWith('right@') && Number(held[0].slice(6)) >= 1200 + PAD_DWELL_MS - 16
+    && Number(held[0].slice(6)) <= 1200 + PAD_DWELL_MS + 16, held.join());
+  g = opened();
+  check('and a roll left the same way, which is Back',
+    drive(g, [[0, flags(), true], [1200, LEFT, false], [1800, flags(), true]], 3000).length === 1);
+  g = opened();
+  const early = drive(g, [[0, flags(), true], [200, RIGHT, false], [700, flags(), true]], 3000);
+  check('a push made inside the settle is swallowed whole, even held past the dwell, and not delayed into an act',
+    early.length === 0, early.join());
+  g = opened();
+  const cursor = drive(g, [[0, flags(), true], [1000, flags({ down: true }), true], [1100, flags(), true],
+    [1200, flags({ up: true }), true]], 2000);
+  check('the cursor is not held: up and down act on their first poll once the settle is over',
+    cursor.join() === 'down@1008,up@1200', cursor.join());
+  g = opened();
+  const buttons = drive(g, [[0, flags(), true], [100, flags({ select: true }), true], [300, flags(), true],
+    [1000, flags({ select: true }), true], [1100, flags(), true], [1200, flags({ back: true }), true]], 2000);
+  check('buttons are not held either, but a press inside the settle is swallowed like the rest',
+    buttons.join() === 'select@1008,back@1200', buttons.join());
+
+  /* The settle restarts on movement, and only counts time it saw. */
+  g = opened();
+  const fidget = [[0, flags(), true]];
+  for (let t = 200; t < 2000; t += 200) {
+    fidget.push([t, flags(), false], [t + 100, flags(), true]);
+  }
+  fidget.push([2000, RIGHT, false], [2600, flags(), true]);
+  check('a radio that never rests for the whole settle is never listened to, so a fidgeting hand cannot press anything',
+    drive(g, fidget, 2600).length === 0);
+  g = opened();
+  stepPadGate(g, flags(), true, 400);
+  check('less than the settle of quiet does not open it, however it is added up',
+    stepPadGate(g, flags(), true, PAD_SETTLE_MS - 400 - 1) === false && stepPadGate(g, flags(), true, 1) === true);
+
+  /* Where the exposed stretch begins and ends. */
+  g = opened();
+  drive(g, [[0, flags(), true]], 1000);
+  closePadGate(g);
+  check('closing the gate, back in the air or on the title, gives the instant flick back',
+    drive(g, [[0, flags(), true], [64, RIGHT, false], [80, flags(), true]], 200).join() === 'right@64');
+  openPadGate(g);
+  check('and opening it again starts the settle from nothing',
+    drive(g, [[0, RIGHT, false], [PAD_SETTLE_MS - 16, flags(), true]], PAD_SETTLE_MS + 400).length === 0);
+
+  /* A stalled frame, a fullscreen change, a tab coming forward: a long gap is
+   * not quiet the gate saw. */
+  check('the time credited to one poll is clamped, and the first poll and a clock that runs backwards are credited nothing',
+    padDtMs(0, 123456) === 0 && padDtMs(1000, 1016) === 16 && padDtMs(1000, 900) === 0
+    && padDtMs(1000, 1000 + 5000) === PAD_DT_MAX_MS && PAD_DT_MAX_MS <= PAD_SETTLE_MS / 2);
+  check('so a menu that opens into a four second stall is not settled by the stall: it is credited the clamp and no more',
+    stepPadGate(opened(), flags(), true, padDtMs(1, 4001)) === false);
+
+  /* The module is the menus' and not the physics path's, and keeps no clock. */
+  const { readFileSync } = await import('node:fs');
+  const text = readFileSync(new URL('../src/input/padgate.js', import.meta.url), 'utf8');
+  check('the gate reads no clock and no random: the time is handed in, so the same polls give the same answer',
+    !/performance|Date\b|setTimeout|Math\.random/.test(text.replace(/\/\*[\s\S]*?\*\//g, '')));
+  check('no em or en dash in it', !/[\u2013\u2014]/.test(text));
+}
+
 console.log(failed ?`\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);
 for (const f of fails) {
   console.log(`  FAIL ${f}`);
