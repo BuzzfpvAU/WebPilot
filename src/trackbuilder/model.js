@@ -48,6 +48,7 @@ import { apertureFrame, wrapAngle } from './geometry.js';
 import {
   styleOf as propStyleOf, clampDim, gapPointsOf, styleDims, GAP_POINTS, CAR_STYLES,
 } from '../props/types.js';
+import { isRoomType, ROOM_SIZE_MIN, ROOM_SIZE_MAX } from '../props/room.js';
 
 /*
  * The schema version. Bump it when a change to the document cannot be read
@@ -924,6 +925,18 @@ export function normalize(raw) {
       if (def.kind === KIND.APERTURE && GATE_SIZES.includes(key) && !(dims[key] > 0)) {
         const fallback = defaultDims(type, doc.trackClass)[key];
         repairs.push(`${id}: ${key} was ${wanted}, which is not a size a gate can have, so it is ${fallback} m, what a new ${def.label.toLowerCase()} starts at.`);
+        dims[key] = fallback;
+      }
+      /*
+       * A TABLE NOTHING WIDE HAS NO TOP, and one 400 m long is not in a room. The
+       * three sizes of a piece of furniture are held to what a room can have
+       * (src/props/room.js), so the drawing, the solids and the warnings never
+       * meet a box that is not one. A size that is not a length is what a new
+       * piece starts at; one that is too large is the most a room takes.
+       */
+      if (isRoomType(type) && !(dims[key] >= ROOM_SIZE_MIN && dims[key] <= ROOM_SIZE_MAX)) {
+        const fallback = dims[key] > ROOM_SIZE_MAX ? ROOM_SIZE_MAX : defaultDims(type, doc.trackClass)[key];
+        repairs.push(`${id}: ${key} was ${wanted}, which is not a size a ${def.label.toLowerCase()} can have, so it is ${fallback} m.`);
         dims[key] = fallback;
       }
     }

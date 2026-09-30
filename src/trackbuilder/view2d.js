@@ -56,6 +56,7 @@ import { startBlockDims } from '../art/startblock.js';
  * parts the physics is given, so a slot on the plan is a slot in the air. */
 import { partsOf, planBounds } from '../props/catalog.js';
 import { placedYaw } from '../props/solids.js';
+import { isRoomType, roomFootprint, roomWorldBoxes } from '../props/room.js';
 import { styleOf as propStyleOf, styleDims } from '../props/types.js';
 /* Roads and vehicles: a road's eased line, where its nodes are and where a
  * vehicle starts, worked out the way the simulator will drive them, and the
@@ -346,6 +347,12 @@ export function planShapeOf(el, doc = null) {
     return boxCorners(el.position, el.yaw, hw * 2, hu * 2);
   }
   if (def.kind === KIND.OBSTACLE) {
+    if (isRoomType(el.type)) {
+      /* Furniture is drawn and solid at its nearest quarter turn, so it is
+       * picked there, by the ground its boxes cover. */
+      const fp = roomFootprint(el.type, el.dims);
+      return boxCorners(el.position, placedYaw('quarter', el.yaw || 0), fp.x1 - fp.x0, fp.y1 - fp.y0);
+    }
     return boxCorners(el.position, el.yaw, el.dims.width, el.dims.depth);
   }
   if (def.kind === KIND.START) {
@@ -1102,7 +1109,11 @@ export class View2D {
       return;
     }
     if (def.kind === KIND.OBSTACLE) {
-      this.drawBarrier(ctx, el, selected, hovered);
+      if (isRoomType(el.type)) {
+        this.drawRoomPiece(ctx, el, selected, hovered);
+      } else {
+        this.drawBarrier(ctx, el, selected, hovered);
+      }
       return;
     }
     if (def.kind === KIND.DECAL) {
@@ -2246,6 +2257,30 @@ export class View2D {
     ctx.closePath();
     ctx.fillStyle = C.barrier;
     ctx.fill();
+    ctx.strokeStyle = selected ? C.selected : (hovered ? '#ffffff' : C.barrierEdge);
+    ctx.lineWidth = selected ? 2.4 : 1.4;
+    ctx.stroke();
+  }
+
+  /*
+   * A TABLE, A CHAIR OR A BANNER FROM ABOVE: every box it is made of as a
+   * filled rectangle, the tallest last, so the top of a table covers its legs
+   * and the legs still show through it, and then the outline of the ground it
+   * covers, which is also what picks it. The boxes are the ones that make it
+   * solid, at the quarter turn it is built at, so what is drawn is where it is.
+   */
+  drawRoomPiece(ctx, el, selected, hovered) {
+    const boxes = roomWorldBoxes(el.type, el.dims, el.position, el.yaw).sort((a, b) => a.z1 - b.z1);
+    ctx.fillStyle = C.barrier;
+    for (const b of boxes) {
+      const from = this.toScreen({ x: b.x0, y: b.y1 });
+      const to = this.toScreen({ x: b.x1, y: b.y0 });
+      ctx.fillRect(from.x, from.y, to.x - from.x, to.y - from.y);
+    }
+    const poly = this.planShape(el).map((p) => this.toScreen(p));
+    ctx.beginPath();
+    poly.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+    ctx.closePath();
     ctx.strokeStyle = selected ? C.selected : (hovered ? '#ffffff' : C.barrierEdge);
     ctx.lineWidth = selected ? 2.4 : 1.4;
     ctx.stroke();

@@ -41,6 +41,7 @@ import { ELEMENTS, KIND, TUNING, trackClassOf, tuningFor, docModeOf } from './el
  * Three.js, so the checks run in Node too. */
 import { placeDocument, topUnder, OPEN_CLEAR, OPEN_POINT_IN } from '../maps/built/place.js';
 import { placeSolids } from '../props/solids.js';
+import { isRoomType, roomHitTest } from '../props/room.js';
 import { sincos, turnY } from '../props/trig.js';
 import { GAP_MIN } from '../props/parts.js';
 import {
@@ -443,6 +444,15 @@ function firstBarrierHit(path, bar, pad) {
   const halfD = bar.dims.depth / 2;
   const minZ = bar.position.z;
   const maxZ = bar.position.z + bar.dims.height;
+  /*
+   * A TABLE IS NOT A SLAB. The line runs under one between its legs, so a
+   * piece of furniture is tested against its own boxes, the very list that
+   * draws it and makes it solid, and a barrier keeps the box test it has always
+   * had. Both are asked the same question of the same points below.
+   */
+  const inside = isRoomType(bar.type)
+    ? roomHitTest(bar, pad)
+    : (p) => insideYawedBox(p, bar.position, bar.yaw, halfW, halfD, minZ, maxZ, pad);
   const sub4 = 4;
   /*
    * Stop one short and test the last sample on its own. The loop used to run
@@ -456,13 +466,13 @@ function firstBarrierHit(path, bar, pad) {
     for (let j = 0; j < sub4; j += 1) {
       const t = j / sub4;
       const p = lerp(a.pos, b.pos, t);
-      if (insideYawedBox(p, bar.position, bar.yaw, halfW, halfD, minZ, maxZ, pad)) {
+      if (inside(p)) {
         return { s: a.s + (b.s - a.s) * t, pos: p };
       }
     }
   }
   const last = n ? path.samples[n - 1] : null;
-  if (last && insideYawedBox(last.pos, bar.position, bar.yaw, halfW, halfD, minZ, maxZ, pad)) {
+  if (last && inside(last.pos)) {
     return { s: last.s, pos: last.pos };
   }
   return null;

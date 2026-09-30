@@ -2044,9 +2044,11 @@ kase('import from the designer', async () => {
     await page.until("!!document.querySelector('#tb-modal h2') && /came across/.test(document.querySelector('#tb-modal h2').textContent)", 10000);
     const doc = await json(page, '({ name: window.trackBuilder.doc.name, cls: window.trackBuilder.doc.trackClass, types: window.trackBuilder.doc.elements.map((e) => e.type), seq: window.trackBuilder.doc.sequence.length })');
     check('it opens as a whoop track named for where it came from', doc.cls === 'micro' && doc.name === 'Synthetic (from the FPV Events designer)', doc.name);
-    check('two gates, a pole and a waypoint for the cube; the banner is not in it', doc.types.join() === 'gate,gate,pole,waypoint' && doc.seq === 4, `${doc.types.join()} ${doc.seq}`);
+    check('two gates, a pole and a waypoint for the cube in the flying order, and the banner standing in the room and not flown',
+      doc.types.join() === 'gate,gate,pole,waypoint,banner' && doc.seq === 4, `${doc.types.join()} ${doc.seq}`);
     const said = await page.evaluate("document.getElementById('tb-modal').textContent");
-    check('the dialog says what was kept, changed and left out', /Kept/.test(said) && /Changed/.test(said) && /Left out/.test(said) && /banner/.test(said) && /cube/.test(said) && /tape measurement/.test(said), said.slice(0, 200));
+    check('the dialog says what was kept, changed and left out, and that the banner became one of ours',
+      /Kept/.test(said) && /Changed/.test(said) && /Left out/.test(said) && /it became a banner/.test(said) && /cube/.test(said) && /tape measurement/.test(said), said.slice(0, 200));
     await key(page, 'Escape');
     await page.evaluate("window.trackBuilder.closeModal(), 1");
     await menu(page, 'Import');
@@ -2388,6 +2390,11 @@ kase('fly order', async () => {
     check('O arms the Fly order tool, and the coach says what a click does now', (await page.evaluate('window.trackBuilder.armed')) === 'route' && /Fly order/.test(await page.evaluate("document.getElementById('tb-coach').textContent")), await page.evaluate("document.getElementById('tb-coach').textContent"));
     /* With a tool in the hand a press is for the tool: the numbers and the marks let it through. */
     const lets = () => page.evaluate("(() => { const n = [...document.querySelectorAll('.tb-bubble, .tb-warnbadge')]; return n.length > 0 && n.every((x) => getComputedStyle(x).pointerEvents === 'none'); })()");
+    /* Waited for, because the numbers are drawn a frame after the key is pressed and a
+     * machine that is busy draws them late: the first full run on a loaded machine found
+     * the list empty and called that a failure. A number that never lets a press through
+     * still fails, after the wait. */
+    await page.until("(() => { const n = [...document.querySelectorAll('.tb-bubble, .tb-warnbadge')]; return n.length > 0 && n.every((x) => getComputedStyle(x).pointerEvents === 'none'); })()", 3000).catch(() => {});
     check('with the tool armed the numbers and marks let a press through to the piece under them', await lets());
     const stepsS = await undoCount(page);
     const start = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-lapbar button')].find((x) => x.textContent === 'Start over'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
@@ -2539,6 +2546,188 @@ kase('passes by touch', async () => {
 });
 
 /* ------------------------------------------------------------------ */
+
+/*
+ * THE FURNITURE OF A ROOM. A table, a chair and a banner are on the palette after the
+ * barrier, with an empty key chip because the letters ran out. They go down where the
+ * pointer clicks, stand on the floor at a quarter turn, and the room draws each from the
+ * boxes it is made of, so a click on a leg picks the table and a click where there is
+ * only air under the top does not. They turn in quarter turns whatever is typed, and the
+ * plan picks them where the room does.
+ */
+kase('furniture', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    const palette = await json(page, `[...document.querySelectorAll('#tb-palette .tb-tool')].map((b) => ({
+      label: b.querySelector('.tb-tool-label').textContent,
+      key: b.querySelector('.tb-tool-key').textContent,
+      none: b.querySelector('.tb-tool-key').classList.contains('none'),
+    }))`);
+    const labels = palette.map((p) => p.label);
+    const after = labels.indexOf('Barrier');
+    check('the palette lists a table, a chair and a banner after the barrier and before the waypoint',
+      labels.slice(after + 1, after + 4).join() === 'Table,Chair,Banner' && labels[after + 4] === 'Waypoint', labels.join());
+    check('each with an empty key chip, and no word "undefined" anywhere on it',
+      palette.slice(after + 1, after + 4).every((p) => p.key === '' && p.none)
+      && !/undefined/.test(await page.evaluate("document.getElementById('tb-palette').textContent")));
+
+    const boxCount = (id) => page.evaluate(`window.trackBuilder.view3d.pickables.filter((m) => m.userData.elementId === '${id}').length`);
+    const floor = await screenOf(page, 'view3d', 5, 6, 0);
+    await tool(page, 'Table');
+    check('pressing Table arms it', (await page.evaluate('window.trackBuilder.armed')) === 'table');
+    await mouse(page, 'mouseMoved', floor.x, floor.y, 0);
+    await page.until('!!window.trackBuilder.view3d.ghostGroup', 5000).catch(() => {});
+    check('the ghost under the pointer is a table: five boxes, not a slab', (await page.evaluate(`(() => {
+      let n = 0;
+      const g = window.trackBuilder.view3d.ghostGroup;
+      if (g) g.traverse((o) => { if (o.isMesh && o.geometry.type === 'BoxGeometry') n += 1; });
+      return n;
+    })()`)) === 5);
+    const steps = await undoCount(page);
+    await click(page, floor.x, floor.y);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const table = (await elements(page)).find((e) => e.type === 'table');
+    check('a click puts a table down where it was clicked, on the floor, at a quarter turn, as one undo step',
+      Boolean(table) && Math.abs(table.x - 5) < 0.06 && Math.abs(table.y - 6) < 0.06 && table.z === 0
+      && Math.abs(table.yaw / (Math.PI / 2) - Math.round(table.yaw / (Math.PI / 2))) < 1e-6 && (await undoCount(page)) === steps + 1,
+      JSON.stringify(table));
+    check('the tool stays armed for the next one, and Escape puts it away', (await page.evaluate('window.trackBuilder.armed')) === 'table');
+    await key(page, 'Escape');
+    check('Escape disarms it', (await page.evaluate('window.trackBuilder.armed')) == null);
+    check('it is not a step in the flying order', (await page.evaluate('window.trackBuilder.doc.sequence.length')) === 0);
+
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('chair');
+      app.placeAt({ x: 7, y: 6, z: 0 });
+      app.arm('banner');
+      app.placeAt({ x: 5, y: 8, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const list = await elements(page);
+    const chair = list.find((e) => e.type === 'chair');
+    const banner = list.find((e) => e.type === 'banner');
+    check('the room draws each from its boxes: five for the table, six for the chair, three for the banner',
+      (await boxCount(table.id)) === 5 && (await boxCount(chair.id)) === 6 && (await boxCount(banner.id)) === 3,
+      `${await boxCount(table.id)}, ${await boxCount(chair.id)}, ${await boxCount(banner.id)}`);
+
+    /* Where a click lands. The table's own boxes, in the room's frame. */
+    const bits = JSON.parse(await page.evaluate(`(async () => {
+      const { roomBoxes } = await import('/src/props/room.js');
+      const el = window.trackBuilder.doc.elements.find((e) => e.id === '${table.id}');
+      return JSON.stringify({ boxes: roomBoxes('table', el.dims), at: el.position, dims: el.dims });
+    })()`));
+    const leg = bits.boxes.find((b) => b.name === 'table leg');
+    const legAt = await screenOf(page, 'view3d', table.x + (leg.lo[0] + leg.hi[0]) / 2, table.y + (leg.lo[1] + leg.hi[1]) / 2, 0.3);
+    await click(page, legAt.x, legAt.y);
+    check('a click on a leg picks the table', await page.evaluate(`window.trackBuilder.selection.has('${table.id}')`));
+    check('and the card names it', await page.evaluate("/Table/.test(document.getElementById('tb-card').textContent)"),
+      await page.evaluate("document.getElementById('tb-card').textContent.slice(0, 80)"));
+    const dimFields = await json(page, `[...document.querySelectorAll('#tb-inspector [data-tbkey^="dim-"]')].map((i) => i.dataset.tbkey.split('-').pop())`);
+    check('the inspector offers a width, a depth and a height and nothing else', dimFields.join() === 'width,depth,height', dimFields.join());
+    const sized = await json(page, `[...document.querySelectorAll('#tb-inspector [data-tbkey^="dim-"]')].map((i) => ({ min: i.min, max: i.max }))`);
+    check('each held to what a room can have', sized.every((f) => Number(f.min) === 0.05 && Number(f.max) === 6), JSON.stringify(sized));
+
+    /* Turning. Q turns a quarter and typing a heading snaps to one, and says why once. */
+    const yawOf = async () => (await elements(page)).find((e) => e.id === table.id).yaw;
+    const y0 = await yawOf();
+    await key(page, 'KeyQ');
+    check('Q turns it a quarter', Math.abs(Math.abs((await yawOf()) - y0) - Math.PI / 2) < 1e-4, `${y0} then ${await yawOf()}`);
+    const typeYaw = async (deg) => {
+      await page.evaluate(`(() => {
+        const i = document.querySelector('#tb-inspector [data-tbkey="yaw-${table.id}"]');
+        i.value = '${deg}';
+        i.dispatchEvent(new Event('change', { bubbles: true }));
+        return 1;
+      })()`);
+      await page.sleep(200);
+    };
+    await typeYaw(40);
+    check('a heading of 40 degrees typed in is the nearest quarter, 0', Math.abs(await yawOf()) < 1e-6, String(await yawOf()));
+    check('and the page says why, once, in words about furniture and not about buildings',
+      (await toasts(page)).length === 1 && /table, a chair or a banner turns in quarter turns/.test((await toasts(page))[0]) && !/Buildings/.test((await toasts(page))[0]), (await toasts(page)).join(' | '));
+    await typeYaw(90);
+    check('90 degrees is a quarter', Math.abs((await yawOf()) - Math.PI / 2) < 1e-4);
+
+    /* The room draws it turned: its long side now runs along y, so a point half a metre
+     * along y at the height of the top is the table and, before the turn, was air. */
+    await page.evaluate("window.trackBuilder.setSelection([]), 1");
+    await page.sleep(150);
+    const topHeight = bits.dims.height - 0.02;
+    const along = await screenOf(page, 'view3d', table.x, table.y + 0.5, topHeight);
+    await click(page, along.x, along.y);
+    check('turned a quarter, a click half a metre along y at the height of the top picks the table',
+      await page.evaluate(`window.trackBuilder.selection.has('${table.id}')`));
+    await page.evaluate("window.trackBuilder.setSelection([]), 1");
+    const before = await screenOf(page, 'view3d', table.x + 0.5, table.y, topHeight);
+    await click(page, before.x, before.y);
+    check('and half a metre along x at that height, where the top was before the turn, is air and picks nothing',
+      await page.evaluate("window.trackBuilder.selection.size === 0"));
+
+    /* The plan picks it where the room does. */
+    await page.evaluate("window.trackBuilder.setMode('2d'), 1");
+    await page.sleep(300);
+    const planAlong = await screenOf(page, 'view2d', table.x, table.y + 0.5);
+    await click(page, planAlong.x, planAlong.y);
+    check('on the plan, a click half a metre along y picks it too', await page.evaluate(`window.trackBuilder.selection.has('${table.id}')`));
+    const planOff = await screenOf(page, 'view2d', table.x + 0.5, table.y);
+    await page.evaluate("window.trackBuilder.setSelection([]), 1");
+    await click(page, planOff.x, planOff.y);
+    check('and half a metre along x, where it was before the turn, picks nothing', await page.evaluate("window.trackBuilder.selection.size === 0"));
+    const px = await page.evaluate(`(() => {
+      const v = window.trackBuilder.view2d;
+      const r = v.canvas.getBoundingClientRect();
+      const p = v.toScreen({ x: ${table.x}, y: ${table.y + 0.3} });
+      const c = v.canvas.getContext('2d');
+      const d = c.getImageData(Math.round(p.x * (v.canvas.width / r.width)), Math.round(p.y * (v.canvas.height / r.height)), 1, 1).data;
+      return [d[0], d[1], d[2]];
+    })()`);
+    check('the plan draws the top of it in the obstacle colour: red in it well above blue', px[0] > px[2] + 40, px.join());
+
+    /* The board does not know them yet, so Publish says so and opens no form. */
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('gate');
+      app.placeAt({ x: 4, y: 5, z: 0 });
+      app.disarm();
+      return 1;
+    })()`);
+    await page.evaluate('window.trackBuilder.publishBtn.click(), 1');
+    await page.sleep(250);
+    const said = await json(page, `(() => {
+      const m = document.getElementById('tb-modal');
+      return { open: !m.hidden, title: m.querySelector('h2')?.textContent ?? '', text: m.textContent, inputs: m.querySelectorAll('input').length };
+    })()`);
+    check('Publish on a track with a table in it says the board does not know them yet, in a dialog, and asks for nothing',
+      said.open && said.title === 'Not on the board yet' && /does not know a table, a chair or a banner/.test(said.text) && /This one has 1 table, 1 chair and 1 banner/.test(said.text) && said.inputs === 0,
+      JSON.stringify(said));
+    await page.evaluate("document.querySelector('#tb-modal .tb-btn').click(), 1");
+    await page.sleep(150);
+    check('and closes', await page.evaluate("document.getElementById('tb-modal').hidden"));
+
+    /* Delete and undo. */
+    await page.evaluate("window.trackBuilder.setMode('3d'), 1");
+    await page.sleep(300);
+    await page.evaluate(`window.trackBuilder.setSelection(['${table.id}']), 1`);
+    /* The dialog's button was pressed and has gone, and a key goes where the focus was. */
+    await page.evaluate('document.activeElement && document.activeElement.blur && document.activeElement.blur(), 1');
+    const count = (await elements(page)).length;
+    await key(page, 'Delete');
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    check('Delete removes it, boxes and all', (await elements(page)).length === count - 1 && (await boxCount(table.id)) === 0,
+      `${count} elements, then ${(await elements(page)).length}, ${await boxCount(table.id)} boxes drawn`);
+    await key(page, 'KeyZ', 2);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    check('and Control Z puts it back, drawn again', (await elements(page)).length === count && (await boxCount(table.id)) === 5);
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
 
 async function main() {
   console.log(`builder flow check${rootArg ? ` (against ${root})` : ''}\n`);

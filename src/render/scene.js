@@ -111,6 +111,9 @@ import {
   CLUBHOUSE_PAD, CLUBHOUSE_TOP, PLAQUE_PX, CAR_PARK,
 } from '../art/clubhouse.js';
 import { Colliders } from '../game/collide.js';
+/* A living room's furniture: a table, a chair and a banner, made of boxes. */
+import { isRoomType, roomSolids, ROOM_COLOURS } from '../props/room.js';
+import { addSolids } from '../props/solids.js';
 
 /*
  * Static scenery merger. A forest of individual Groups costs a draw call
@@ -2759,6 +2762,32 @@ function courseProps(course, height, scene, colliders, baker, kit, padDecks = []
   let markerIndex = 0;
   for (const s of course.structures) {
     const y = height(s.x, s.z) + s.baseY;
+    if (s.kind === 'obstacle' && isRoomType(s.type)) {
+      /*
+       * A TABLE, A CHAIR OR A BANNER, drawn from the very boxes the physics is
+       * given. src/props/room.js turns the piece to its nearest quarter and
+       * places its boxes, and this loop paints each one and hands the same list
+       * to the colliders, so a leg is drawn where it is solid and there is
+       * nothing to fly into that is not there to see. Quarter turned boxes are
+       * still axis aligned, so a mesh needs no rotation and the collider is
+       * exact rather than inscribed.
+       */
+      const solids = roomSolids(s.type, s.dims, s.x, y, s.z, s.yaw);
+      for (const o of solids) {
+        const [x0, y0, z0, x1, y1, z1] = o.box;
+        const part = new THREE.Mesh(
+          new THREE.BoxGeometry(x1 - x0, y1 - y0, z1 - z0),
+          celMaterial({ color: ROOM_COLOURS[o.m], rim: 0.2 }),
+        );
+        part.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+        part.castShadow = true;
+        part.receiveShadow = true;
+        outlineHull(part, 1.04);
+        baker.bake(part);
+      }
+      addSolids(colliders, solids);
+      continue;
+    }
     if (s.kind === 'obstacle') {
       const w = s.dims.width;
       const d = s.dims.depth;

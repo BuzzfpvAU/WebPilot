@@ -66,6 +66,7 @@ import { ELEMENTS, KIND, FRAME_TUBE_OD, isUnbuilt, trackClassOf, virtualAperture
 import { PIPE_OD as RACEGOW_PIPE_OD } from './racegow.js';
 import { aperturesOf, elementById, apertureCenter } from './model.js';
 import { apertureFrame, apertureCorners, clamp } from './geometry.js';
+import { isRoomType, roomWorldBoxes } from '../props/room.js';
 
 const ALL_SIDES = { top: true, bottom: true, left: true, right: true };
 
@@ -742,6 +743,16 @@ export function buildStage(THREE, doc, path, {
   };
 
   const buildObstacle = (el) => {
+    /* Furniture is the boxes it is made of, where they stand at the quarter
+     * turn it is built at: the same boxes the room draws and the game holds. */
+    if (isRoomType(el.type)) {
+      for (const b of roomWorldBoxes(el.type, el.dims, el.position, el.yaw)) {
+        const geo = new THREE.BoxGeometry(b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0);
+        geo.translate((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2);
+        pipes.push(geo);
+      }
+      return;
+    }
     const p = el.position;
     const len = el.dims.width ?? 1;
     const dx = Math.cos(el.yaw) * (len / 2);

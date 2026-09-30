@@ -46,6 +46,9 @@ import {
 import {
   PROP_TYPES, PROP_GROUPS, FURNITURE_PALETTE, approxHeight, styleOf as propStyleOf, CAR_STYLES,
 } from '../props/types.js';
+/* What a table, a chair and a banner are worth by default, in the one place their
+ * shape is written down: src/props/room.js. */
+import { ROOM_SIZES } from '../props/room.js';
 
 /* Re-exported because this module's consumers already read it from here. */
 export { FRAME_TUBE_OD };
@@ -663,6 +666,47 @@ export const ELEMENTS = {
      * commonest obstacle on a RaceGOW track by a wide margin. */
     microDims: { width: 1.8, depth: 0.85, height: 0.75 },
   },
+  /*
+   * THE FURNITURE OF A ROOM, which a RaceGOW track is flown round and under and
+   * until now had a barrier to stand in for. Each is a solid obstacle like the
+   * barrier, holds a width, a depth and a height like the barrier, and is made
+   * of the boxes src/props/room.js writes down, so what is drawn, what is
+   * solid and what the warnings test are one list. They stand on the floor, are
+   * never in the flying order, and turn in quarter turns because the physics
+   * holds boxes square to the room. There is no hotkey: the letters ran out.
+   * The sizes are what a living room has in it and are RaceGOW's own only in
+   * that the rules leave the room to the builder.
+   */
+  table: {
+    id: 'table',
+    label: 'Table',
+    group: 'track',
+    kind: KIND.OBSTACLE,
+    turns: 'quarter',
+    note: 'A table: a top on four legs. Solid, and there is room to fly under it between the legs. It stands on the floor.',
+    dims: { ...ROOM_SIZES.table },
+    microDims: { ...ROOM_SIZES.table },
+  },
+  chair: {
+    id: 'chair',
+    label: 'Chair',
+    group: 'track',
+    kind: KIND.OBSTACLE,
+    turns: 'quarter',
+    note: 'A chair: a seat on four legs and a solid back, which is behind it as it faces. It stands on the floor.',
+    dims: { ...ROOM_SIZES.chair },
+    microDims: { ...ROOM_SIZES.chair },
+  },
+  banner: {
+    id: 'banner',
+    label: 'Banner',
+    group: 'track',
+    kind: KIND.OBSTACLE,
+    turns: 'quarter',
+    note: 'A standing banner: a thin solid panel on two feet, down to the floor. It stands on the floor.',
+    dims: { ...ROOM_SIZES.banner },
+    microDims: { ...ROOM_SIZES.banner },
+  },
   flag: {
     id: 'flag',
     label: 'Flag',
@@ -1171,11 +1215,12 @@ export const PALETTE_ORDER = [
  * dive gate, and offering them would be the tool inventing a class rule.
  *
  * Barrier is on it because a living room has furniture in it, which is a
- * real and constant feature of these tracks.
+ * real and constant feature of these tracks, and so are a table, a chair and a
+ * banner, which follow it.
  */
 export const MICRO_PALETTE_ORDER = [
   'gate', 'doubleStack', 'ladder', 'tower', 'diveGate',
-  'pole', 'horizontalPole', 'cone', 'barrier', 'waypoint',
+  'pole', 'horizontalPole', 'cone', 'barrier', 'table', 'chair', 'banner', 'waypoint',
 ];
 
 /* The palette for a track class. A map's is its assets, then its roads and

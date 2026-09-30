@@ -510,9 +510,55 @@ export function usableTags(list) {
     .slice(0, TRACK_TAGS_MAX);
 }
 
+/*
+ * WHAT THE BOARD DOES NOT KNOW YET: a living room's table, chair and banner.
+ *
+ * The board keeps its own list of what a track is made of (WebFPVSimulator-
+ * LeaderBoard/src/validate.js), for the gate count and the length that decide
+ * a lap's floor and for the plan its card draws. A piece it has never heard of
+ * is counted as nothing and drawn as nothing, which is the safe direction and
+ * still a wrong card, so a track that holds one is not sent until the board
+ * has been taught them. THIS LIST IS EMPTIED IN THE SAME CHANGE THAT TEACHES
+ * THE BOARD, and the board deploys first.
+ *
+ * It is the simulator that refuses, not the board, because the author is here
+ * and can be told in words, and because a board that refused a document it
+ * did not understand would say less. Nothing is lost by it: the track still
+ * flies, and it still shares as a link.
+ */
+export const BOARD_UNKNOWN_TYPES = ['table', 'chair', 'banner'];
+
+/* What in a track the board does not know, as [{ type, count }] in the order of
+ * BOARD_UNKNOWN_TYPES. A document that is not one holds nothing. */
+export function partsTheBoardDoesNotKnow(doc) {
+  const elements = doc && Array.isArray(doc.elements) ? doc.elements : [];
+  const tally = new Map();
+  for (const el of elements) {
+    if (el && typeof el === 'object' && BOARD_UNKNOWN_TYPES.includes(el.type)) {
+      tally.set(el.type, (tally.get(el.type) ?? 0) + 1);
+    }
+  }
+  return BOARD_UNKNOWN_TYPES.filter((t) => tally.has(t)).map((type) => ({ type, count: tally.get(type) }));
+}
+
+/* The refusal, in words: what the board does not know, what this track has, and what
+ * to do about it. */
+export function unknownPartsSentence(list) {
+  const have = (list || []).map((p) => `${p.count} ${p.type}${p.count === 1 ? '' : 's'}`);
+  const joined = have.length > 1 ? `${have.slice(0, -1).join(', ')} and ${have[have.length - 1]}` : have.join('');
+  return `The board does not know a table, a chair or a banner yet, so a track that has one cannot go on it. This one has ${joined}. Take them out to publish it. It still flies, and it still shares as a link.`;
+}
+
 export async function publishTrack({
   author, document, editKey, origin, tags,
 }) {
+  /* Before anything is sent: see BOARD_UNKNOWN_TYPES. */
+  const unknown = partsTheBoardDoesNotKnow(document);
+  if (unknown.length) {
+    const err = new Error(unknownPartsSentence(unknown));
+    err.unknownParts = unknown;
+    throw err;
+  }
   const board = trimOrigin(origin || boardOrigin());
   const res = await fetch(`${board}/api/tracks`, {
     method: 'POST',

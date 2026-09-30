@@ -68,7 +68,7 @@ import { PRESETS } from './presets.js';
 import { ELEMENTS, PALETTE_ORDER, GATE_FLAG_H, flagSideOf, flagSideSigns, elementByKey, elementHeight,
   virtualApertureDims, countElementsByType, formatElementCounts,
   GATE_PRESETS, applyGatePreset, matchingGatePreset, levelPitchFor, FRAME_TUBE_OD,
-  KIND, FREESTYLE_PALETTE_ORDER, PALETTE_EXTRA, paletteItems, docModeOf, isTrafficType,
+  KIND, FREESTYLE_PALETTE_ORDER, MICRO_PALETTE_ORDER, PALETTE_EXTRA, paletteItems, docModeOf, isTrafficType,
   TUNING, tuningFor, ROAD_NODES_MAX, defaultDims, defaultPitch,
 } from './elements.js';
 import {
@@ -82,7 +82,11 @@ import { startBlockDims, startBlockHeight, startBlockLaneOffset } from '../art/s
 import { padsLayout } from '../props/course.js';
 import { placeDocument, seatDocument, topUnder, groundUnder, SUPPORT_TIE, OPEN_CLEAR } from '../maps/built/place.js';
 import { SEAT_SLACK, hasRaised, needsSeat, seatFloating, seatedNote, standsOnGround } from './seat.js';
-import { addSolids } from '../props/solids.js';
+import { addSolids, placeSolids } from '../props/solids.js';
+import {
+  ROOM_TYPES, ROOM_COLOURS, ROOM_SIZE_MIN, ROOM_SIZE_MAX, isRoomType, clampRoomSize, roomBoxes, roomFootprint,
+  propsBox, roomParts, roomSolids, roomWorldBoxes, roomHit, roomHitTest,
+} from '../props/room.js';
 import { roadOf, nearestOn } from '../maps/built/road.js';
 import { trafficOf, DRIFT, roadKeepOut } from '../maps/built/traffic.js';
 import {
@@ -122,7 +126,7 @@ import {
   suggestRemixName, tagsToSend,
 } from '../share/listing.js';
 import { readBind, readEditKey, writeBind } from '../share/session.js';
-import { publishTrack } from '../share/board.js';
+import { publishTrack, partsTheBoardDoesNotKnow, unknownPartsSentence, BOARD_UNKNOWN_TYPES } from '../share/board.js';
 import { keepDisplaced, readAutosave } from './storage.js';
 import { FPV_FLOOR_CLEAR, FPV_NEAR_CLEAR, fpvLensClear } from '../render/lens.js';
 
@@ -3450,7 +3454,8 @@ function suiteFreestyle() {
   };
   for (const cls of ['full', 'micro']) {
     const items = paletteItems(cls, 'race');
-    const got = Object.fromEntries(items.map((d) => [d.key, d.id]));
+    /* A piece with no hotkey (the furniture) is on the palette and arms nothing by key. */
+    const got = Object.fromEntries(items.filter((d) => d.key).map((d) => [d.key, d.id]));
     check(`the ${cls} race palette's keys are unchanged`,
       JSON.stringify(got) === JSON.stringify(Object.fromEntries(Object.entries(raceKeys[cls]).map(([k, v]) => [String(k), v]))),
       JSON.stringify(got));
@@ -7072,6 +7077,14 @@ async function suiteShareLink() {
     placeRow(d, { x: 5, y: 6 }, { x: 5 + 61 * 0.0254, y: 6 });
     const a = await decodeTrack(await encodeTrack(d));
     check('a track that was laid by the row tool round trips too', a && serialize(a) === serialize(normalize(JSON.parse(JSON.stringify(toPlain(d)))).doc));
+    const furnished = createTrack('furnished', 'micro');
+    placeOnTrack(furnished, 'gate', { x: 5, y: 5 });
+    for (const [type, x] of [['table', 6.5], ['chair', 7.5], ['banner', 3]]) {
+      placeOnTrack(furnished, type, { x, y: 6 }).yaw = Math.PI / 2;
+    }
+    const f = await decodeTrack(await encodeTrack(furnished));
+    check('a track with a table, a chair and a banner in it comes back through a link with all three, byte for byte',
+      f && serialize(f) === serialize(normalize(JSON.parse(JSON.stringify(toPlain(furnished)))).doc) && f.elements.filter((e) => ['table', 'chair', 'banner'].includes(e.type)).length === 3);
     check('and one with an odd name (quotes, an angle bracket, a percent sign, an emoji) is the same name', await (async () => {
       const e = createTrack('a "b" <c> 100% \u{1F680}', 'micro');
       const back = await decodeTrack(await encodeTrack(e));
@@ -7418,18 +7431,56 @@ function suiteImportFpv() {
   check('the stack is reported as kept', /became one double stack, 700 mm/.test(lines), lines);
   check('the cube is reported as changed, by its place in their list', /#6 is a pass through a cube/.test(lines));
   check('the hoop is reported as changed', /#7 is a hoop, 500 mm across/.test(lines));
-  check('the banner is left out, by its place and its kind', /Left out: #8 is a banner/.test(lines));
+  check('the banner is kept, as a banner in the room, and reported as changed by its place in their list',
+    /Changed: #8 is a banner, 1500 mm wide: it became a banner 1500 mm wide/.test(lines) && doc.elements.some((e) => e.type === 'banner'), lines);
   check('a type it does not know is left out by name', /Left out: #9 is a "mystery-9000"/.test(lines));
   check('a gate outside the hall is left out and says so', /Left out: #10 stands outside the 10 by 12 m hall/.test(lines));
   check('the tape measurements are left out and the build sheet is named as where they went', /2 tape measurements were not kept/.test(lines) && /build sheet/.test(lines));
   check('a gate bigger than RaceGOW allows is kept at its size, and the rules are named as what will say so', /Gates 750 mm across were kept at that size/.test(lines) && gates.filter((e) => near(e.dims.clearW, 0.75)).length === 2);
-  check('nothing was left out that the report does not name: 10 in their list, 7 flown, 3 named as left out', doc.sequence.length === 7 && r.report.dropped.filter((l) => /^#/.test(l)).length === 3);
+  check('nothing was left out that the report does not name: 10 in their list, 7 flown, 1 furniture kept, 2 named as left out', doc.sequence.length === 7 && r.report.dropped.filter((l) => /^#/.test(l)).length === 2);
 
   /* The document is a sound one. */
   check('it round trips through a file, and needs no repair', roundTripsCleanly(doc) && deserialize(serialize(doc)).repairs.length === 0);
   const warned = collectWarnings(doc, buildPath(doc));
   check('the rules run on it: the 750 mm gates are over the size RaceGOW allows, and that is a warning', warned.some((w) => w.code === 'rg-opening-max'), warned.map((w) => w.code).join());
   check('and the racing line through it is finite', buildPath(doc).samples.every((sm) => Number.isFinite(sm.pos.x) && Number.isFinite(sm.pos.y) && Number.isFinite(sm.pos.z)));
+
+  /* Their tables, chairs and banners are ours now: kept where they stood, at the nearest quarter turn, with
+   * the depth and height their file does not carry taken from ours, and never in the flying order. */
+  {
+    const f = importFpvEvents({
+      arena: { w: 6, d: 6 },
+      gates: [
+        gate('square-75', 3, 4, 0, 0),
+        gate('table-120', 3, 2, 0, 0, 'forward', true),
+        gate('chair-standard', 1, 5, 0, 0.3, 'forward', true),
+        gate('devon-banner', 5, 1, 0, Q, 'forward', true),
+        gate('start-gate', 1, 1, 0, 0, 'forward', true),
+        gate('table-120', 40, 1, 0, 0, 'forward', true),
+      ],
+    });
+    const at = (type) => f.doc.elements.find((e) => e.type === type);
+    const table = at('table');
+    const chair = at('chair');
+    const banner = at('banner');
+    const said = reportLines(f.report).join(' | ');
+    check('a table, a chair and a banner of theirs are kept as ours, one of each, and the start marker and the table outside the hall are not',
+      Boolean(table) && Boolean(chair) && Boolean(banner) && f.doc.elements.filter((e) => ['table', 'chair', 'banner'].includes(e.type)).length === 3, said);
+    check('each stands where theirs did: the arena is centred in the hall and their z runs the other way',
+      near(table.position.x, 2 + 3) && near(table.position.y, 3 + (6 - 2)) && near(chair.position.x, 2 + 1) && near(chair.position.y, 3 + (6 - 5))
+      && near(banner.position.x, 2 + 5) && near(banner.position.y, 3 + (6 - 1)) && table.position.z === 0 && chair.position.z === 0 && banner.position.z === 0);
+    check('the width is the designer\'s and the rest is ours, in proportion: a 1.2 m table is 700 mm by 750 mm, a 450 mm chair is 900 mm high, a 1.5 m banner is 1.6 m high',
+      near(table.dims.width, 1.2) && near(table.dims.depth, 0.7) && near(table.dims.height, 0.75)
+      && near(chair.dims.width, 0.45) && near(chair.dims.depth, 0.45) && near(chair.dims.height, 0.9)
+      && near(banner.dims.width, 1.5) && near(banner.dims.height, 1.6), JSON.stringify([table.dims, chair.dims, banner.dims]));
+    check('they are at a quarter turn, whatever the heading was, a chair at 0.3 radians included',
+      [table, chair, banner].every((e) => near(e.yaw / (Math.PI / 2), Math.round(e.yaw / (Math.PI / 2)), 1e-6)), [table, chair, banner].map((e) => e.yaw).join());
+    check('none of them is in the flying order', f.doc.sequence.length === 1 && f.doc.sequence.every((q) => elementById(f.doc, q.elementId).type === 'gate'));
+    check('and the report says what it did to each, and that the file does not say which way they face or how tall',
+      /#2 is a table, 1200 mm long: it became a table/.test(said) && /#3 is a chair/.test(said) && /#4 is a banner/.test(said)
+      && /does not say/.test(said) && /Left out: #5 is a start marker/.test(said) && /Left out: #6 stands outside the 10 by 12 m hall/.test(said), said);
+    check('the document is a sound one', roundTripsCleanly(f.doc) && deserialize(serialize(f.doc)).repairs.length === 0);
+  }
 
   /* Shapes of input. */
   check('the designer\'s own wrapper and the bare data both read, and so does text', looksLikeFpvEvents(fixture()) && looksLikeFpvEvents(fixture().data) && looksLikeFpvEvents(JSON.stringify(fixture())) && !importFpvEvents(fixture().data).error);
@@ -7792,6 +7843,403 @@ function suiteWhoopPasses() {
   }
 }
 
+/*
+ * THE FURNITURE OF A ROOM: a table, a chair and a banner. A living room has them in it, RaceGOW
+ * tracks are flown round and under them, and until now the palette had a barrier to stand in for
+ * all three. Each is a short list of boxes (src/props/room.js), the same list drawing it, making it
+ * solid and warning about it, at the four quarter turns a box can be turned to and no others.
+ */
+function suiteRoomParts() {
+  console.log('\nthe whoop builder: the furniture of a room');
+  const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+  const TYPES = ['table', 'chair', 'banner'];
+  const inside = (boxes, p) => boxes.some((b) => p.every((v, i) => v >= b.lo[i] - 1e-12 && v <= b.hi[i] + 1e-12));
+  const centre = (b) => b.lo.map((v, i) => (v + b.hi[i]) / 2);
+
+  /* WHAT THEY ARE ON THE PALETTE: solid, in the whoop's list after the barrier and before the
+   * waypoint, and nowhere else. */
+  {
+    check('room.js knows exactly these three', ROOM_TYPES.join() === TYPES.join() && TYPES.every(isRoomType)
+      && !isRoomType('barrier') && !isRoomType('gate') && !isRoomType(undefined));
+    for (const t of TYPES) {
+      const def = ELEMENTS[t];
+      check(`${t} is a solid obstacle on the track palette that turns in quarter turns`,
+        Boolean(def) && def.kind === KIND.OBSTACLE && def.group === 'track' && def.turns === 'quarter' && turnsOf(t) === 'quarter');
+      check(`${t} has a label, a note, and holds a width, a depth and a height and nothing else`,
+        Boolean(def) && def.label.length > 0 && def.note.length > 20
+        && Object.keys(def.dims).join() === 'width,depth,height' && Object.values(def.dims).every((v) => Number.isFinite(v) && v > 0),
+        JSON.stringify(def?.dims));
+    }
+    const at = MICRO_PALETTE_ORDER.indexOf('barrier');
+    check('they follow the barrier on the whoop palette, in order, and the waypoint comes after them',
+      MICRO_PALETTE_ORDER.slice(at + 1, at + 4).join() === TYPES.join() && MICRO_PALETTE_ORDER[at + 4] === 'waypoint',
+      MICRO_PALETTE_ORDER.join());
+    check('and they are not on the 5 inch palette or a map\'s',
+      TYPES.every((t) => !PALETTE_ORDER.includes(t) && !FREESTYLE_PALETTE_ORDER.includes(t)));
+    check('they have no hotkey, because the letters ran out, and no key arms one',
+      TYPES.every((t) => ELEMENTS[t].key === undefined)
+      && ![...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'].some((k) => TYPES.includes(elementByKey(k, 'micro', 'race')?.id)));
+    check('a new one is the size its definition says, on the floor, and at the quarter turn nearest the way the course goes', TYPES.every((t) => {
+      const d = createTrack('size', 'micro');
+      placeOnTrack(d, 'gate', { x: 3, y: 5 });
+      const el = placeOnTrack(d, t, { x: 5, y: 6 });
+      return JSON.stringify(el.dims) === JSON.stringify(defaultDims(t, 'micro'))
+        && near(el.yaw, nearestQuarter(el.yaw)) && el.position.z === 0;
+    }));
+    check('the inventory counts them, in the palette\'s order', formatElementCounts(countElementsByType(
+      ['banner', 'table', 'chair', 'table'].map((type) => ({ type })))) === '2 tables, 1 chair, 1 banner');
+  }
+
+  /* THE BOXES: every one inside the piece's width, depth and height, standing on the floor, thick
+   * enough to be a box, and named for what it is. */
+  for (const t of TYPES) {
+    const dims = ELEMENTS[t].dims;
+    const boxes = roomBoxes(t, dims);
+    const fp = roomFootprint(t, dims);
+    check(`${t}: real boxes, every number finite, none thinner than two millimetres`,
+      boxes.length > 0 && boxes.every((b) => b.lo.every(Number.isFinite) && b.hi.every(Number.isFinite) && b.hi.every((v, i) => v - b.lo[i] >= 0.002)));
+    check(`${t}: all of it inside its width by its depth by its height`,
+      boxes.every((b) => b.lo[0] >= -dims.width / 2 - 1e-9 && b.hi[0] <= dims.width / 2 + 1e-9
+        && b.lo[1] >= -dims.depth / 2 - 1e-9 && b.hi[1] <= dims.depth / 2 + 1e-9
+        && b.lo[2] >= -1e-9 && b.hi[2] <= dims.height + 1e-9));
+    check(`${t}: the highest point is its height and its footprint is its width by its depth`,
+      near(Math.max(...boxes.map((b) => b.hi[2])), dims.height) && near(fp.x1 - fp.x0, dims.width) && near(fp.y1 - fp.y0, dims.depth)
+      && near(fp.x0 + fp.x1, 0) && near(fp.y0 + fp.y1, 0),
+      JSON.stringify(fp));
+    check(`${t}: each box has a name, and a material the colours know, and something touches the floor`,
+      boxes.every((b) => b.name.length > 0 && Number.isInteger(ROOM_COLOURS[b.m])) && boxes.some((b) => near(b.lo[2], 0)));
+    const k = 3.43;
+    const scaled = roomBoxes(t, { width: dims.width * k, depth: dims.depth * k, height: dims.height * k });
+    check(`${t}: at the room's scale it is the same piece, every box ${k} times the size`,
+      scaled.length === boxes.length && scaled.every((b, i) => b.name === boxes[i].name
+        && b.lo.every((v, j) => near(v, boxes[i].lo[j] * k, 1e-9)) && b.hi.every((v, j) => near(v, boxes[i].hi[j] * k, 1e-9))));
+  }
+
+  /* A TABLE is a top and four legs, with room to fly under it. */
+  {
+    const d = ELEMENTS.table.dims;
+    const boxes = roomBoxes('table', d);
+    const top = boxes.filter((b) => b.name === 'table top');
+    const legs = boxes.filter((b) => b.name === 'table leg');
+    check('a table is a top and four legs', top.length === 1 && legs.length === 4 && boxes.length === 5);
+    check('the top covers the whole footprint, is thin, and its upper face is the table\'s height',
+      near(top[0].hi[2], d.height) && near(top[0].lo[0], -d.width / 2) && near(top[0].hi[0], d.width / 2)
+      && near(top[0].lo[1], -d.depth / 2) && near(top[0].hi[1], d.depth / 2)
+      && top[0].hi[2] - top[0].lo[2] > 0.01 && top[0].hi[2] - top[0].lo[2] < d.height / 5);
+    check('the legs stand on the floor and reach the underside of the top',
+      legs.every((l) => near(l.lo[2], 0) && near(l.hi[2], top[0].lo[2])));
+    const corners = new Set(legs.map((l) => `${Math.sign(centre(l)[0])},${Math.sign(centre(l)[1])}`));
+    check('one leg in each corner, set in from the edge, and slender', corners.size === 4
+      && legs.every((l) => Math.abs(l.lo[0]) < d.width / 2 && Math.abs(l.hi[0]) < d.width / 2
+        && Math.abs(l.lo[1]) < d.depth / 2 && Math.abs(l.hi[1]) < d.depth / 2
+        && l.hi[0] - l.lo[0] < d.width / 8 && l.hi[1] - l.lo[1] < d.depth / 4));
+    check('there is room under it: a whoop can go beneath the top, between the legs',
+      !inside(boxes, [0, 0, 0.3]) && !inside(boxes, [0.3, 0, 0.5]) && !inside(boxes, [0, 0.15, 0.6]));
+    check('and the top and a leg are solid', inside(boxes, [0, 0, d.height - 0.01]) && inside(boxes, centre(legs[0])));
+  }
+
+  /* A CHAIR faces along its heading and its back is behind it. */
+  {
+    const d = ELEMENTS.chair.dims;
+    const boxes = roomBoxes('chair', d);
+    const seat = boxes.find((b) => b.name === 'chair seat');
+    const back = boxes.find((b) => b.name === 'chair back');
+    const legs = boxes.filter((b) => b.name === 'chair leg');
+    check('a chair is a seat, four legs and a back', Boolean(seat) && Boolean(back) && legs.length === 4 && boxes.length === 6);
+    check('the seat is about half the chair\'s height, covers the footprint, and stands on its legs',
+      seat.hi[2] > d.height * 0.35 && seat.hi[2] < d.height * 0.65
+      && near(seat.lo[0], -d.width / 2) && near(seat.hi[0], d.width / 2) && near(seat.lo[1], -d.depth / 2) && near(seat.hi[1], d.depth / 2)
+      && legs.every((l) => near(l.lo[2], 0) && near(l.hi[2], seat.lo[2])));
+    check('the back stands on the seat, is as tall as the chair, and is behind it: the minus x side',
+      near(back.lo[2], seat.hi[2]) && near(back.hi[2], d.height) && near(back.lo[0], -d.width / 2) && back.hi[0] < 0);
+    check('and the front of the seat is open above it, and so is the space under it',
+      !inside(boxes, [d.width / 2 - 0.05, 0, seat.hi[2] + 0.2]) && !inside(boxes, [0, 0, 0.2]));
+  }
+
+  /* A BANNER is a thin panel on two feet. */
+  {
+    const d = ELEMENTS.banner.dims;
+    const boxes = roomBoxes('banner', d);
+    const panel = boxes.find((b) => b.name === 'banner');
+    const feet = boxes.filter((b) => b.name === 'banner foot');
+    check('a banner is a panel and two feet', Boolean(panel) && feet.length === 2 && boxes.length === 3);
+    check('the panel is thin, as wide as the banner, reaches its height, and goes down to the floor, so there is no slot under it',
+      panel.hi[1] - panel.lo[1] < d.depth / 2 && near(panel.hi[0] - panel.lo[0], d.width) && near(panel.hi[2], d.height) && near(panel.lo[2], 0)
+      && near(panel.lo[1], -panel.hi[1]));
+    check('the feet stand on the floor, are low, and run out across the panel to the banner\'s depth',
+      feet.every((f) => near(f.lo[2], 0) && f.hi[2] < d.height / 10 && near(f.hi[1] - f.lo[1], d.depth)));
+    check('one foot at each end', (feet[0].hi[0] < 0) !== (feet[1].hi[0] < 0));
+  }
+
+  /* HOSTILE DIMENSIONS never throw and never make a number that is not one. */
+  {
+    const nasty = [undefined, null, {}, { width: -1, depth: 0, height: Number.NaN }, { width: 1e9, depth: 1e9, height: 1e9 },
+      { width: Infinity }, { width: 'x', depth: [], height: {} }, { top: 5, leg: 5, inset: 5, seat: 9, thick: 9, foot: 9 }];
+    let threw = null;
+    let bad = null;
+    for (const t of TYPES) {
+      for (const dims of nasty) {
+        try {
+          const boxes = roomBoxes(t, dims);
+          const parts = roomParts(t, dims);
+          const fp = roomFootprint(t, dims);
+          if (!boxes.every((b) => b.lo.every(Number.isFinite) && b.hi.every(Number.isFinite)) || !Object.values(fp).every(Number.isFinite) || parts.length !== boxes.length) {
+            bad = `${t} ${JSON.stringify(dims)}`;
+          }
+        } catch (e) {
+          threw = `${t} ${JSON.stringify(dims)}: ${e.message}`;
+        }
+      }
+    }
+    check('a hostile size never makes a piece throw', threw === null, threw);
+    check('and never makes a box with a number that is not finite', bad === null, bad);
+    check('a piece with nothing to size it by is its definition\'s',
+      roomBoxes('table', {}).length === 5 && roomBoxes('chair', undefined).length === 6 && roomBoxes('banner', null).length === 3
+      && JSON.stringify(roomBoxes('table', {})) === JSON.stringify(roomBoxes('table', ELEMENTS.table.dims)));
+    check('an unknown type has no boxes, no footprint and nothing to hit',
+      roomBoxes('barrier', ELEMENTS.barrier.dims).length === 0 && roomBoxes(undefined, {}).length === 0
+      && roomFootprint('barrier', {}).x1 === 0 && roomHit({ type: 'barrier', dims: ELEMENTS.barrier.dims, position: { x: 0, y: 0, z: 0 }, yaw: 0 }, { x: 0, y: 0, z: 0.3 }, 1) === false);
+    check('a size is held to what a room can have', clampRoomSize(0) === ROOM_SIZE_MIN && clampRoomSize(99) === ROOM_SIZE_MAX && clampRoomSize(1.5) === 1.5);
+  }
+
+  /* THE TWO FRAMES. A document box is heading, left, up; a part in the props is heading, up, right. */
+  {
+    const box = propsBox({ lo: [0, 1, 2], hi: [3, 4, 5] });
+    check('a document box is a part with the left turned into minus right and up second',
+      JSON.stringify(box) === JSON.stringify({ lo: [0, 2, -4], hi: [3, 5, -1] }), JSON.stringify(box));
+    for (const t of TYPES) {
+      const d = ELEMENTS[t].dims;
+      const parts = roomParts(t, d);
+      check(`${t}: a part for each box, and every one a solid box of the wall kind`,
+        parts.length === roomBoxes(t, d).length && parts.every((p) => p.t === 'box' && p.solid === true && p.kind === 'wall'));
+    }
+    /* Placed by the props' own placeSolids in the scene's axes and by room.js in the document's,
+     * the two land on the same boxes at every quarter turn. The scene's z is minus the document's y. */
+    let agree = true;
+    let inflated = 0;
+    let where = '';
+    for (const t of TYPES) {
+      const d = ELEMENTS[t].dims;
+      for (const q of [0, 1, 2, 3]) {
+        const stats = {};
+        const solids = placeSolids(roomParts(t, d), 3, 0.5, -2, q * Math.PI / 2, 'quarter', [], stats);
+        const doc = roomWorldBoxes(t, d, { x: 3, y: 2, z: 0.5 }, q * Math.PI / 2);
+        inflated += stats.inflated || 0;
+        const same = solids.length === doc.length && solids.every((s, i) => near(s.box[0], doc[i].x0) && near(s.box[3], doc[i].x1)
+          && near(s.box[2], -doc[i].y1) && near(s.box[5], -doc[i].y0) && near(s.box[1], doc[i].z0) && near(s.box[4], doc[i].z1));
+        if (!same) {
+          agree = false;
+          where = `${t} at ${q}`;
+        }
+      }
+    }
+    check('placed in the scene and placed in the document, every piece lands on the same boxes at each quarter turn', agree, where);
+    check('and no box is turned by anything but a quarter, so none is inflated', inflated === 0);
+    const solids = roomSolids('chair', ELEMENTS.chair.dims, 1, 0, 1, Math.PI / 2);
+    check('roomSolids is that same list with each box\'s material put back on it',
+      solids.length === 6 && solids.every((s) => s.box && Number.isInteger(ROOM_COLOURS[s.m]) && s.kind === 'wall')
+      && JSON.stringify(solids.map((s) => s.box)) === JSON.stringify(placeSolids(roomParts('chair', ELEMENTS.chair.dims), 1, 0, 1, Math.PI / 2, 'quarter', []).map((s) => s.box)));
+    const flat = roomWorldBoxes('table', ELEMENTS.table.dims, { x: 5, y: 5, z: 0 }, 0);
+    const still = roomWorldBoxes('table', ELEMENTS.table.dims, { x: 5, y: 5, z: 0 }, 0.3);
+    const turned = roomWorldBoxes('table', ELEMENTS.table.dims, { x: 5, y: 5, z: 0 }, 1.4);
+    const quarter = roomWorldBoxes('table', ELEMENTS.table.dims, { x: 5, y: 5, z: 0 }, Math.PI / 2);
+    check('a heading between the quarters is the nearest quarter: 0.3 is 0 and 1.4 is 90 degrees',
+      JSON.stringify(still) === JSON.stringify(flat) && JSON.stringify(turned) === JSON.stringify(quarter) && JSON.stringify(flat) !== JSON.stringify(quarter));
+    check('a table turned a quarter is as long in y as it was in x',
+      near(Math.max(...quarter.map((b) => b.y1)) - Math.min(...quarter.map((b) => b.y0)), ELEMENTS.table.dims.width));
+  }
+
+  /* THE LINE'S TEST: a point is in a piece if it is inside one of its boxes, within the pad. */
+  {
+    const table = { type: 'table', dims: { ...ELEMENTS.table.dims }, position: { x: 5, y: 5, z: 0 }, yaw: 0 };
+    const h = table.dims.height;
+    check('a line under the top, between the legs, is clear of a table', !roomHit(table, { x: 5, y: 5, z: 0.3 }, 0.1));
+    check('through the top it is not', roomHit(table, { x: 5, y: 5, z: h - 0.01 }, 0.1));
+    check('and it is in it within the pad above the top, and not beyond', roomHit(table, { x: 5, y: 5, z: h + 0.09 }, 0.1)
+      && !roomHit(table, { x: 5, y: 5, z: h + 0.11 }, 0.1));
+    const leg = roomBoxes('table', table.dims).find((b) => b.name === 'table leg');
+    const lc = centre(leg);
+    check('a leg is solid, and so is the pad round it', roomHit(table, { x: 5 + lc[0], y: 5 + lc[1], z: 0.3 }, 0)
+      && roomHit(table, { x: 5 + lc[0] + 0.05, y: 5 + lc[1], z: 0.3 }, 0.1) && !roomHit(table, { x: 5 + lc[0] + 0.2, y: 5 + lc[1], z: 0.3 }, 0.1));
+    const long = { ...table, yaw: Math.PI / 2 };
+    check('a table turned a quarter has its top where its long side now runs', roomHit(long, { x: 5, y: 5.5, z: h - 0.01 }, 0)
+      && !roomHit(table, { x: 5, y: 5.5, z: h - 0.01 }, 0));
+    check('a table off the floor is off it by its position', roomHit({ ...table, position: { x: 5, y: 5, z: 1 } }, { x: 5, y: 5, z: 1 + h - 0.01 }, 0)
+      && !roomHit({ ...table, position: { x: 5, y: 5, z: 1 } }, { x: 5, y: 5, z: h - 0.01 }, 0));
+    const test = roomHitTest(table, 0.1);
+    check('one test made for a piece answers as roomHit does', test({ x: 5, y: 5, z: h - 0.01 }) === true && test({ x: 5, y: 5, z: 0.3 }) === false);
+    check('a point that is not a point is not in it', !roomHit(table, { x: Number.NaN, y: 5, z: 0.3 }, 0.1) && !roomHit(table, null, 0.1)
+      && !roomHit({ type: 'gate', dims: {}, position: { x: 0, y: 0, z: 0 }, yaw: 0 }, { x: 0, y: 0, z: 0 }, 0.1));
+  }
+
+  /* IN A DOCUMENT: placed, written, read, warned about, snapped, planned and built. */
+  {
+    const d = createTrack('room', 'micro');
+    const els = TYPES.map((t, i) => placeOnTrack(d, t, { x: 3 + 1.5 * i, y: 5 }));
+    check('none of them is a step in the flying order: furniture is never flown', d.sequence.length === 0);
+    check('and the three read back as they were written, with nothing repaired',
+      roundTripsCleanly(d) && deserialize(serialize(d)).repairs.length === 0 && deserialize(serialize(d)).doc.elements.map((e) => e.type).join() === TYPES.join());
+    check('a piece of furniture stands on the floor, whatever its position says: it needs a seat',
+      els.every((e) => needsSeat(e)) && els.every((e) => standsOnGround(d, e)));
+    const table = els[0];
+    table.yaw = 0.3;
+    check('a heading between the quarters is drawn and picked at the quarter: the plan shape does not turn',
+      JSON.stringify(planShapeOf(table)) === JSON.stringify(planShapeOf({ ...table, yaw: 0 })));
+    check('the plan shape is the footprint, and a quarter turn swaps it',
+      planShapeOf(table).length === 4 && near(Math.max(...planShapeOf(table).map((p) => p.x)) - Math.min(...planShapeOf(table).map((p) => p.x)), table.dims.width)
+      && near(Math.max(...planShapeOf({ ...table, yaw: Math.PI / 2 }).map((p) => p.x)) - Math.min(...planShapeOf({ ...table, yaw: Math.PI / 2 }).map((p) => p.x)), table.dims.depth));
+    check('the builder snaps it to the quarter when it is turned by hand, and Alt does not let it off',
+      near(snapYaw('table', 0.3), 0) && near(snapYaw('table', 1.4), Math.PI / 2) && near(snapYaw('chair', 0.3, true), 0)
+      && near(snapTurn(d, table, 0.3, true), 0) && near(snapTurn(d, table, 1.4, false), Math.PI / 2)
+      && near(snapTurn(d, table, 3.0, false), Math.PI));
+
+    /* a stale document that says 0 wide, or a hand edit that says 400 metres: repaired, and said */
+    const raw = JSON.parse(serialize(d));
+    raw.elements[0].dims = { width: 0, depth: 400, height: -2 };
+    const read = deserialize(JSON.stringify(raw));
+    const fixed = read.doc.elements[0].dims;
+    check('a size a room cannot have is repaired on the way in, and the repair says which',
+      fixed.width === ELEMENTS.table.dims.width && fixed.depth === ROOM_SIZE_MAX && fixed.height === ELEMENTS.table.dims.height
+      && read.repairs.length === 3 && read.repairs.every((r) => r.includes(read.doc.elements[0].id)), JSON.stringify(read.repairs));
+
+    /* the line under a table and through a chair */
+    const line = createTrack('line', 'micro');
+    placeOnTrack(line, 'gate', { x: 4, y: 5 });
+    placeOnTrack(line, 'gate', { x: 4, y: 8 });
+    const under = placeOnTrack(line, 'table', { x: 4, y: 6.5 });
+    under.yaw = Math.PI / 2;
+    check('the line runs under a table between its legs and the table is not in its way',
+      !collectWarnings(line, buildPath(line)).some((w) => w.code === 'barrier'), collectWarnings(line, buildPath(line)).map((w) => w.message).join(' | '));
+    line.elements = line.elements.filter((e) => e.id !== under.id);
+    const chair = placeOnTrack(line, 'chair', { x: 4, y: 6.5 });
+    check('a chair on the line is: the seat is where the line goes',
+      collectWarnings(line, buildPath(line)).some((w) => w.code === 'barrier' && w.elementId === chair.id));
+    line.elements = line.elements.filter((e) => e.id !== chair.id);
+    const bar = placeOnTrack(line, 'barrier', { x: 4, y: 6.5 });
+    check('and a barrier there still is, as it always was', collectWarnings(line, buildPath(line)).some((w) => w.code === 'barrier' && w.elementId === bar.id));
+  }
+
+  /* IN THE GAME: a course carries them as solid obstacles at the room's scale, and the solids
+   * they make land in the colliders, one for each box. */
+  {
+    const d = createTrack('game', 'micro');
+    const table = placeOnTrack(d, 'table', { x: 5, y: 6 });
+    const chair = placeOnTrack(d, 'chair', { x: 6, y: 6 });
+    const banner = placeOnTrack(d, 'banner', { x: 7, y: 6 });
+    const course = courseFromDocument(d);
+    const boxes = { table: 5, chair: 6, banner: 3 };
+    const colliders = new Colliders();
+    for (const [el, t] of [[table, 'table'], [chair, 'chair'], [banner, 'banner']]) {
+      const s = course.structures.find((x) => x.id === el.id);
+      check(`${t}: the course carries it as an obstacle at the room's scale`,
+        Boolean(s) && s.kind === 'obstacle' && s.type === t && near(s.dims.width, el.dims.width * MICRO_SCALE, 1e-9) && near(s.dims.height, el.dims.height * MICRO_SCALE, 1e-9));
+      const solids = roomSolids(t, s.dims, s.x, s.baseY, s.z, s.yaw);
+      check(`${t}: ${boxes[t]} solid boxes, all on the floor's side of its scaled height and inside its footprint`, solids.length === boxes[t]
+        && solids.every((o) => o.box[1] >= s.baseY - 1e-9 && o.box[4] <= s.baseY + s.dims.height + 1e-9
+          && o.box[0] >= s.x - Math.max(s.dims.width, s.dims.depth) / 2 - 1e-9 && o.box[3] <= s.x + Math.max(s.dims.width, s.dims.depth) / 2 + 1e-9));
+      addSolids(colliders, solids);
+    }
+    const stats = colliders.build().stats();
+    check('the colliders hold every one of them as a box of the wall kind, and no capsule',
+      stats.count === 14 && stats.boxes === 14 && stats.capsules === 0 && stats.byKind.wall === 14, JSON.stringify(stats));
+    const tableStruct = course.structures.find((x) => x.id === table.id);
+    check('the scaled table\'s top is at the scaled height',
+      near(roomSolids('table', tableStruct.dims, 0, 0, 0, 0)[0].box[4], table.dims.height * MICRO_SCALE, 1e-9));
+    /* a table stands where the builder put it: the scene's x is the document's, and its z is minus its y */
+    const s0 = roomSolids('table', tableStruct.dims, tableStruct.x, tableStruct.baseY, tableStruct.z, tableStruct.yaw);
+    const cx = (s0[0].box[0] + s0[0].box[3]) / 2;
+    const cz = (s0[0].box[2] + s0[0].box[5]) / 2;
+    check('and its top is centred where the document put it', near(cx, tableStruct.x, 1e-9) && near(cz, tableStruct.z, 1e-9));
+  }
+
+  /* ON THE SHEET: a person building the room's track from the sheet is told about them. */
+  {
+    const base = createTrack('sheet', 'micro');
+    placeOnTrack(base, 'gate', { x: 4, y: 5 });
+    const d = deserialize(serialize(base)).doc;
+    placeOnTrack(d, 'table', { x: 4, y: 7 });
+    placeOnTrack(d, 'chair', { x: 5, y: 7 });
+    placeOnTrack(d, 'chair', { x: 6, y: 7 });
+    placeOnTrack(d, 'banner', { x: 7, y: 7 });
+    const sheet = buildSheet(d);
+    const plain = buildSheet(base);
+    const other = Object.fromEntries(sheet.parts.other.map((o) => [o.label, o.count]));
+    check('the sheet counts the furniture and says it is not pipe', other.Table === 1 && other.Chair === 2 && other.Banner === 1, JSON.stringify(sheet.parts.other));
+    check('and lists each piece with where it stands and which way it faces',
+      ['Table', 'Chair', 'Banner'].every((label) => sheet.pieces.some((p) => p.label === label && Number.isFinite(p.x) && p.faces)), JSON.stringify(sheet.pieces.map((p) => p.label)));
+    check('none of it changes the pipe: the sections, cuts, fittings, poles and bars are the gate\'s alone',
+      JSON.stringify([sheet.parts.sections, sheet.parts.cuts, sheet.parts.fittings, sheet.parts.poles, sheet.parts.bars])
+      === JSON.stringify([plain.parts.sections, plain.parts.cuts, plain.parts.fittings, plain.parts.poles, plain.parts.bars]));
+  }
+}
+
+/*
+ * THE BOARD DOES NOT KNOW A TABLE, A CHAIR OR A BANNER, and until it does no track that holds one goes to
+ * it. Its validator and its card drawer keep their own list of what a track is made of, so a track with an
+ * unknown piece would be counted short and drawn without it, which is the safe direction and still wrong.
+ * The refusal is where every publish passes, publishTrack, so the builder's dialog and the game's own
+ * menu are both stopped by it, and it costs the author nothing they had: the track still flies.
+ */
+async function suiteBoardParts() {
+  console.log('\nthe board and the furniture');
+  const doc = createTrack('with furniture', 'micro');
+  placeOnTrack(doc, 'gate', { x: 4, y: 5 });
+  placeOnTrack(doc, 'gate', { x: 4, y: 8 });
+  placeOnTrack(doc, 'table', { x: 6, y: 5 });
+  placeOnTrack(doc, 'table', { x: 6, y: 7 });
+  placeOnTrack(doc, 'chair', { x: 7, y: 6 });
+  const plain = toPlain(doc);
+  const list = partsTheBoardDoesNotKnow(plain);
+  check('a track that holds furniture names it, counted, in the palette\'s order',
+    JSON.stringify(list) === '[{"type":"table","count":2},{"type":"chair","count":1}]', JSON.stringify(list));
+  check('the list is the three, and the working document is read as well as the plain one',
+    BOARD_UNKNOWN_TYPES.join() === 'table,chair,banner' && partsTheBoardDoesNotKnow(doc).length === 2);
+  const none = toPlain(createTrack('plain', 'micro'));
+  placeOnTrack(none, 'gate', { x: 4, y: 5 });
+  check('a track without any names nothing, and a document that is not one names nothing and does not throw',
+    partsTheBoardDoesNotKnow(none).length === 0 && partsTheBoardDoesNotKnow(null).length === 0
+    && partsTheBoardDoesNotKnow({}).length === 0 && partsTheBoardDoesNotKnow({ elements: 'x' }).length === 0
+    && partsTheBoardDoesNotKnow({ elements: [null, 5, { type: 'table' }, { type: 'gate' }] }).length === 1);
+  const say = unknownPartsSentence(list);
+  check('the sentence says what the board does not know, what this track has, and what to do',
+    /does not know a table, a chair or a banner/.test(say) && /2 tables and 1 chair/.test(say) && /Take them out/.test(say) && /still flies/.test(say), say);
+  check('and reads for one kind, and for all three',
+    /This one has 1 banner\./.test(unknownPartsSentence([{ type: 'banner', count: 1 }]))
+    && /1 table, 2 chairs and 3 banners/.test(unknownPartsSentence([{ type: 'table', count: 1 }, { type: 'chair', count: 2 }, { type: 'banner', count: 3 }])));
+
+  const hadFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: true, status: 200, text: async () => '{}' };
+  };
+  try {
+    let refused = null;
+    try {
+      await publishTrack({ author: 'Ada Rook', document: plain, origin: 'http://board.test' });
+    } catch (e) {
+      refused = e;
+    }
+    check('publishing a track that holds furniture is refused, with the sentence, and nothing is sent',
+      Boolean(refused) && refused.message === say && calls === 0, `${refused && refused.message}, ${calls} sent`);
+    check('and the refusal carries the list, for a dialog that wants to say more',
+      Boolean(refused) && JSON.stringify(refused.unknownParts) === JSON.stringify(list));
+    await publishTrack({ author: 'Ada Rook', document: none, origin: 'http://board.test' });
+    check('a track without furniture goes as it always did', calls === 1);
+    const planTable = { ...none, elements: [...none.elements, { ...plain.elements.find((e) => e.type === 'table') }] };
+    let again = null;
+    try {
+      await publishTrack({ author: 'Ada Rook', document: planTable, origin: 'http://board.test', editKey: 'k' });
+    } catch (e) {
+      again = e;
+    }
+    check('an update of a track already on the board is refused the same way, so a board copy is never given a table',
+      Boolean(again) && calls === 1, String(again && again.message));
+  } finally {
+    globalThis.fetch = hadFetch;
+  }
+}
+
 async function main() {
   if (process.argv.includes('--emit')) {
     process.stdout.write(serialize(demoTrack()));
@@ -7829,6 +8277,7 @@ async function main() {
   suiteRoadsAndVehicles();
   suiteRoadTool();
   await suiteListing();
+  await suiteBoardParts();
   suiteBranding();
   suiteFlagShape();
   suiteStartBlock();
@@ -7842,6 +8291,7 @@ async function main() {
   suiteWhoopReplace();
   suiteWhoopBadges();
   suiteWhoopPasses();
+  suiteRoomParts();
   await suiteShareLink();
   suiteBuildSheet();
   suiteImportFpv();

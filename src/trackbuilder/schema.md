@@ -299,6 +299,9 @@ Each row's `kind` decides everything the tool does with it.
 | `waypoint` | W | marker | yes, at zero clearance | `height poleRadius clearance` |
 | `pole` | U | marker | yes, with a pass side | `height poleRadius clearance`. A bare upright pipe, flown round on one side like a flag. On the whoop palette, and furniture on a map. |
 | `horizontalPole` | Z | obstacle | **never** | `width depth height`. A single bar on two legs, placed 1.6 m up on a field and 0.95 m in a room; `position.z` is the underside of the bar. On the whoop palette, and furniture on a map. |
+| `table` | none | obstacle | **never** | `width depth height`. A living room's table: a top on four legs, solid, with room to fly under it between the legs. The whoop palette's only, and it stands on the floor. It turns in quarter turns, and a `yaw` between two of them is built at the nearest. The boxes it is made of are worked out from those three sizes alone, in `src/props/room.js`. |
+| `chair` | none | obstacle | **never** | `width depth height`. A seat on four legs and a solid back. `width` runs along the way it faces and its back is behind it, on the minus x side of its own frame. Otherwise as a `table`. |
+| `banner` | none | obstacle | **never** | `width depth height`. A thin panel on two feet, down to the floor. `width` runs along the panel and `depth` is how far its feet reach across it. Otherwise as a `table`. |
 | `startPads` | S | start | **never**, it is the line itself | `pads spacing padSize` |
 | `label` | L | annotation | **never** | `textHeight` |
 | `groundLogo` | O | decal | **never** | `width depth` |
@@ -306,7 +309,20 @@ Each row's `kind` decides everything the tool does with it.
 The keys are the palette's, and each palette has its own: the five inch
 palette, the whoop palette and a map's palette. `pole` and `horizontalPole`
 are on the whoop's and a map's, not the five inch's, and a key that is not on
-the palette in front of the author does nothing.
+the palette in front of the author does nothing. `table`, `chair` and `banner`
+are on the whoop's alone and have no key at all: the letters ran out.
+
+**The furniture is sized by three numbers and built of boxes.** A `table`, a
+`chair` and a `banner` hold `width`, `depth` and `height` exactly as a
+`barrier` does, so nothing that reads a track needs a new shape of number.
+Every other proportion (how thick a top is, how far a leg is set in) is a
+fraction of those three, so the piece is the same at the room's scale as it is
+here. A reader clamps each of the three to 0.05 to 6 m and says so in its
+repairs, since a table nothing wide has no top. They are made of axis aligned
+boxes, so they turn in quarter turns and the heading is snapped to the nearest
+one wherever they are drawn or flown: a document that says 40 degrees is a
+table standing at 0. A track that holds one is not published to the board until
+the board knows them.
 
 A map also holds the freestyle assets, of two more kinds, `structure` and
 `zone`, and roads and vehicles, of two more, `road` and `vehicle`; they are
@@ -876,7 +892,7 @@ does. Codes, so a consumer can filter:
 | `no-face` | warn | a sequenced aperture with `entry: 0` |
 | `reversal` | warn | an element's face sends the line backwards along the course |
 | `tight-corner` | warn | the radius of curvature drops below `settings.minCurveRadius` |
-| `barrier` | warn | the line passes through a `barrier` element |
+| `barrier` | warn | the line passes through a `barrier` element, or through the boxes a `table`, `chair` or `banner` is made of (under a table between its legs is not through it) |
 | `out-of-field` | warn | the line leaves the field boundary |
 | `underground` | warn | the line goes below `z = 0` |
 | `unsequenced` | warn | an element that could be in the course is not |

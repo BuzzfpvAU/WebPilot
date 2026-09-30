@@ -93,6 +93,8 @@ import { travelDirection, markerPassDir } from './faces.js';
 import { knotForSeq, markerSquare } from './path.js';
 import { apertureFrame, clamp, gateSupportFeet, leftOf, normalize, scale } from './geometry.js';
 import { guideFromKnots, knotsFromPath, tessellateGuide } from '../game/guide.js';
+import { isRoomType, roomBoxes, ROOM_COLOURS } from '../props/room.js';
+import { placedYaw } from '../props/solids.js';
 /* A map's traffic, as the physics is handed it, and where each car starts:
  * already on the 2D view's graph, so importing them here loads nothing. The
  * module that drives them, and the code that draws them, are fetched later
@@ -1966,6 +1968,8 @@ export class View3D {
 
     if (def.kind === KIND.APERTURE) {
       this.buildAperture(group, el, numbers, selected);
+    } else if (def.kind === KIND.OBSTACLE && isRoomType(el.type)) {
+      this.buildRoomPiece(group, el, selected);
     } else if (def.kind === KIND.OBSTACLE) {
       const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(el.dims.width, el.dims.depth, el.dims.height),
@@ -2043,6 +2047,28 @@ export class View3D {
       group.add(sprite);
     }
     return group;
+  }
+
+  /*
+   * A TABLE, A CHAIR OR A BANNER: one box for each of the boxes it is made of
+   * (src/props/room.js), in its own frame, under a node turned to the quarter
+   * turn it is built at. They are the boxes the game makes solid, so the room
+   * shows a leg where a leg is and nothing where a whoop can fly. Any of them
+   * picks the piece.
+   */
+  buildRoomPiece(group, el, selected) {
+    const node = new THREE.Group();
+    node.rotation.z = placedYaw('quarter', el.yaw);
+    for (const b of roomBoxes(el.type, el.dims)) {
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(b.hi[0] - b.lo[0], b.hi[1] - b.lo[1], b.hi[2] - b.lo[2]),
+        new THREE.MeshLambertMaterial({ color: selected ? COL.frameSel : ROOM_COLOURS[b.m] }),
+      );
+      mesh.position.set((b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2);
+      this.register(mesh, el);
+      node.add(mesh);
+    }
+    group.add(node);
   }
 
   buildAperture(group, el, numbers, selected) {

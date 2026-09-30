@@ -115,7 +115,7 @@ const V3 = () => ({
   x: 0, y: 0, z: 0, set(a, b, c) { this.x = a; this.y = b; this.z = c; return this; },
 });
 
-function frameAt(o, yaw) {
+export function frameAt(o, yaw) {
   const sc = sincos(yaw, { s: 0, c: 0 });
   return { o, yaw, c: sc.c, s: sc.s };
 }
@@ -227,7 +227,7 @@ function tracker(target, heading, { hold = false } = {}) {
  * as crash-check's pilot keeps asking for a point past the wall. Then the
  * pilot lets go: acro, sticks centred, `after` on the throttle.
  */
-function pathSticks(P, heading) {
+export function pathSticks(P, heading, opts) {
   const D = Math.sqrt(P.d[0] * P.d[0] + P.d[1] * P.d[1] + P.d[2] * P.d[2]) || 1;
   const G1 = clamp((P.vEnd * P.secs) / D, 0.2, 2.6);
   const c2 = 3 - G1;
@@ -247,7 +247,7 @@ function pathSticks(P, heading) {
       a: [P.d[0] * av, P.d[1] * av, P.d[2] * av],
     };
   };
-  const fly = tracker(target, heading);
+  const fly = tracker(target, heading, opts);
   return (ms, st, ctx) => {
     if (ms >= endMs) {
       ctx.angle = false;

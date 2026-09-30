@@ -51,6 +51,8 @@
 import { KIND, frameSidesOf, isUnbuilt, labelOf } from './elements.js';
 import { aperturesOf, apertureCenter, kindOf } from './model.js';
 import { sequenceNumbers } from './sequence.js';
+import { isRoomType, roomFootprint } from '../props/room.js';
+import { placedYaw } from '../props/solids.js';
 import { apertureCorners, apertureFrame, gateSupportFeet } from './geometry.js';
 import {
   GATE_OPENING_MAX, PIPE_LEN_MAX, PIPE_LEN_MIN, PIPE_OD, inches,
@@ -329,6 +331,11 @@ function footprint(el) {
   if (el.type === 'horizontalPole' || el.type === 'barrier') {
     return rect(d.width || 0.5, d.depth || PIPE_OD, el.yaw);
   }
+  if (isRoomType(el.type)) {
+    /* The ground it covers, at the quarter turn it is built at. */
+    const fp = roomFootprint(el.type, d);
+    return rect(fp.x1 - fp.x0, fp.y1 - fp.y0, placedYaw('quarter', el.yaw));
+  }
   if (kind === KIND.START) {
     const pads = d.pads || 1;
     const size = d.padSize || 0.1;
@@ -464,6 +471,9 @@ export function buildSheet(doc, opts = {}) {
       ? `Stack of ${r.els.length}`
       : labelOf(el.type, 'micro');
     const note = isUnbuilt(el) && r.els.length === 1 ? 'no frame of its own: the opening is marked by its neighbours' : '';
+    /* A piece of furniture is built at its nearest quarter turn, so that is the
+     * way the sheet says it faces. */
+    const heading = isRoomType(el.type) ? placedYaw('quarter', el.yaw) : el.yaw;
     return {
       key,
       numbers: r.numbers,
@@ -472,12 +482,12 @@ export function buildSheet(doc, opts = {}) {
       x: at.x,
       y: at.y,
       heights,
-      faces: r.kind === KIND.APERTURE || r.kind === KIND.OBSTACLE || r.kind === KIND.START ? compass(el.yaw) : '',
+      faces: r.kind === KIND.APERTURE || r.kind === KIND.OBSTACLE || r.kind === KIND.START ? compass(heading) : '',
       runs: r.kind === KIND.APERTURE ? frameRuns(el.yaw) : '',
       note,
       elementIds: r.els.map((e) => e.id),
       shape: footprint(el).map((p) => from(p)),
-      yaw: el.yaw,
+      yaw: heading,
       kind: r.kind,
     };
   });
@@ -511,7 +521,7 @@ export function buildSheet(doc, opts = {}) {
     } else if (el.type === 'horizontalPole') {
       const k = `${round((el.dims.width || 0) / IN, 2)}|${round(el.position.z / IN, 2)}`;
       bars.set(k, { count: (bars.get(k)?.count ?? 0) + 1, length: el.dims.width || 0, height: el.position.z });
-    } else if (el.type === 'cone' || el.type === 'barrier') {
+    } else if (el.type === 'cone' || el.type === 'barrier' || isRoomType(el.type)) {
       other.set(labelOf(el.type, 'micro'), (other.get(labelOf(el.type, 'micro')) ?? 0) + 1);
     } else if (kindOf(el) === KIND.START) {
       other.set('Start pads', (other.get('Start pads') ?? 0) + (el.dims.pads || 1));
@@ -546,6 +556,9 @@ export function buildSheet(doc, opts = {}) {
       'Two gates that share an upright or a bar are counted with that pipe once.',
       'Poles and bars are listed by size and are cut from the same stock. Cones and barriers are not pipe.',
       'A junction of more than three pipes that is not a cross (a stack meeting the corner of a cube) is not one fitting: build it from a cross or a tee and a short pipe.',
+      ...(physical.some((el) => isRoomType(el.type))
+        ? ['A table, a chair or a banner is furniture, not pipe: put one where the room has it, at the position and the heading given. A chair faces the way its heading says, with its back behind it.']
+        : []),
     ],
   };
 }

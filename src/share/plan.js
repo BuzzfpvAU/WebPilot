@@ -653,8 +653,29 @@ function isMarker(type) {
   return type === 'flag' || type === 'cone' || type === 'pole';
 }
 
+/*
+ * A table, a chair or a banner: a solid piece of a room's furniture. Like the
+ * barrier it is a footprint from above and a box from the side, at the size the
+ * document gives it, and it stands at its nearest quarter turn, which is how
+ * the builder and the game build it (src/props/room.js). This file imports
+ * nothing, because the board keeps a copy of it, so the three names are
+ * written here and the board's copy does not know them yet: a track that holds
+ * one is not published until it does.
+ */
+const FURNITURE = new Set(['table', 'chair', 'banner']);
+
+function isFurniture(type) {
+  return FURNITURE.has(type);
+}
+
+/* The nearest quarter turn, by arithmetic alone. */
+function quarterTurned(yaw) {
+  const v = Number(yaw);
+  return Number.isFinite(v) ? Math.round(v / (Math.PI / 2)) * (Math.PI / 2) : 0;
+}
+
 function order(type) {
-  if (isBarrier(type)) {
+  if (isBarrier(type) || isFurniture(type)) {
     return 0;
   }
   if (isMarker(type)) {
@@ -807,7 +828,7 @@ export function drawPlan(canvas, plan, options = {}) {
       continue;
     }
     const known = type === 'startPads' || type === 'barrier' || type === 'flag'
-      || type === 'cone' || type === 'diveGate' || LEVELS[type];
+      || type === 'cone' || type === 'diveGate' || isFurniture(type) || LEVELS[type];
     if (!known) {
       continue;
     }
@@ -820,7 +841,7 @@ export function drawPlan(canvas, plan, options = {}) {
     }
     if (type === 'startPads') {
       startPads(ctx, box.s, padRow(mark, small));
-    } else if (isBarrier(type)) {
+    } else if (isBarrier(type) || isFurniture(type)) {
       barrier(ctx, box.s, mark, small);
     } else if (isMarker(type)) {
       marker(ctx, box.s, type === 'cone', small);
@@ -942,7 +963,7 @@ export function planFromDocument(doc) {
       x: Number(item.position.x) || 0,
       y: Number(item.position.y) || 0,
       z: Number(item.position.z) || 0,
-      yaw: Number(item.yaw) || 0,
+      yaw: isFurniture(type) ? quarterTurned(item.yaw) : (Number(item.yaw) || 0),
       pitch: Number(item.pitch) || 0,
       sillH: Number.isFinite(sillH) && sillH > 0 ? sillH : undefined,
       clearH: Number.isFinite(clearH) && clearH > 0 ? clearH : undefined,
@@ -1194,7 +1215,7 @@ function isoShapes(mark, small) {
     }
     return out;
   }
-  if (type === 'barrier') {
+  if (type === 'barrier' || isFurniture(type)) {
     const w = (mark.w || 1) / 2;
     const d = (mark.d || 1) / 2;
     const h = mark.height || 1;

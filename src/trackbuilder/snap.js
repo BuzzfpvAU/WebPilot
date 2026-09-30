@@ -37,6 +37,7 @@ import { addToSequence, gateNumbers, moveInSequence, removeFromSequence } from '
 import { applyFigure, defaultFigure } from './figures.js';
 import { applyAutoFaces, defaultYawFor, lastAnchorOf } from './faces.js';
 import { apertureFrame, wrapAngle } from './geometry.js';
+import { isRoomType } from '../props/room.js';
 
 /* ------------------------------------------------------------------ */
 /* What is in frame                                                    */
@@ -135,15 +136,21 @@ export function nearestQuarter(yaw) {
  */
 export function turnStepFor(doc, el) {
   const def = ELEMENTS[el.type];
+  /* Furniture is boxes and a box stands square to the room, so it turns by
+   * quarters wherever it is. */
+  if (isRoomType(el.type)) {
+    return QUARTER;
+  }
   return def && def.kind === KIND.APERTURE && trackClassOf(doc) === 'micro' && docModeOf(doc) !== 'freestyle'
     ? QUARTER
     : FREE_STEP;
 }
 
 /* An angle pulled to by hand, put on the step, or left where it is when the
- * modifier says the author knows better. */
+ * modifier says the author knows better. Furniture is not let off: the physics
+ * cannot hold a box at the angle the modifier would ask for. */
 export function snapTurn(doc, el, raw, free) {
-  if (free) {
+  if (free && !isRoomType(el.type)) {
     return wrapAngle(raw);
   }
   const step = turnStepFor(doc, el);
@@ -174,6 +181,11 @@ export function snapTurn(doc, el, raw, free) {
 export function placementFor(doc, position, type) {
   const plain = { yaw: defaultYawFor(doc, position), pin: false, pinPrevious: null };
   const def = ELEMENTS[type];
+  /* A table, a chair or a banner stands at a quarter turn: the one nearest the
+   * way the course is going, and it is not pinned, because it is not flown. */
+  if (isRoomType(type)) {
+    return { ...plain, yaw: nearestQuarter(plain.yaw) };
+  }
   if (!def || def.kind !== KIND.APERTURE || trackClassOf(doc) !== 'micro' || docModeOf(doc) === 'freestyle') {
     return plain;
   }

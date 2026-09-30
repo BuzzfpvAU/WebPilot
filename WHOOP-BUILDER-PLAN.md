@@ -661,6 +661,12 @@ gate shape in Node. `check:clip` gains a hostile input round for each new type
 `whoop:gates` prove the RaceGOW field did not move.
 Exit: green, and the owner flies a cube, a hoop and a table.
 
+*Progress, 2026-09-30.* Table, chair and banner are in (PROGRESS.md, "Stage 4 begins"): one
+list of boxes for each, in `src/props/room.js`, drawn and solid and warned about from that list; the
+physics needed nothing, and `npm run check:room` flies the real module through each to say so. The
+board's refusal is in `publishTrack`. Left: hoop and hex (an opening's shape inscribed in its
+rectangle), the cube spike, the cube.
+
 **Stage 5. Ways out (optional),** in the order of 5.4.
 
 **Through every stage:** `check:clip` (990 checks today), `micro:check`,

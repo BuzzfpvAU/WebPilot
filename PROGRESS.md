@@ -61222,3 +61222,200 @@ this branch on main is a fast forward. Nothing was pushed to main: that is the o
     not re run               the full flow check (nothing in main's change reaches the builder), `lint:input`
                              (main's own, and the one racy check in it is described in the entry of the
                              earlier merge)
+
+## 2026-09-30 | builder | Whoop builder, Stage 4 begins: a table, a chair and a banner
+
+The owner answered the numbered decisions in WHOOP-BUILDER-PLAN.md section 8 with one line: "3. no
+profiles, 4, add these elements, 5, what changes do you wan tto make? 7 no need for that tother stuff
+for now". Recorded here with the date because an approval nobody wrote down is one the next session
+cannot see, and with how each was read (the plan carries the same, marked "Answered 2026-09-30"):
+
+- **3, no profiles.** RaceGOW only: no `spec` field, no free gate size, no room size as data. Stage 4 is
+  trimmed to the parts.
+- **4, add these elements.** The six parts, in the order the plan gives: table, chair, banner, hoop, hex,
+  cube. This entry is the first three. Where a RaceGOW rule applies to a part it is kept; furniture is
+  held to the general checks only, because RaceGOW says nothing about a table.
+- **5, "what changes do you want to make?"** The owner is asking what has to change in the physics, the
+  module ABI or the build. **None.** The evidence is below, and the plan's section 4.4 said the same
+  before any code was written.
+- **6, the board.** Not answered. Nothing in the LeaderBoard repository was touched, and the simulator
+  refuses to publish a track that holds a part the board does not know until it does.
+- **7, "no need for that other stuff for now".** Read as: no exports and nothing beyond the parts
+  (decision 8), and the palette's look unchanged (decision 7). If the owner meant the board (decision 6)
+  only the line about the board changes. Asked back in the reply.
+
+### What was built
+
+Three solid obstacles for a living room, each **a short list of axis aligned boxes** that is the drawing,
+the physics, the warning and the picture on the plan, so the four cannot disagree about where a leg is.
+
+- **`src/props/room.js` (new, pure).** A table is a top and four legs (5 boxes), a chair a seat, four legs
+  and a back (6), a banner a panel to the floor and a foot at each end (3). Each holds `width`, `depth` and
+  `height` exactly as a barrier does, and every other proportion is a **fraction** of those three, which is
+  the property that matters: `courseFromDocument` hands the game the same dims times the room's scale
+  (3.43), and a table whose parts are fractions of its size is the same table at any scale (a check holds
+  every box to exactly that). `roomBoxes` is the document's frame (x heading, y left, z up), `roomParts`
+  is the props' (x heading, y up, z right) through the one `propsBox` conversion, `roomSolids` is what
+  `placeSolids` makes of them, `roomWorldBoxes` and `roomHitTest` are what the warnings and the plan read.
+  Quarter turns only: a box turned a quarter is still a box, exactly, with no sine taken, and a heading
+  between two quarters is built at the nearest by everything that draws or flies it.
+- **The element and the palette (`elements.js`).** `table`, `chair`, `banner`: kind obstacle, `turns:
+  'quarter'`, no hotkey (the letters ran out), on the whoop palette after the barrier and before the
+  waypoint and nowhere else. `normalize` repairs a size a room cannot have (0 to 6 m, 0.05 least) and says
+  so. Nothing in a stored track changes shape and `schemaVersion` stays 3.
+- **The room (`view3d.js`).** One box mesh for each box of the piece, under a node turned to the quarter it
+  is built at, so a click on a leg picks the table and a click on air under the top does not. The ghost
+  under the pointer is the same five boxes.
+- **The plan (`view2d.js`).** The footprint at the placed heading picks it, and every box is drawn as a
+  rectangle with the tallest last, so the top of a table covers its legs and the legs show through.
+- **The game (`scene.js`).** `courseProps` places the boxes with `roomSolids`, paints each one and hands the
+  same list to the colliders, so nothing is drawn that is not solid and nothing is solid that is not drawn.
+  A quarter turned box is still axis aligned, so a mesh needs no rotation and the collider is exact.
+- **The warning (`warnings.js`).** The line is tested against a piece's own boxes, so the line runs under a
+  table between its legs and is not in its way, and a chair on the line is. A barrier keeps the box test it
+  had, with the same arguments.
+- **Turning (`snap.js`, `ui.js`, `app.js`).** A piece of furniture turns by quarters on Q and E and on the
+  handle, and Alt does not let it off (the physics cannot hold what Alt would ask for). Typing 40 degrees
+  gives the nearest quarter and the page says why once, in words about furniture and not buildings.
+- **The sheet, the animation, the card (`buildsheet.js`, `stage.js`, `share/plan.js`).** The sheet counts
+  them and says they are not pipe, and lists where each stands and which way it faces. The animation export
+  draws the boxes. The shared plan drawer draws a footprint and a box, and snaps the heading.
+- **The importer (`importfpv.js`).** Their table, chair and banner were dropped "because a whoop room has no
+  element for them yet", which stopped being true. They are kept where they stood, on the floor, at the
+  nearest quarter, never in the flying order, with the one size their file carries and our own
+  proportions for the rest, and the report says so, and says that which way one faces is a reading of
+  their `rotY` that no real file was there to check.
+- **The board (`share/board.js`).** `publishTrack` refuses a track that holds one, before anything is sent,
+  with a sentence; the builder's Publish says it in a dialog before asking for a name. The list
+  (`BOARD_UNKNOWN_TYPES`) is emptied in the same change that teaches the board.
+
+### Physics: no change (the answer to 5)
+
+`git diff --stat -- src/native dist configs vendor scripts/build-wasm.sh tests/goldens` is empty. A table
+is five `sim_world_box` calls and the world holds 49,152 shapes (`world.c`). That is claimed from the code
+and it was also flown:
+
+- **`scripts/room-check.js` (new, `npm run check:room`, 1.3 s).** The real `dist/sim.wasm`, the baseline
+  plant a whoop is flown on, in a room built 3.429 times life size: each piece as `courseFromDocument`
+  reads it, `roomSolids` places it, the same `Colliders` and `uploadWorld` the shell uses. A stick script
+  flies it along a path, twice, and the two must agree to the bit. Under a table between its legs, and
+  over it, round the end of a banner, under a chair's seat: not one step in contact. Into a leg, the edge
+  of the top, a chair's back and seat, a banner's panel: touches, and the box it touches is that one.
+  The chair's back is on the right side (from the seat flying the way the chair does not face it is
+  hit, and flying the way it faces it is clear). 32 checks, 0 failed.
+- **World golden.** `scripts/lib/worldruns.js` gained two `export`s and one optional argument
+  (`pathSticks` takes `{ hold: true }` for a height hold); the default path is byte for byte what it was,
+  and `node scripts/world-golden.js` says all passed.
+- **The real game.** After Fly this track on a room with a table, two chairs and a banner in it,
+  `window.__colliderBoxes` returned all 20 boxes exactly where the builder's code says (float32
+  tolerance), and the screenshot shows the cel shaded chair with its outline in the sakura room. Run by
+  hand, not part of a check.
+- **What would bring the question back to the owner:** a table at any heading would need a turned box, which
+  the ABI does not have (`sim_world_box` takes two corners); and a collider count that costs frame time on
+  the low tier would be measured first. Neither is needed for this.
+
+### Where this departs from the plan, and why
+
+- **Three sizes, not more.** The first draft of the tests gave a table a top thickness, a leg and an inset in
+  `dims`. That cannot be: `normalize` reads the keys of the definition's `dims`, `scaledDims` multiplies
+  every number in them by the room's scale, and a proportion held in metres is a top that is paper thin in
+  the room and thick in the builder. So the three sizes are what is stored and the rest is a fraction.
+- **A banner is a plain panel.** The plan said "artwork from the course's own logo slots". That needs a
+  `logoId` on the element and a texture path in the room, the game and the plan. It is not done, and it is
+  a question for the owner below.
+- **The importer maps furniture.** The plan said tables, chairs and banners are dropped until Stage 4; the
+  elements now exist, so leaving the report saying they cannot be kept would be false. It is a reading of
+  their heading that nobody could check, said in the report.
+- **The refusal is in `publishTrack`,** where every publish passes (the builder's dialog and the game's own
+  menu), and the dialog says it earlier so nobody types a name for nothing.
+- **`elements.js` and `model.js` now import `props/room.js`,** which pulls `props/parts.js` and
+  `props/solids.js` (about 15 KB, pure) into the boot closure. `npm run gen:preload` moved them out of the
+  built map's set and into the boot's: `boot 126 modules, built 33`, 238 served.
+
+### The tracks that exist are not touched
+
+Nothing here edits a shipped track, preset, map, reader or exporter file. What could reach one: `normalize`
+(a branch for the three new types only), `snap.js` (`isRoomType` first), `warnings.js` (the same predicate a
+barrier had, called with the same arguments), `scene.js` (a branch before the barrier's, for the three
+types only), `share/plan.js` (the yaw of a furniture mark), `buildsheet.js` (a note only when furniture is
+present). Against the code as it was before the whole whoop builder work (`31433d8`), on this tree:
+
+    documents                431 old reader against new: 390 identical in every respect, 41 differ and they
+                             are the same 41 as at the last stage (each one a Stage 0 repair, named), 0
+                             throw on either side; the 21 shipped documents (8 presets, 11 tracks, 2
+                             maps) are identical
+    other canvases           the 5 inch and freestyle canvases in 6 states: 0 of 1,440,000 pixels differ in
+                             each
+    exporter                 8 of 8 GIFs byte identical to the last stage's, which were byte identical to the
+                             pre-work build's, through the real Export animation button (no error from the
+                             page in any of them)
+
+### What went wrong
+
+- **The chair flight touched the seat.** The first run of the physics check failed "under the seat, between
+  the legs": the shared path tracker lets the craft swell by 0.7 m in height at 3.5 m/s, and the seat is
+  0.6 m above the path. Found by the check failing, printed the altitude every quarter second and it was the
+  tracker, not the chair. `pathSticks` takes the height hold as an option now, and the golden did not move.
+- **A mutation was missed.** Mirroring the props' right against the document's left was caught by the
+  self test and not by the flights: every piece is symmetric left to right, so no flight can tell. The
+  chair's back was the asymmetric part, and two flights for which side it is on were added (they catch a
+  back put on the front).
+- **A check that could not be right.** "A click on the floor under the top picks nothing" cannot be: seen
+  from above, the floor under a table is behind its top. Replaced by the air beside it at the height of the
+  top. The Delete check raced the room's redraw and looked too soon (it waits now).
+- **The full flow run found two things.** The import case asserted the banner was left out, which is the
+  behaviour the owner's decision changed (updated, and the new assertions name the banner). And one
+  timing failure in `fly order` ("the numbers let a press through"): it looked before the numbers were
+  drawn on a machine that was also running two other checks. It passes three times out of three alone and
+  now waits for the numbers, with a timeout, so a number that never lets a press through still fails.
+- **Small things of mine.** Two tests written with an escaped apostrophe inside a raw string, caught by
+  `node --check`; a stray `room.js.tmp` from a bad `cp` during mutation testing, removed and never staged.
+- **`lint:catalog` cannot run in this container** (`vendor/betaflight` is not checked out here). It says
+  nothing about this change, as at the last stage.
+
+### Decisions for the owner (also asked in the reply)
+
+- **6, the board.** Still open. The board's `validate.js` (`PLAN_APERTURE`, `planFromDocument`) and its plan
+  card have to learn a table, a chair and a banner (and later a hoop, a hex and a cube), and it deploys
+  first. Until then the simulator will not publish them.
+- **Banner artwork.** Do you want an image on a banner, from the track's own five logo slots? It is a stored
+  field and a texture path in three places, so it is a slice of its own.
+- **The importer's reading of `rotY`** for a table, a chair and a banner is a guess (a chair faces along it,
+  a table and a banner run across it). If you have a real file from the designer with one of each, the guess
+  can be checked in a minute.
+
+### RUN LOG
+
+    files                    src/props/room.js (new); scripts/room-check.js (new); src/trackbuilder/
+                             elements.js, model.js, snap.js, warnings.js, view2d.js, view3d.js, ui.js,
+                             app.js, buildsheet.js, stage.js, importfpv.js, schema.md, selftest.js;
+                             src/render/scene.js; src/share/plan.js, board.js; scripts/builder-flow-check.js,
+                             lib/worldruns.js; package.json; src/fresh.js and src/maps/preload.js
+                             (generated); WHOOP-BUILDER-PLAN.md
+    self test                node src/trackbuilder/selftest.js: 1505 passed, 0 failed (1403 before; 102
+                             new: the furniture suite 85, the importer 7, the board 9, the link 1, written
+                             before the code they check, the suite failing first with the module missing)
+    physics                  npm run check:room: 32 passed, 0 failed; world-golden: all passed
+    browser check            npm run check:builder: 33 cases, 375 assertions, all pass, exit 0 (32 cases and
+                             348 before). New case: furniture (palette, ghost, placing by pointer, picking a
+                             leg, the card, the inspector's sizes, Q and typed headings, the room and the
+                             plan agreeing about where it is, Publish saying the board does not know it,
+                             Delete and undo). Changed: import from the designer, fly order (waits)
+    device check             npm run lint:devices: PASS (the whoop room with three more chips on a tablet)
+    lint:responsive          PASS; lint:boot 9 of 9; check:fresh 18 passed, 0 failed
+    mutations                5 single reversions of room.js, each caught: the top a slab down to the floor
+                             and a table with no legs by the flights, the quarter turn the wrong way and
+                             the props' mirror by the self test only (the flights never use the document's
+                             frame, and every piece is left right symmetric), a chair's back on its front
+                             by both
+    micro:check              exit 0; whoop:gates 21 of 21; check:path 12 passed; check:props all passed;
+                             lint:presets 4 of 4; lint:nouns PASS; lint:fc 33 of 33; lint:partners 45 passed
+    lint:preload             up to date, boot 126 modules, city 75, built 33; 238 served
+    node --check             every edited file
+    dashes and non ASCII     none added (scanned over the diff)
+    not run                  `npm run verify` (no physics, plant, ABI or build change, and check:room and
+                             world-golden are the physics evidence), `shots.js` and a hand flight (offered
+                             at the end of the turn, as CLAUDE.md asks), `lint:input` (nothing here reaches
+                             the shell's input), and `lint:catalog` (cannot run in this container). Nothing
+                             was tried on a real phone or tablet, on a real GPU, or in a browser that is
+                             not Chromium.

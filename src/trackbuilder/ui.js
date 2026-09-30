@@ -53,6 +53,8 @@ import { localBoundsOf, turnsOf } from './view2d.js';
 import {
   PROP_GROUPS, GAP_POINTS, clampDim, styleDims, styleOf as propStyleOf,
 } from '../props/types.js';
+/* What a room's furniture may be sized to, so the fields hold to it. */
+import { isRoomType, clampRoomSize, ROOM_SIZE_MIN, ROOM_SIZE_MAX } from '../props/room.js';
 /* A road's eased line and the drift car's numbers, for the road and vehicle
  * inspectors: the same answers the plan draws and the physics is handed. */
 import { roadOf } from '../maps/built/road.js';
@@ -385,7 +387,9 @@ export class Panels {
       const b = el('button', 'tb-tool');
       b.type = 'button';
       b.title = def.note;
-      b.append(el('span', 'tb-tool-key', def.key), el('span', 'tb-tool-label', labelOf(def.id, cls)));
+      /* A table, a chair and a banner have no key of their own: the letters ran
+       * out. They keep an empty chip so the labels still line up. */
+      b.append(el('span', def.key ? 'tb-tool-key' : 'tb-tool-key none', def.key || ''), el('span', 'tb-tool-label', labelOf(def.id, cls)));
       b.addEventListener('click', () => this.host.arm(def.id));
       this.paletteButtons.set(def.id, b);
       (def.group === 'track' ? track : extra).append(b);
@@ -730,7 +734,9 @@ export class Panels {
       dims.append(this.field(`dim-${element.id}-${key}`, DIM_LABELS[key] ?? key, element.dims[key], (val) => {
         this.host.edit('resize', (d) => {
           const e2 = elementById(d, element.id);
-          e2.dims[key] = isCount ? Math.max(1, Math.round(val)) : Math.max(0, val);
+          /* Furniture is held to what a room can have; everything else may be
+           * any length, as it always has been. */
+          e2.dims[key] = isCount ? Math.max(1, Math.round(val)) : (isRoomType(e2.type) ? clampRoomSize(val) : Math.max(0, val));
           /*
            * Changing the opening height of a stack whose spacing is still
            * the one the OLD height implied leaves the frames overlapping
@@ -744,7 +750,11 @@ export class Panels {
             e2.dims.levelPitch = levelPitchFor(e2.dims.clearH);
           }
         });
-      }, { suffix: isCount ? '' : 'm', step: isCount ? 1 : 0.05 }));
+      }, {
+        suffix: isCount ? '' : 'm',
+        step: isCount ? 1 : 0.05,
+        ...(isRoomType(element.type) ? { min: ROOM_SIZE_MIN, max: ROOM_SIZE_MAX } : {}),
+      }));
     }
     host.append(dims);
     if (def.kind === KIND.APERTURE) {
@@ -819,7 +829,9 @@ export class Panels {
       this.host.setElementYaw(element.id, val * RAD);
     }, { suffix: 'deg', step: quarter ? 90 : 5, places: 1 }));
     if (quarter) {
-      host.append(el('p', 'tb-help', 'Keeps to the compass, in quarter turns, until the physics learns turned boxes.'));
+      host.append(el('p', 'tb-help', isRoomType(element.type)
+        ? 'Keeps to quarter turns: it is made of boxes, and they stand square to the room.'
+        : 'Keeps to the compass, in quarter turns, until the physics learns turned boxes.'));
     }
   }
 
