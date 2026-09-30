@@ -60217,3 +60217,161 @@ section or a cut; the fittings counted are the fittings found; no NaN).
                              paper, and a share link opened in a second browser engine, were
                              not tried: the print styles were read by emulating the print medium,
                              and the link was opened in the one Chromium this container has.
+
+## 2026-09-30 | builder | Whoop builder: the owner's three questions before the push to main
+
+Before the Stage 0 to 3 work goes to main the owner asked three things: does the builder look
+less cluttered than it did, because it "was really hard to see what was going on"; will every
+current track still be ok and good; does the GIF exporter still work. Each was answered by
+running the old build and the new one side by side, not by reading the diff. "Old" is the tree
+at 31433d8 (the plan commit, whose code is the code from before any of this work, a6766a4),
+exported to a scratch directory and served the way this checkout is, so both builds ran in the
+same headless Chromium, at the same window size, on the same documents. One small change to the
+reader, and its tests, came out of it (section 2). Nothing else in the repository changed except
+this file.
+
+### 1. Is it less cluttered? Yes around the picture and mostly on it; four things are still noisy
+
+Counted from the rendered page in both builds, same tracks, nothing selected unless said.
+
+    window 1600 x 900                            before      after
+    the picture, share of the window               56 %       73 %
+    words on the screen, Track 1                    453        199
+    words on the screen, Track 6                    453        217
+    words on the screen, one piece selected         493        231
+    things laid over the picture, Track 1             1          8
+    things laid over the picture, Track 6             1         26
+    window 1280 x 720, the picture's share         48 %       67 %
+
+What went is the column on the right (three boxes: the inspector with the track blurb and the
+field size, the flying order, and the results with the warnings and the elevation chart, the last
+two partly under the fold). What came is on the picture itself: the number on each gate, the way it is flown, which
+face is which, the racing line, a mark on a piece with a warning. The things laid over the picture
+went up because they are the answer to "what is going on", where the old plan showed a knot of
+dashed circles in the middle of an empty 10 by 12 m rectangle. Side by side for Track 1 and
+Track 6, and all eight shipped tracks in the new room, were looked at as pictures (not committed,
+by the rule on screenshots). The 5 inch and freestyle canvases are the same picture as before: 6 states (5 inch empty,
+with a 37 element course, and in 3D; freestyle empty, with the starter yard of 57 elements, and
+in 3D) compared pixel by pixel at 1600 x 900, 0 of 1,440,000 pixels differ in every one.
+
+Still noisy, measured, and not changed in this turn (each is a design choice for the owner):
+
+- **Numbers pile up on the busy tracks at the framing a track opens with.** Numbers that another
+  number or mark sits on the middle of, and numbers that merely touch another, at 1600 x 900:
+  Tracks 1 and 2 none; Track 3 0 and 3 of 15; Track 4 1 and 3 of 12; Track 5 2 and 6 of 20;
+  Track 6 1 and 6 of 20; Track 7 1 and 2 of 16; Track 8 2 and 6 of 29. At 1280 x 720 Track 6 has 13
+  of its 20 touching and Track 8 has 3 hidden and 10 touching. Zooming in separates them. The old
+  plan had the same pile and no way to read it but to zoom as well. A pass that nudges bubbles
+  apart with a thin leader is the fix, and it is the size of a small stage of its own.
+- **The hint strip at the foot went from 11 items to 15** (Drag move, Shift drag, Ring turn, Ctrl D,
+  F frame are new) and wraps to two lines at 1280 wide. It is on all the time.
+- **The card is about 270 by 340 px** and lands beside its piece, over that piece's neighbours.
+- **The palette's Path button lights like an armed tool** but is the line's visibility toggle
+  (`ui.js` lights it from `pathVisible`), and the line is now on by default, so it is lit on a
+  fresh page too.
+
+Separately, and it belongs to section 2 as much as here: **every one of the eight shipped tracks
+raises at least one warning under our own rules**, and the new builder is the first thing to
+show them. Track 1 has 1 (a 0.12 m radius corner, "nothing flies that"), Tracks 2 to 4 have 1
+each, Track 5 has 7, Track 6 has 5, Track 7 has 2, Track 8 has 8 (mostly "faces away from" the next
+gate). They are the same warnings the old build computed, word for word (section 2). The old
+build listed them in the results panel, which was 218 px tall holding 839 px of content, and
+at 1600 x 900 the list began at y 846 of 900 inside that scrolling panel: none of the 8 items of
+Track 5 was fully in view without scrolling it. The new bar says "Warnings 7" and a red mark stands on the piece.
+I have not checked whether the "faces away" warnings are true of those tracks or a product of how
+the line is derived from the flying order, and I have not touched the tracks: a preset is a track
+people fly. That is a question for the owner.
+
+### 2. Are the current tracks ok and good?
+
+A differential test, old reader against new, on 431 documents: the 8 RaceGOW5 presets, the 11
+course documents in `tracks/json`, the two freestyle maps (starter yard and showpiece), a set
+of saved-track shapes written by the old code (every piece the palette offers on each class,
+rooms of other sizes, gates of no size), and 400 seeded mutations of those (junk values in 1 to 4
+places). Each is read by both realms, and compared: the document written back, the repairs, the
+racing line, the warnings, and the course the GAME builds from it (`src/game/trackdoc.js`, which
+Fly this track and the board read). Randomness and the clock are pinned so a fresh id or stamp
+cannot hide or fake a difference.
+
+- **The 21 shipped documents are identical in every respect**: document, repairs, line, warnings
+  and game course. (The reworded "heading" warning below only shows on documents that raise it,
+  and none of the 21 does.)
+- 390 of the 431 come out identical. 41 differ, and every one is one of four things I intended or
+  can name: 31 have a gate of no size, which is repaired now where the old code left a gate with
+  no opening; 4 are a whoop room the author resized, kept as typed now (the old reader threw the
+  size away and shifted the track); 4 carry the reworded "heading" warning; 2 are a whoop
+  document whose `field` was damaged. Neither reader throws on any of the 431.
+- **The two damaged fields were a real difference and one of them was mine.** The old reader
+  forced every whoop document that was not already 10 by 12 into the room, and moved every gate
+  by half the difference (25 m one way and 14 m the other for a missing field, measured on the two
+fuzz cases). Stage 0 narrowed that rule to the
+  old 5 by 6 alone so that a room an author had resized is not thrown away, and a side effect was
+  that a whoop document with no `field`, or a broken one, read back as the five inch paddock, 60
+  by 40, its gates in one corner. `normalize` now takes the room's size (10 by 12, one inch grid)
+  where a whoop document's size is missing or not a number, and moves nothing. Every other class
+  keeps the defaults it had. The room was 5 by 6 only from its first commit (ac647c6) to the day
+  it became 10 by 12 (0b0f36f, 2026-09-06), so 5 by 6 is the only old size there is to migrate.
+- **What this cannot see:** tracks people have saved in their own browsers and tracks on the
+  board. The corpus above stands in for them and none of it is theirs.
+- A hand-typed field of 1e9 makes the game's course builder allocate gigabytes, in the old code as
+  in the new (found when the fuzz ran out of memory, twice). It is not new and not touched; a
+  document that asks for it can hang a tab.
+
+### 3. Does the GIF exporter still work? Yes
+
+The real Export animation button (More, Export animation, Render the animation), clicked in a
+real page, on each of the eight RaceGOW5 tracks in the old build and in the new one, and on a
+track laid with the new tools (start pads, a gate, a row of three side by side, a double stack,
+a pole, a horizontal gate, a waypoint, a gate replaced by a tower). Each produced a GIF89a of
+512 by 512 that loops (the Netscape extension), every frame 4 cs, decoded back through the
+browser's own GIF decoder with distinct frames, no error from the page. The eight are
+**byte for byte the file the old build makes** (same SHA-256, same frame count, same size: Track
+1 92 frames 290,960 bytes, Track 8 298 frames 2,350,611 bytes). The files the exporter is made of
+have no change since 31433d8 (`animate.js`, `animate.html`, `stage.js`, `gif.js`, `path.js`,
+`trackgif.js`, `cardgif.js`, `src/game/trackdoc.js`: `git diff` is empty). `npm run gif:selftest`
+passes, 38 checks.
+
+### What went wrong
+
+- **A check that could not fail.** My first table of the GIF comparison said IDENTICAL for all
+  eight tracks with blank columns: I had read the hash from the wrong key of the JSON, and
+  `undefined === undefined`. It was found by reading the table and not the verdict. The comparison
+  now throws if either hash is not there, and the numbers above are from that one.
+- The differential ran out of memory twice: once serialising a course (typed arrays of millions
+  of numbers, now digested by a walker that samples them), once on fuzz values of 1e9 in sizes
+  (now small, the absurd ones kept for positions). Four differences I could not name at first
+  were the old reader disagreeing with itself: a junk id is replaced by a fresh random one and a
+  junk time by now. Pinning the random and the clock made them go, and they were not differences.
+- My first comparison of the 5 inch canvas loaded the first file in `tracks/json`, which is a
+  whoop track, and reported a difference that was the whoop canvas doing what it is meant to. It
+  loads a 5 inch course now, and the pictures are identical.
+- A check of mine on the whole-page counts counted the number bubbles as "controls" and made Track 6
+  look no better than before (62 against 64). Controls are not in the table above for that reason;
+  words and the picture's share are the numbers that do not depend on how many gates a track has.
+
+### RUN LOG
+
+    code                     src/trackbuilder/model.js (normalize: a whoop document's missing
+                             field is the room), src/trackbuilder/selftest.js (+15 checks)
+    self test                node src/trackbuilder/selftest.js: 1320 passed, 0 failed (1305 before)
+    mutations                3 reversions of the change, each caught: micro falls back to the
+                             paddock (7 checks fail), the depth default alone (6), a non whoop
+                             class given the room (3)
+    differential             431 documents old against new: 390 identical, 41 differ and all 41
+                             named, 0 throw in either; 21 of 21 shipped documents identical
+    exporter                 8 of 8 GIFs byte identical to the old build's, one hand built track
+                             exported, gif:selftest 38 passed, exporter files unchanged
+    other canvases           6 states, 0 of 1,440,000 pixels differ in each
+    micro:check              267 pass, exit 0
+    whoop:gates              21 of 21
+    lint:presets             4 of 4 clean
+    lint:preload             up to date, 236 served
+    browser check            npm run check:builder after the change: 267 assertions, 0 failures,
+                             exit 0 (28 cases, as before the change)
+    dashes and non ASCII     none added (scanned over the diff and this entry)
+    not run                  `npm run verify` (no physics, plant, ABI or build change),
+                             `shots.js` and a hand flight (offered at the end of the turn, as
+                             CLAUDE.md asks), and `lint:catalog`, which cannot run in this
+                             container (vendor/betaflight is not checked out here). Nothing was
+                             tried on a real phone or tablet, on a real GPU, or in a browser that
+                             is not Chromium.

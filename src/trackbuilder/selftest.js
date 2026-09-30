@@ -6245,6 +6245,69 @@ function suiteWhoopRepairs() {
       `${up.elements[0].position.x}, ${up.elements[0].position.y}`);
   }
 
+  /* A WHOOP DOCUMENT WITH NO FIELD IS THE ROOM. The reader's defaults come
+   * from a five inch track, so a whoop document that lost its field (a hand
+   * edit, a cut off file) read back sixty metres by forty with its gates in
+   * a corner. It used to come out as the room only because every whoop
+   * document not already 10 by 12 was forced to it, which is the rule that
+   * threw away a room an author had resized. That rule is narrowed, and the
+   * room is now what a missing size means on purpose. Nothing is shifted:
+   * the document never said where its gates stood relative to a room it did
+   * not have, and the numbers it does hold are the ones to keep. */
+  {
+    const d = createTrack('no field', 'micro');
+    place(d, 'gate', 4.2, 5.1);
+    const read = (mutate) => {
+      const raw = JSON.parse(serialize(d));
+      mutate(raw);
+      return normalize(raw);
+    };
+    const ways = [
+      ['no field at all', (r) => { delete r.field; }],
+      ['a null field', (r) => { r.field = null; }],
+      ['a field that is a number', (r) => { r.field = 1e-9; }],
+      ['a field that is text', (r) => { r.field = 'large'; }],
+      ['an empty field', (r) => { r.field = {}; }],
+    ];
+    for (const [what, mutate] of ways) {
+      const r = read(mutate);
+      const f = r.doc.field;
+      check(`a whoop document with ${what} is the 10 by 12 room, on the one inch grid`,
+        f.width === 10 && f.depth === 12 && f.gridSize === 0.0254, `${f.width} by ${f.depth}, grid ${f.gridSize}`);
+      check(`and its gate stays where the document put it (${what})`,
+        Math.abs(r.doc.elements[0].position.x - 4.2) < 1e-9 && Math.abs(r.doc.elements[0].position.y - 5.1) < 1e-9,
+        `${r.doc.elements[0].position.x}, ${r.doc.elements[0].position.y}`);
+    }
+    const w = read((r) => { r.field = { width: 8 }; }).doc.field;
+    check('a whoop field with only a width keeps it and takes the room\'s depth', w.width === 8 && w.depth === 12,
+      `${w.width} by ${w.depth}`);
+    const dp = read((r) => { r.field = { depth: 9 }; }).doc.field;
+    check('and with only a depth keeps that and takes the room\'s width', dp.width === 10 && dp.depth === 9,
+      `${dp.width} by ${dp.depth}`);
+
+    /* Everything that is not a whoop track reads exactly as it did. */
+    const paddock = createTrack('paddock').field;
+    const full = createTrack('five inch');
+    place(full, 'gate', 30, 20);
+    const rawFull = JSON.parse(serialize(full));
+    delete rawFull.field;
+    const f5 = normalize(rawFull).doc.field;
+    check('a five inch document with no field is still the sixty by forty paddock',
+      f5.width === paddock.width && f5.depth === paddock.depth && f5.gridSize === paddock.gridSize,
+      `${f5.width} by ${f5.depth}`);
+    const rawNoClass = JSON.parse(serialize(full));
+    delete rawNoClass.field;
+    delete rawNoClass.trackClass;
+    const fn = normalize(rawNoClass).doc.field;
+    check('and so is one written before classes existed', fn.width === paddock.width && fn.depth === paddock.depth,
+      `${fn.width} by ${fn.depth}`);
+    const map = createTrack(undefined, 'full', 'freestyle');
+    const rawMap = JSON.parse(serialize(map));
+    delete rawMap.field;
+    const fm = normalize(rawMap).doc.field;
+    check('and so is a map', fm.width === paddock.width && fm.depth === paddock.depth, `${fm.width} by ${fm.depth}`);
+  }
+
   /* A GATE OF NO SIZE IS REPAIRED ON READ. normalize clamped a length to zero
    * and stopped there, which is a structure with no opening at all: nothing
    * can be flown through it and nothing in the builder can say so. (The sweep

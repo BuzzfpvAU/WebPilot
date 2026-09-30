@@ -737,6 +737,19 @@ export function normalize(raw) {
    * of its own because normalize already reads every field with a default,
    * and that is most of what a migration is. */
 
+  /* The class is settled first because it decides what a size that is not
+   * there means. `base` is a five inch track, so a whoop document with no
+   * field, or one whose field was damaged, would come back as a room sixty
+   * metres across with its gates in one corner of it. It is the room. (Until
+   * the room migration below was narrowed to the old 5 by 6 alone, every
+   * whoop document whose field was not 10 by 12 was forced to the room, and
+   * this case was covered by accident. It is covered on purpose now, and
+   * without the shift that used to come with it.) Every other class keeps
+   * the defaults it always had. */
+  const cls = src.mode === 'freestyle' ? 'full'
+    : (TRACK_CLASSES.includes(src.trackClass) ? src.trackClass : TRACK_CLASS_DEFAULT);
+  const room = cls === 'micro' ? tuningFor('micro') : null;
+
   const doc = {
     schemaVersion: SCHEMA_VERSION,
     id: str(src.id, base.id),
@@ -749,11 +762,11 @@ export function normalize(raw) {
      * in the repository. */
     trackClass: TRACK_CLASSES.includes(src.trackClass) ? src.trackClass : TRACK_CLASS_DEFAULT,
     field: {
-      width: Math.max(5, num(src.field?.width, base.field.width)),
-      depth: Math.max(5, num(src.field?.depth, base.field.depth)),
+      width: Math.max(5, num(src.field?.width, room ? room.fieldWidth : base.field.width)),
+      depth: Math.max(5, num(src.field?.depth, room ? room.fieldDepth : base.field.depth)),
       /* 0.005 rather than 0.1: a RaceGOW grid is one inch, 0.0254, and a
        * floor of a tenth of a metre is a MultiGP field's assumption. */
-      gridSize: Math.max(0.005, num(src.field?.gridSize, base.field.gridSize)),
+      gridSize: Math.max(0.005, num(src.field?.gridSize, room ? room.gridSize : base.field.gridSize)),
     },
     settings: {
       tangentScale: Math.max(0.01, num(src.settings?.tangentScale, base.settings.tangentScale)),
