@@ -186,7 +186,7 @@ import { mountRatesPanel } from './ratespanel.js';
 import { mountPidsPanel } from './pidspanel.js';
 import { touchWanted } from '../input/touchsticks.js';
 import {
-  capital, channelList, platformHelp, stickBrowser, stickPlatform, stickSay,
+  capital, channelList, platformHelp, radioBlind, stickBrowser, stickPlatform, stickSay,
 } from './stickhelp.js';
 import {
   downloadCli, drawAttitude, FcSession, paintPageStrip, paintTabStrip,
@@ -3528,9 +3528,15 @@ function gpuItem(info) {
   };
 }
 
-function padChooseNote(info) {
+function padChooseNote(info, blind = null) {
   const n = info && typeof info.count === 'number' ? info.count : 0;
   if (n <= 0) {
+    /* A pilot looking at this row has a radio in mind. Where the browser
+     * will not show one to a page, that is the first thing to tell them,
+     * and not "plug one in": see radioBlind in src/ui/stickhelp.js. */
+    if (blind) {
+      return blind.note;
+    }
     return 'Plug in a radio in joystick mode. If more than one is plugged in, this is how you pick which one flies.';
   }
   if (n === 1) {
@@ -4212,6 +4218,10 @@ export class Ui {
       coarse: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,
     });
     this.stickBrowser = stickBrowser(nav.userAgent);
+    /* Whether this browser is one that does not show a radio to a page, and
+     * the words for it, or null. Every surface that says "plug a radio in"
+     * asks first: see radioBlind in src/ui/stickhelp.js. */
+    this.radioBlind = radioBlind(this.stickPlatform, this.stickBrowser);
     /* What the help block under the bars was last built for, so it is
      * rebuilt only when that changes. See setStickHelp. */
     this.stickHelpKey = '';
@@ -7006,7 +7016,7 @@ export class Ui {
           label: 'Choose joystick',
           value: (this.padInfo && this.padInfo.using) || 'Keyboard',
           action: 'choosepad',
-          note: padChooseNote(this.padInfo),
+          note: padChooseNote(this.padInfo, this.radioBlind),
         },
         { label: 'Back', action: 'back' },
       ];
@@ -7470,7 +7480,7 @@ export class Ui {
           label: 'Choose joystick',
           value: (this.padInfo && this.padInfo.using) || 'Keyboard',
           action: 'choosepad',
-          note: padChooseNote(this.padInfo),
+          note: padChooseNote(this.padInfo, this.radioBlind),
         },
         { label: 'Calibrate sticks', action: 'calibrate', note: 'Centre, full range, then one named move per stick. Saved after you check it.' },
         /*
@@ -11814,7 +11824,9 @@ export class Ui {
       ? [
         [`Left stick (Mode ${normaliseStickMode(this.settings.stickMode)})`, `${stickCaption(this.settings.stickMode, 'left')}. Set the mode on the radio; this page follows it in Settings.`],
         ['Right stick', `${stickCaption(this.settings.stickMode, 'right')}.`],
-        ['Before you fly', 'Put the radio in joystick mode before loading this page, then run Calibrate sticks in Settings.'],
+        ['Before you fly', this.radioBlind
+          ? this.radioBlind.howto
+          : 'Put the radio in joystick mode before loading this page, then run Calibrate sticks in Settings.'],
         ['In the menus', 'Pitch moves the cursor, roll right selects, roll left goes back.'],
         ['Restart', 'R on the keyboard, or a switch on the radio: Settings, Restart switch, then flip it.'],
         ['Acro', 'Hands off holds the attitude you left it in. Every turn has to be flown back out again.'],
@@ -13837,7 +13849,7 @@ export class Ui {
       ? `${view.pad}: ${view.axisCount} ${view.axisCount === 1 ? 'axis' : 'axes'}, ${how}.`
       : 'No radio or gamepad.');
     this.stickAxisCells = paintAxisStrip(this.stickAxes, this.stickAxisCells, view.axes || [], true);
-    Ui.text(this.stickSay, stickSay(view, this.stickPlatform));
+    Ui.text(this.stickSay, stickSay(view, this.stickPlatform, this.stickBrowser));
     const key = `${this.stickPlatform}|${this.stickBrowser}|${view.fourAxes ? view.axisCount : ''}`;
     if (key !== this.stickHelpKey) {
       this.stickHelpKey = key;

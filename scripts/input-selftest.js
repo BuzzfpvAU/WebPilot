@@ -1743,6 +1743,7 @@ section('stick help: which machine, and what the screen says');
 {
   const {
     stickPlatform, stickBrowser, stickSay, platformHelp, lostStickNotice, channelList,
+    radioBlind, noRadioNotice,
   } = await import('../src/ui/stickhelp.js');
   const phoneUa = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36';
   const desktopLinux = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36';
@@ -1788,12 +1789,67 @@ section('stick help: which machine, and what the screen says');
   check('Safari on a Mac is told to try another browser first, and Chrome on a Mac is not',
     /Try Chrome, Edge or Firefox/.test(platformHelp('mac', 'safari').lines[0])
     && !/Try Chrome/.test(platformHelp('mac', 'chromium').lines.join(' ')));
+
+  /*
+   * bug-616cc604: a Safari pilot with a radio plugged in was told, by every
+   * banner and by the sentence on this screen, to plug it in and move a
+   * stick. Eight WebKit tickets on the board read the keyboard and 0 Hz, and
+   * a Pocket pilot spent an evening on cables and a hub.
+   */
+  const macSafari = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15';
+  const ipadChrome = 'Mozilla/5.0 (iPad; CPU OS 18_7_8 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/150.0.7871.51 Mobile/15E148 Safari/604.1';
+  check('the ticket\'s own machine, Safari 27 on a Mac, is a browser that does not show a radio to a page',
+    stickPlatform({ userAgent: macSafari }) === 'mac' && stickBrowser(macSafari) === 'safari'
+    && radioBlind(stickPlatform({ userAgent: macSafari }), stickBrowser(macSafari)) !== null);
+  check('so is an iPad, in Chrome or in Safari, since both are WebKit: bug-616cc604, bug-40980a75',
+    radioBlind(stickPlatform({ userAgent: ipadChrome }), stickBrowser(ipadChrome)) !== null
+    && radioBlind('ios', 'safari') !== null && radioBlind('ios', 'chromium') !== null);
+  check('Chrome and Firefox on a Mac are not, and neither is a Safari named browser off Apple hardware',
+    radioBlind('mac', 'chromium') === null && radioBlind('mac', 'firefox') === null
+    && radioBlind('linux', 'safari') === null && radioBlind('windows', 'chromium') === null
+    && radioBlind('android', 'chromium') === null);
+  check('every surface has words on both: banner, note, how to, sentence and a block',
+    ['mac', 'ios'].every((p) => {
+      const b = radioBlind(p, 'safari');
+      return ['banner', 'note', 'howto', 'say'].every((k) => typeof b[k] === 'string' && b[k].length > 20)
+        && Array.isArray(b.lines) && b.lines.length >= 1;
+    }));
+  const safariBanner = noRadioNotice('mac', 'safari', 'move');
+  const iosBanner = noRadioNotice('ios', 'safari', 'reload');
+  check('the banner for a browser that can show a radio is the ordinary advice, word for word',
+    noRadioNotice('windows', 'chromium', 'move') === 'No radio or gamepad found.\nPlug one in, set it to joystick mode, then move it.'
+    && noRadioNotice('mac', 'firefox', 'reload') === 'No radio or gamepad found.\nPlug one in, set it to joystick mode, and reload.');
+  check('on Safari the banner names it and the browsers to use, and does not say plug one in',
+    /Safari/.test(safariBanner) && /Chrome, Edge or Firefox/.test(safariBanner) && !/Plug one in/.test(safariBanner)
+    && safariBanner === noRadioNotice('mac', 'safari', 'reload'));
+  check('on an iPhone or iPad it says a computer, and does not say plug one in',
+    /computer/.test(iosBanner) && !/Plug one in/.test(iosBanner));
+  check('both are two lines, as the other banners are, so they fit where the others do',
+    safariBanner.split('\n').length === 2 && iosBanner.split('\n').length === 2);
+  check('Stick help with no pad on Safari says so and names the other browsers, and does not ask for a stick to be moved',
+    /Safari is not showing this page/.test(stickSay({}, 'mac', 'safari'))
+    && /Chrome, Edge or Firefox/.test(stickSay({}, 'mac', 'safari')) && !/move a stick/.test(stickSay({}, 'mac', 'safari')));
+  check('and on an iPad it says a computer, not a stick',
+    /computer/.test(stickSay({}, 'ios', 'safari')) && !/move a stick/.test(stickSay({}, 'ios', 'safari')));
+  check('with no pad in Chrome on a Mac it is the old sentence, word for word',
+    stickSay({}, 'mac', 'chromium') === stickSay({}) && /only once something on it moves/.test(stickSay({}, 'mac', 'chromium')));
+  check('with a pad reading, nothing about Safari is said, whatever the browser',
+    !/Safari/.test(stickSay({ ...base, moving: { axis: 3, channel: 'yaw' } }, 'mac', 'safari')));
+  check('Safari on a Mac: the block says a cable is unlikely to matter and gives the test that settles it',
+    /unlikely to help/.test(platformHelp('mac', 'safari').lines[0])
+    && /If it shows up there, it was Safari/.test(platformHelp('mac', 'safari').lines[0]));
+  const iosBlock = platformHelp('ios', 'safari').lines.join(' ');
+  check('iPhone and iPad: every browser is Safari underneath, a computer is the way, and Android is offered with its catch',
+    /Every browser on an iPhone or iPad is Safari underneath/.test(iosBlock) && /computer/.test(iosBlock)
+    && /drops some of its axes/.test(iosBlock));
   check('the in flight banner is two short lines naming the one thing to do',
     lostStickNotice('yaw') === 'Yaw is not reaching the sim.\nPause for Stick help.');
   /* CLAUDE.md: no em or en dashes in anything a pilot reads. */
   const every = [
     stickSay({}), stickSay({ ...base }), stickSay({ ...base, missing: ['yaw', 'pitch'] }),
     stickSay({ ...base, dead: ['yaw', 'throttle'], fourAxes: true }, 'android'),
+    stickSay({}, 'mac', 'safari'), stickSay({}, 'ios', 'safari'), safariBanner, iosBanner,
+    ...['mac', 'ios'].flatMap((p) => Object.values(radioBlind(p, 'safari')).flat()),
     ...['android', 'windows', 'mac', 'linux', 'ios', 'chromeos', 'other'].flatMap((p) => {
       const h = platformHelp(p, p === 'mac' ? 'safari' : 'firefox', { fourAxes: true, axisCount: 4 });
       return [h.title, ...h.lines];
@@ -1802,7 +1858,84 @@ section('stick help: which machine, and what the screen says');
   check('no em or en dash in any of it', !/[\u2013\u2014]/.test(every));
 }
 
-console.log(failed ? `\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);
+/*
+ * bug-616cc604 and the three Safari tickets before it read the same, `source`
+ * the keyboard, `padHz` 0, `map` null, and a report could not say whether the
+ * browser had handed the page nothing or handed it something the page then
+ * dropped. browserPads is the field that says, and every shape it can meet is
+ * here: what Chrome hands over with nothing to show, what a browser hands over
+ * that this page will not fly, and the browser that has no such API or throws.
+ */
+section('what the browser listed: a report says whether it listed anything, and what the page dropped');
+{
+  const POCKET = 'RadioMaster Pocket Joystick (Vendor: 1209 Product: 4f54)';
+  const rig = new Rig(makePad([0, 0, -1, 0, 0, -1, 0, 0], 24, POCKET));
+  const im = rig.im;
+  const listing = (fn) => {
+    navigator.getGamepads = fn;
+    return im.browserPads();
+  };
+
+  let r = im.browserPads();
+  check('a radio the browser lists and this page flies: one listed, one used, its id and shape named',
+    r.api === true && r.listed === 1 && r.used === 1 && r.list.length === 1
+    && r.list[0].includes(POCKET) && /no mapping, 8 axes, 24 buttons, connected$/.test(r.list[0]), JSON.stringify(r));
+
+  r = listing(() => [null, null, null, null]);
+  check('four empty slots, which is what Chrome hands over with nothing to show, read as none listed: the tickets\' own case',
+    r.api === true && r.listed === 0 && r.used === 0 && r.list.length === 0 && !('threw' in r), JSON.stringify(r));
+  r = listing(() => []);
+  check('an empty list reads the same', r.api === true && r.listed === 0 && r.used === 0);
+
+  const three = makePad([0, 0, 0], 4, 'A device with three axes');
+  r = listing(() => [three]);
+  check('a pad listed with too few axes to fly is counted as listed and not used, and its axis count is the report',
+    r.listed === 1 && r.used === 0 && /3 axes/.test(r.list[0]), JSON.stringify(r));
+  const off = makePad([0, 0, -1, 0, 0, -1], 4, 'A pad that is not connected');
+  off.connected = false;
+  r = listing(() => [off]);
+  check('a pad listed but not connected is counted as listed and not used, and says so',
+    r.listed === 1 && r.used === 0 && /not connected$/.test(r.list[0]), JSON.stringify(r));
+
+  const second = makePad([0, 0, -1, 0, 0, -1], 4, 'Second slot');
+  second.index = 1;
+  r = listing(() => [null, second]);
+  check('a pad in the second slot is found, and its slot is in the line',
+    r.listed === 1 && r.used === 1 && r.list[0].startsWith('#1 Second slot'), JSON.stringify(r));
+
+  const crowd = Array.from({ length: 6 }, (_, i) => {
+    const p = makePad([0, 0, -1, 0, 0, -1], 4, `${'x'.repeat(200)}${i}`);
+    p.index = i;
+    return p;
+  });
+  r = listing(() => crowd);
+  check('six pads with two hundred character ids: all six counted, four written, each id cut, the whole under 700 characters',
+    r.listed === 6 && r.list.length === 4 && r.list.every((l) => l.length < 130) && JSON.stringify(r).length < 700,
+    `${r.listed} listed, ${r.list.length} written, ${JSON.stringify(r).length} chars`);
+
+  r = listing(undefined);
+  check('a browser with no Gamepad API says so, which is a different answer from an empty list',
+    r.api === false && r.listed === 0 && r.used === 0, JSON.stringify(r));
+  r = listing(() => { throw new DOMException('not allowed', 'SecurityError'); });
+  check('a browser that throws from getGamepads is reported as having thrown, and does not take the report with it',
+    r.api === true && r.threw === 'SecurityError' && r.listed === 0, JSON.stringify(r));
+
+  /* The report is read when one is sent. The frame loop never asks for it, so
+   * a pilot's frames do not pay for a string per pad. */
+  let asked = 0;
+  const realReport = im.browserPads;
+  im.browserPads = function counted(...args) {
+    asked += 1;
+    return realReport.apply(this, args);
+  };
+  navigator.getGamepads = () => [rig.pad];
+  rig.run(320);
+  check('twenty frames of polling never build the report', asked === 0, `${asked} calls`);
+  im.browserPads = realReport;
+}
+installEnv(null);
+
+console.log(failed ?`\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);
 for (const f of fails) {
   console.log(`  FAIL ${f}`);
 }

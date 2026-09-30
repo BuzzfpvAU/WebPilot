@@ -2144,6 +2144,57 @@ export class InputManager {
     };
   }
 
+  /*
+   * WHAT THE BROWSER LISTED, before this page decided which of it to fly.
+   *
+   * Four tickets from WebKit, three of them a radio on a Mac in Safari
+   * (bug-c3ecb273, bug-7d3064fc, bug-616cc604) and one an iPad
+   * (bug-40980a75), read the same: `source` the keyboard, `padHz` 0, `map`
+   * null. That is one symptom with two causes a report could not tell apart.
+   * Either the browser handed this page nothing, or it handed it something
+   * that listGamepads then threw away for being disconnected or having fewer
+   * than four axes, and both look like a pilot with no radio. So a Safari
+   * ticket could only ever be argued from the other Safari tickets.
+   *
+   * This is the missing field: whether the Gamepad API is there at all, how
+   * many entries navigator.getGamepads() returned, how many of them this page
+   * flies, and the shape of the first few, so that a pad that was listed and
+   * dropped is named with its axis count. Read when a report is sent and
+   * never per frame. Four entries of sixty four characters bound it, because
+   * the board caps a context at 8000 characters.
+   */
+  browserPads() {
+    const nav = typeof navigator !== 'undefined' ? navigator : null;
+    if (!nav || typeof nav.getGamepads !== 'function') {
+      return { api: false, listed: 0, used: 0, list: [] };
+    }
+    let entries;
+    try {
+      entries = Array.from(nav.getGamepads() || []);
+    } catch (e) {
+      /* Some browsers throw where a page may not read gamepads at all. That
+       * is a different answer from an empty list, so it says which. */
+      return {
+        api: true, threw: String((e && e.name) || 'error').slice(0, 40), listed: 0, used: 0, list: [],
+      };
+    }
+    const list = [];
+    let listed = 0;
+    for (let i = 0; i < entries.length; i += 1) {
+      const gp = entries[i];
+      if (!gp) {
+        continue;
+      }
+      listed += 1;
+      if (list.length < 4) {
+        list.push(`#${gp.index} ${String(gp.id || '').slice(0, 64)}, ${gp.mapping || 'no mapping'},`
+          + ` ${gp.axes ? gp.axes.length : 0} axes, ${gp.buttons ? gp.buttons.length : 0} buttons,`
+          + ` ${gp.connected ? 'connected' : 'not connected'}`);
+      }
+    }
+    return { api: true, listed, used: listGamepads().length, list };
+  }
+
   firstGamepad() {
     return this.pickPad(listGamepads());
   }
