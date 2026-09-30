@@ -60093,3 +60093,240 @@ the settle and the beat feel on a radio, which is the owner's look: what to do
 and what would count as wrong are under "For the owner" above. The live site
 was not loaded in a browser for this check, so as not to add a visit to its
 statistics.
+
+## 2026-09-30 | board | Two tickets answered, and the 27 open feel reports closed wontfix
+
+Board only. Nothing in this repository changed but this entry: no code, no
+plant, no module ABI and no build.
+
+### The ask
+
+"close all tickets addressed and alll flight feel tickets", said after the
+pause menu fix was on main and live. Taken as the tickets this session worked
+on, and every ticket of kind feel whatever its status. The two entries above
+hold draft replies for the two tickets, offered and not posted; this turn
+posts them as the resolutions.
+
+### Read before writing
+
+The unfiltered listing caps at 200 and the board holds 298, so the oldest 98
+are not in it, and a count made from it was one short: bug-1dfe790c, a feel
+report filed at 06:59 UTC today, is open on the server and absent from the
+listing. `?status=open` and `?status=in_progress` ask the server itself, as
+the entry of 27 September said to. They gave 33 open and 1 in progress: 27
+feel (26 open, and bug-08577148 in progress), 5 wrong and 2 blocking. Each was
+fetched by id before it was touched, and each still had an empty resolution.
+
+The fixes the notes cite were re-hashed against the live site just before the
+first write: padgate.js, stickhelp.js, ui.js, input.js and main.js on
+webfpv.org/sim, each equal to the working tree, and origin/main still at
+596ed9e.
+
+### The two tickets, both fixed
+
+Written 07:05 and 07:06 UTC, each read back and equal to the text below
+character for character. They are the drafts of the two entries above, adapted
+to the board's voice: the commit, the reload advice and what to send if it is
+still wrong. The pause menu note adds two candid lines, that a switch the
+radio sends as a button still acts and that their own radio was not flown.
+
+bug-2d93629e, fixed:
+
+    Fixed, live now (commit 01c00e3). The pause menu was listening to your
+    radio the moment it opened, so letting go of the sticks, a small bump or
+    setting the radio down could read as roll right, which selects Resume,
+    or roll left, which is Back and is also Resume there. A menu opened from
+    flight now waits until the sticks have been at rest for half a second,
+    and roll has to be held for a fifth of a second to count. So pause, let
+    go, give it a moment, then hold roll right to select. A switch the radio
+    sends as a button still selects or goes back, on purpose. Reload the
+    page first (Ctrl+Shift+R if it still behaves the old way). We reproduced
+    this with a simulated TX15 and have not flown yours, so if it still
+    happens please send another report from the menu: it now records what
+    the radio did to the menu.
+
+bug-616cc604, fixed:
+
+    Answered, and the sim now says it too (commit 3c1c9fd). Your radio,
+    cable and port are most likely fine: Safari usually does not show a web
+    page a USB radio, and on an iPad every browser is Safari underneath, so
+    no browser there can. On the MacBook, plug the Pocket in first and pick
+    joystick on the radio when it asks, then open webfpv.org in Chrome, Edge
+    or Firefox and use Settings, Choose joystick, then Calibrate sticks. On
+    Safari and iPad the sim used to tell you to plug the radio in; it now
+    says the browser is the likely cause, and a bug report records what the
+    browser listed. Reload first (Ctrl+Shift+R if it looks unchanged). If
+    the radio still does not show in Chrome, please send another report from
+    that screen.
+
+Why bug-616cc604 is fixed and not wontfix. What changed is the sim's words and
+what a report records. The radio still does not appear in Safari, and nothing
+the page does can make it. The nearest earlier ticket on the same cause,
+bug-c3ecb273 (a Pocket in Safari), was closed fixed for the same kind of
+change, "Answered, and the reason it was hard to find has been fixed", and
+this note opens the same way and says what did and did not change. The two
+plain Safari radio tickets before it, bug-7d3064fc and bug-40980a75, were
+closed wontfix with no note. Either reading is defensible and the owner may
+prefer the other: one POST changes it. The reporter's email, which sits in
+that ticket's Expected field, is in neither the note nor this file.
+
+### The 27 feel tickets, wontfix, no note
+
+wontfix with an empty resolution, which is how the sweeps of the 19th, 21st
+and 24th closed theirs. Written 07:06:54 to 07:07:37 UTC, each read back as
+wontfix, resolution empty, kind still feel: 27 of 27, none skipped, none
+failed. Each was checked open or in progress, still feel and still without a
+note immediately before its own write. Nothing was stopped by the session's
+permission check this time, as it was on the 24th: the ask named the scope.
+
+bug-08577148 was in progress, held out of the 24 September sweep to wait for a
+report that carries `stick.flight`. Every newer feel report carries it, which
+is what that ticket was waiting for in general, though not from its own
+reporter. It is closed with the rest because the ask said all. It is the one
+to reopen if that was not meant.
+
+What they said, for the record, since a closed ticket drops out of the open
+view. Verdicts: twitchy 8, about right 7, floppy 7, soft 4, stiff 1. Noticed:
+locked in, no complaints 4; throttle is touchy 3; bounces back after a stop 2;
+wobbles in propwash 2; yaw is lazy 2; floaty, carries too far 1; slow to
+answer the stick 1. 26 of 27 carry `stick.flight`; bug-08577148 is the one
+that does not. At the commonest setting, slider 100 percent and 2.02 g, ten
+pilots gave floppy 4, twitchy 2, about right 2, soft 1 and stiff 1, so one
+setting drew both ends of the scale. Reporter names are left out.
+
+    bug-08577148  21 Sep 11:31  floppy       75%  1.22 g
+        bounces back after a stop; wobbles in propwash. "quiere caer muy
+        rapido el drone mientras recupero el ya aterriza y no le da la fuerza
+        de empuje en mi tbs mambo"
+    bug-243613fc  29 Sep 10:21  about right 100%  1.62 g
+        bounces back after a stop
+    bug-d95651ec  29 Sep 11:05  twitchy      60%  0.97 g
+    bug-9c7ac61c  29 Sep 11:34  twitchy     100%  1.62 g
+        throttle is touchy
+    bug-bc0a769c  29 Sep 11:36  about right 100%  1.62 g
+        throttle is touchy
+    bug-52170dd7  29 Sep 13:11  about right 100%  1.62 g
+        locked in, no complaints. "I guess the gravity is a bit high. in real
+        world I can do inverted yaw in a low distance to the ground, but
+        cannot do it here. touch the ground too quickly."
+    bug-b32a0c8d  29 Sep 13:15  about right  90%  1.46 g
+        locked in, no complaints. "great simulator. good job."
+    bug-1020ab86  29 Sep 13:25  soft        100%  2.02 g
+        "whoop is not fast"
+    bug-4449c627  29 Sep 13:47  soft        100%  1.62 g
+        yaw is lazy
+    bug-39a165a8  29 Sep 15:41  twitchy     140%  2.27 g
+        "too twitchy, not as smooth as a real drone, feels like flying a
+        spring"
+    bug-a60851cb  29 Sep 16:19  soft        100%  1.62 g
+    bug-cbc8a131  29 Sep 17:20  soft         90%  1.46 g
+        "When starting wierdly sticks to the ground"
+    bug-bf885155  29 Sep 18:00  twitchy     100%  2.02 g
+    bug-5e4fd54d  29 Sep 18:11  about right 120%  2.43 g
+        "toggle for the side of screen effects"
+    bug-5e10a62e  29 Sep 19:02  floppy      100%  2.02 g
+        "to fast for a whoop"
+    bug-3a6d6538  29 Sep 23:07  twitchy     100%  2.02 g
+        floaty, carries too far
+    bug-b900f383  29 Sep 23:50  about right 100%  2.02 g
+        locked in, no complaints. "Muchas gracias por esto"
+    bug-84fff4fc  30 Sep 01:12  about right 100%  2.02 g
+        locked in, no complaints
+    bug-2e0d3499  30 Sep 01:36  floppy      100%  2.02 g
+        slow to answer the stick
+    bug-5e901faf  30 Sep 01:53  twitchy      60%  0.97 g
+    bug-2912cecc  30 Sep 04:37  twitchy     120%  2.43 g
+        throttle is touchy
+    bug-dc3ce167  30 Sep 04:52  floppy       60%  0.97 g
+        wobbles in propwash; yaw is lazy
+    bug-562ceaec  30 Sep 05:35  twitchy     115%  1.86 g
+        "make it so it spins less out of control"
+    bug-9cdc8061  30 Sep 06:02  stiff       100%  2.02 g
+    bug-a66e2d08  30 Sep 06:02  floppy      100%  2.02 g
+    bug-322e81e4  30 Sep 06:04  floppy      100%  2.02 g
+    bug-1dfe790c  30 Sep 06:59  floppy      120%  2.43 g
+
+Comments that read like more than taste, none investigated: bug-cbc8a131,
+"When starting wierdly sticks to the ground"; bug-52170dd7, gravity "a bit
+high" and touching the ground too quickly to do an inverted yaw low down;
+bug-08577148, in Spanish, the quad falls fast and lacks the thrust to recover,
+on a TBS Mambo at slider 75 percent, which is 1.22 g; bug-5e4fd54d asks for a
+toggle for the side of screen effects. bug-1020ab86 ("whoop is not fast") and
+bug-5e10a62e ("to fast for a whoop") point opposite ways at the same 2.02 g.
+
+### The board now
+
+298 tickets, from the server's own status filters, which sum to 298: 141
+fixed, 151 wontfix, 1 duplicate, 5 open, none in progress. No feel ticket is
+open. The five open ones are not addressed by anything in this session and
+were not touched:
+
+    bug-f42ae325  wrong      No yaw on controller. Chrome on Android, a
+                             BETAFPV LR3PRO; the report's own check lists yaw
+                             as dead, travel 0 to 0 over 33 s
+    bug-52a66f69  wrong      Pitch is not reaching sim. Firefox on Linux, a
+                             Pocket calibrated in mode 3; its check lists
+                             pitch as dead, travel 0 to 0 over 43 s
+    bug-a18b2ed9  blocking   The French phone report, no drone drawn. Cause
+                             not found
+    bug-453fb074  wrong      Sound stopped. Chrome on a Mac, a RADIOMASTER
+                             SIM. Read, not investigated
+    bug-d1d3f4fb  wrong      Keyboard does nothing. Chrome, 1366 by 768, sent
+                             from How to fly. Read, not investigated. It
+                             carries the new stick.menu block (gate open,
+                             nothing logged) and lists no pad; the gate only
+                             ever acts on a pad
+
+### What went wrong
+
+- The first read back of bug-2d93629e failed on my side: I piped curl into a
+  Python script and gave the script its own source on a heredoc, so it read an
+  empty stdin. The write had already returned 200 with the ticket echoed as
+  fixed. The next helper used Python's urllib and got a 403 from the site's
+  edge, which refuses that client's default user agent. curl is accepted and
+  every other read and write this turn used it, so the helper now shells out
+  to curl. No header was changed to get past the 403. Both reads then matched
+  exactly.
+
+- The first parse of the 27 reports matched none of them, because the reports
+  put a newline between their sentences and the pattern expected a space. It
+  printed 0 of 27 before anything was written from it.
+
+- The count of feel tickets to close was 26 until the server filter showed 27.
+  Trusting the capped listing would have left bug-1dfe790c open with nothing
+  to say why.
+
+### Not done
+
+- No code changed, so the verification scale asked after the two code turns
+  (none, cheap, shots, verify, fly it) was not asked again and was never
+  chosen. Nobody has flown either fix on a real radio or in a real Safari. The
+  board now says fixed for both, which is a statement about what shipped and
+  not about what a pilot felt.
+
+- The other five open tickets got no reply, and no French reply was drafted
+  for bug-a18b2ed9. bug-f42ae325 and bug-52a66f69 are dead axis reports; the
+  nearest precedent, bug-338cd29b on 27 September, was wontfix with advice,
+  and bug-52a66f69 reads like a calibrated map that points at an axis that
+  never moves, which is worth a look before it is closed that way.
+
+### For the owner
+
+To reverse any of these, POST https://webfpv.org/board/api/bugs/<id> with
+{"status":"open","resolution":""}, or "in_progress". Only the board was
+written. bug-08577148 and bug-616cc604 are the two closes that are judgement
+calls, for the reasons above.
+
+### RUN LOG
+
+    board reads      status=open, in_progress, fixed, wontfix, duplicate,
+                     limit=500: 5 + 0 + 141 + 151 + 1 = 298
+    board writes     29 POSTs to /board/api/bugs/<id>, all HTTP 200: 2 fixed
+                     with a note, 27 wontfix with none
+    read back        29 of 29 by id: status as written; 2 of 2 notes exact
+                     (810 and 726 characters); 27 of 27 resolutions empty
+    served files     5 of 5 equal to the working tree before the first write
+    git diff --check clean, exit 0
+    dash scan (Node) no en or em dash in any added line
+    npm run verify   not run: no code, plant, ABI or build changed
+    lint, shots      not run: nothing to lint or fly
