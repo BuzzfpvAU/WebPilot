@@ -62332,3 +62332,46 @@ same `obstacle()` and `tiltedGate()`. It was flown, not only claimed:
                              the end of the turn), `lint:input`, and `lint:catalog` (cannot run in this
                              container). Nothing was tried on a real phone or tablet, or on a real GPU. Nothing
                              in the LeaderBoard or the front door was touched or re-vendored.
+
+## 2026-09-30 | builder | Whoop builder: the merge with main, and the push to main
+
+The owner said "push to main". Main had moved by five commits since this branch last met it (keys fly the quad
+on a touchscreen laptop, a suspended sound context is asked back, a crash is set down with room round it beside
+a wall, and two PROGRESS entries), and by one more while this was being checked (a PROGRESS entry, no code).
+Both were merged into this branch, so main's tip is in its history and the push is a fast forward: nothing was
+forced or rewritten, and `git merge-base` was main's own history, not an empty answer.
+
+Two conflicts, both in PROGRESS.md, where both sides append at the end: main's entries first and this branch's
+after, nothing dropped from either. `src/trackbuilder/selftest.js`, which both sides edited, merged without one.
+The entries of this branch are not in date order after main's; each carries its own date.
+
+### What was re run on the merged tree
+
+The code on it is what was pushed to main; the second merge added a PROGRESS entry only.
+
+    self test                node src/trackbuilder/selftest.js: 1773 passed, 0 failed (1765 here, 8 of main's)
+    builder flow check       npm run check:builder: 38 cases, 449 assertions, all pass, exit 0
+    physics evidence         check:room 71 passed; check:world-golden all passed
+    the rest                 micro:check exit 0; whoop:gates 21 of 21; check:path 12 passed; check:props all
+                             passed; lint:presets 4 of 4; lint:nouns PASS; lint:partners 45 passed; lint:fc 33
+                             of 33; lint:preload up to date (241 served); check:fresh 18 passed
+    device checks            lint:devices PASS; lint:responsive PASS; lint:boot 9 of 9
+    input check              npm run lint:input on the merged tree: 219 of 220 the first time, 220 of 220 the
+                             second (303 s); see below
+    not repeated             the documents differential, the pixel comparison of the other canvases and the eight
+                             exported animations were run on this branch's code before the merge, and were not
+                             repeated: main's commits touch input, audio, the crash placement, `main.js` and a
+                             test, none of which they read
+    not run                  `npm run verify` (this work changes no physics, plant, module ABI or build, and
+                             main's five commits are its own to verify), `shots.js` and a hand flight (offered
+                             to the owner), `lint:catalog` (cannot run in this container)
+
+### `lint:input` is not a reliable gate on this container, for main as much as for this branch
+
+The first run on the merged tree failed one check, "set down on the floor under it, landed, and it stays down
+with the keys at idle, parked at 8.973 for 26 frames, throttle 1 0". That is the racy check the entry of the
+earlier merge describes (it samples a frame in which X has flagged the whoop landed and its drawn position has
+not followed yet), in a file this work does not touch. A clean extract of main's tip (`5e674d3`) run on its own
+failed one check as well, a different one: "and a stick key takes the sticks again, the other way", in the
+touchscreen laptop section that main's own commit added. The second run on the merged tree passed all 220. Neither
+tree is shown worse than the other, and neither check was changed: they are main's.
