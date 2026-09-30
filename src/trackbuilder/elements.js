@@ -1497,6 +1497,12 @@ export const WHOOP_TOOLS = [
     note: 'Drag along the floor to lay two or three gates in a row, 30 in apart, sharing their verticals. One click lays a pair.',
   },
   {
+    id: 'cube',
+    label: 'Cube',
+    key: 'K',
+    note: 'Click to put a cube down: five gates that share their pipe, in one piece. It is flown straight through, along the way it faces; change the two faces with the Fly order tool. Move it, turn it, copy it and remove it as one.',
+  },
+  {
     id: 'ruler',
     label: 'Ruler',
     key: 'M',

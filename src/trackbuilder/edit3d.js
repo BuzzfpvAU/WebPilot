@@ -54,7 +54,7 @@
 import { ELEMENTS, KIND, defaultDims, trackClassOf } from './elements.js';
 import { elementById, kindOf, apertureCenter, aperturesOf } from './model.js';
 import {
-  measuresFor, placementFor, rowPlan, rulerPoint, rulerReading, snapTurn, spacingTone,
+  cubeItems, measuresFor, placementFor, rowPlan, rulerPoint, rulerReading, snapTurn, spacingTone,
 } from './snap.js';
 import { inches, GATE_SPACING_NOMINAL } from './racegow.js';
 
@@ -304,7 +304,7 @@ export class RoomEditor {
         return;
       }
       const raw = Math.atan2(g.y - el.position.y, g.x - el.position.x);
-      h.rotateSelected(snapTurn(h.doc, el, raw, e.altKey));
+      h.rotateSelected(snapTurn(h.doc, el, raw, e.altKey), d.id);
       /* A turn changes what a piece IS, not only where, so the room is rebuilt
        * as it goes; it is rare, and a rebuild is a few milliseconds. */
       v.markDirty();
@@ -532,6 +532,10 @@ export class RoomEditor {
   showGhost(e) {
     const v = this.view;
     const h = this.host;
+    if (h.armed === 'cube') {
+      this.showCubeGhost(e);
+      return;
+    }
     /* The row tool's ghost, before the drag, is one gate: where the row would begin. */
     const type = h.armed === 'row' ? 'gate' : h.armed;
     const def = ELEMENTS[type];
@@ -551,6 +555,27 @@ export class RoomEditor {
     } else {
       v.clearMeasures();
     }
+  }
+
+  /* The cube tool's ghost: the five faces a click would lay, faint, where they would stand, facing the way a gate
+   * would face here. They are the list placeCube lays them from, so what is shown is what is put down. It snaps
+   * as the click does, as a cube: the gate's magnet would take it 30 in along a gate's width, where a cube, which
+   * is 30 in wide itself, would be inside the gate. */
+  showCubeGhost(e) {
+    const v = this.view;
+    const h = this.host;
+    const p = v.levelPoint(e.clientX, e.clientY, 0);
+    if (!p) {
+      v.clearGhost();
+      v.clearMeasures();
+      return;
+    }
+    const at = h.snap(p, e.altKey, { type: 'cube' });
+    v.setGuides(h.guides);
+    const yaw = placementFor(h.doc, at, 'gate').yaw;
+    const plan = cubeItems(h.doc, at, { yaw });
+    v.setGhosts(plan.items.map((it) => ({ type: 'gate', position: it.position, yaw: it.yaw, props: it.props })));
+    v.clearMeasures();
   }
 
   /* The distances round a gate that is being pulled. */

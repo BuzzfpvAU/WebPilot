@@ -35,11 +35,12 @@ import {
   roundTripsCleanly, serialize, aperturesOf, toPlain, startPadsOf, newElementId,
   logoForDecal, dressOrder, LOGO_SLOTS, SCHEMA_VERSION,
   SCENE_TIMES, SCENE_GROUNDS, SCENE_DEFAULT, sceneOf, deepClone, setSideBuilt,
+  groupMembers, expandGroups,
 } from './model.js';
 import { applyAutoFaces, flipFace, setYaw, clearOverride, travelDirection, defaultYawFor } from './faces.js';
 import {
   addToSequence, addNextLevel, sequenceLabel, faceLabel, bendIndexFor, bendLineAt, gateNumbers,
-  neighboursOf, pinFacesAt, sequenceNumbers, removeElement,
+  neighboursOf, pinFacesAt, sequenceNumbers, removeElement, removeFromSequence,
 } from './sequence.js';
 import { applyFigure, matchingFigure, defaultFigure, upgradeStackedFigures } from './figures.js';
 import {
@@ -57,9 +58,10 @@ import {
 import {
   frameRectFor, nearestQuarter, placementFor, placeOnTrack, spacingTone, snapTurn, copyElements,
   moveToPlace, measuresFor, magnetFor, sideBySideYaw, MAGNET_RADIUS, rowPlan, placeRow, ROW_MAX,
-  rulerPoint, rulerReading, replacementsFor, replaceWith,
+  rulerPoint, rulerReading, replacementsFor, replaceWith, placeCube, cubeItems, turnGroups,
 } from './snap.js';
-import { envelopeFor, GATE_OPENING_DEFAULT, inches } from './racegow.js';
+import { CUBE_FACES, cubeFaces } from './cube.js';
+import { envelopeFor, GATE_OPENING_DEFAULT, PIPE_OD as CUBE_PIPE_OD, inches } from './racegow.js';
 import {
   RAD, DEG, wrapAngle, gateSupportFeet, apertureFrame, GATE_POST_R_SCALE,
 } from './geometry.js';
@@ -7089,6 +7091,15 @@ async function suiteShareLink() {
     const f = await decodeTrack(await encodeTrack(furnished));
     check('a track with a table, a chair and a banner in it comes back through a link with all three, byte for byte',
       f && serialize(f) === serialize(normalize(JSON.parse(JSON.stringify(toPlain(furnished)))).doc) && f.elements.filter((e) => ['table', 'chair', 'banner'].includes(e.type)).length === 3);
+    const cubed = createTrack('cubed', 'micro');
+    placeOnTrack(cubed, 'gate', { x: 4, y: 6 });
+    placeCube(cubed, { x: 6, y: 6 });
+    placeCube(cubed, { x: 8, y: 6 }, { lift: 0.5, passes: ['top', 'bottom'] });
+    const cb = await decodeTrack(await encodeTrack(cubed));
+    check('a track with two cubes in it, one lifted and flown down through and out underneath, comes back through a link byte for byte: groups, flat faces and passes',
+      cb && serialize(cb) === serialize(normalize(JSON.parse(JSON.stringify(toPlain(cubed)))).doc)
+      && new Set(cb.elements.filter((e) => e.group).map((e) => e.group)).size === 2 && cb.elements.filter((e) => e.group).length === 11
+      && cb.elements.filter((e) => e.unbuilt === true).length === 3 && cb.sequence.length === 5);
     check('and one with an odd name (quotes, an angle bracket, a percent sign, an emoji) is the same name', await (async () => {
       const e = createTrack('a "b" <c> 100% \u{1F680}', 'micro');
       const back = await decodeTrack(await encodeTrack(e));
@@ -7419,30 +7430,31 @@ function suiteImportFpv() {
   /* The rest. */
   const pole = doc.elements.find((e) => e.type === 'pole');
   check('a pole is a pole, its height the designer\'s 2 m, where it stood', pole && near(pole.dims.height, 2) && near(pole.position.x, 6) && near(pole.position.y, 5));
-  const bend = doc.elements.find((e) => e.type === 'waypoint');
-  check('a pass through a cube is a waypoint at the middle of the cube, 375 mm up', bend && near(bend.position.z, 0.375) && near(bend.position.x, 4) && near(bend.position.y, 4));
+  const cube = doc.elements.filter((e) => e.group);
+  check('a cube of theirs is a cube of ours: five gates in a group, 750 mm, where it stood', cube.length === 5 && cube.every((e) => near(e.dims.clearW, 0.75))
+    && near(cube.find((e) => Math.abs(e.pitch) > 1).position.x, 4) && near(cube.find((e) => Math.abs(e.pitch) > 1).position.y, 4));
   const hoop = doc.elements.find((e) => e.type === 'hoop');
   check('a hoop is a hoop of the same width, round, raised to the height it had, where it stood',
     hoop && near(hoop.dims.clearW, 0.5) && near(hoop.dims.clearH, 0.5) && near(hoop.dims.sillH, 0.25) && near(hoop.position.x, 5) && near(hoop.position.y, 4));
 
   /* The flying order: theirs, in their order, with what could be flown left in it. */
   const order = doc.sequence.map((q) => elementById(doc, q.elementId).type);
-  check('the flying order is their order: gate, gate, pole, the stack twice, the cube, the hoop', order.join() === 'gate,gate,pole,doubleStack,doubleStack,waypoint,hoop', order.join());
+  check('the flying order is their order: gate, gate, pole, the stack twice, the cube (in at the top, out at the right), the hoop', order.join() === 'gate,gate,pole,doubleStack,doubleStack,gate,gate,hoop', order.join());
   check('a gate marked back is flown the other way through, and one marked forward is not', doc.sequence[0].entry === 1 && doc.sequence[1].entry === -1 && doc.sequence[0].overridden === true && doc.sequence[1].overridden === true);
   check('the two passes of the stack are its two openings, bottom then top', doc.sequence[3].apertureIndex === 0 && doc.sequence[4].apertureIndex === 1);
 
   /* What did not map is said. */
   const lines = reportLines(r.report).join(' | ');
   check('the stack is reported as kept', /became one double stack, 700 mm/.test(lines), lines);
-  check('the cube is reported as changed, by its place in their list', /#6 is a pass through a cube/.test(lines));
+  check('the cube is reported as changed, by its place in their list, with what it was flown through', /#6 is a cube, 750 mm/.test(lines) && /in at the top and out at the right/.test(lines), lines);
   check('the hoop is reported as kept, and not as changed', /1 hoop placed with the position, heading, height, size and direction they had/.test(lines) && !/#7 is a hoop/.test(lines), lines);
   check('the banner is kept, as a banner in the room, and reported as changed by its place in their list',
     /Changed: #8 is a banner, 1500 mm wide: it became a banner 1500 mm wide/.test(lines) && doc.elements.some((e) => e.type === 'banner'), lines);
   check('a type it does not know is left out by name', /Left out: #9 is a "mystery-9000"/.test(lines));
   check('a gate outside the hall is left out and says so', /Left out: #10 stands outside the 10 by 12 m hall/.test(lines));
   check('the tape measurements are left out and the build sheet is named as where they went', /2 tape measurements were not kept/.test(lines) && /build sheet/.test(lines));
-  check('a gate bigger than RaceGOW allows is kept at its size, and the rules are named as what will say so', /Gates 750 mm across were kept at that size/.test(lines) && gates.filter((e) => near(e.dims.clearW, 0.75)).length === 2);
-  check('nothing was left out that the report does not name: 10 in their list, 7 flown, 1 furniture kept, 2 named as left out', doc.sequence.length === 7 && r.report.dropped.filter((l) => /^#/.test(l)).length === 2);
+  check('a gate bigger than RaceGOW allows is kept at its size, and the rules are named as what will say so', /Gates 750 mm across were kept at that size/.test(lines) && gates.filter((e) => !e.group && near(e.dims.clearW, 0.75)).length === 2);
+  check('nothing was left out that the report does not name: 10 in their list, 8 passes flown (the cube is two), 1 furniture kept, 2 named as left out', doc.sequence.length === 8 && r.report.dropped.filter((l) => /^#/.test(l)).length === 2);
 
   /* The document is a sound one. */
   check('it round trips through a file, and needs no repair', roundTripsCleanly(doc) && deserialize(serialize(doc)).repairs.length === 0);
@@ -8237,12 +8249,48 @@ async function suiteBoardParts() {
     && partsTheBoardDoesNotKnow({ elements: [null, 5, { type: 'table' }, { type: 'gate' }] }).length === 1);
   const say = unknownPartsSentence(list);
   check('the sentence says what the board does not know, what this track has, and what to do',
-    /does not know a table, a chair, a banner, a hoop or a hex gate/.test(say) && /2 tables and 1 chair/.test(say) && /Take them out/.test(say) && /still flies/.test(say), say);
+    /does not know a table, a chair, a banner, a hoop, a hex gate or a cube/.test(say) && /2 tables and 1 chair/.test(say) && /Take them out/.test(say) && /still flies/.test(say), say);
   check('and reads for one kind, and for all five, a hex gate in two words and its own plural',
     /This one has 1 banner\./.test(unknownPartsSentence([{ type: 'banner', count: 1 }]))
     && /1 table, 2 chairs and 3 banners/.test(unknownPartsSentence([{ type: 'table', count: 1 }, { type: 'chair', count: 2 }, { type: 'banner', count: 3 }]))
     && /This one has 1 hoop and 2 hex gates\./.test(unknownPartsSentence([{ type: 'hoop', count: 1 }, { type: 'hexGate', count: 2 }]))
-    && /This one has 1 hex gate\./.test(unknownPartsSentence([{ type: 'hexGate', count: 1 }])));
+    && /This one has 1 hex gate\./.test(unknownPartsSentence([{ type: 'hexGate', count: 1 }]))
+    && /This one has 1 cube\./.test(unknownPartsSentence([{ type: 'cube', count: 1 }]))
+    && /This one has 1 table and 2 cubes\./.test(unknownPartsSentence([{ type: 'table', count: 1 }, { type: 'cube', count: 2 }])));
+
+  /* A cube is five gates and a group, so it is the group that the board would lose, and it is counted by group. */
+  {
+    const cubes = createTrack('with cubes', 'micro');
+    placeOnTrack(cubes, 'gate', { x: 4, y: 5 });
+    placeCube(cubes, { x: 5.5, y: 5 });
+    placeCube(cubes, { x: 7, y: 5 });
+    placeOnTrack(cubes, 'table', { x: 6, y: 8 });
+    const found = partsTheBoardDoesNotKnow(toPlain(cubes));
+    check('a track with two cubes names them once each, after the parts that have a type of their own, counted by group and not by gate',
+      JSON.stringify(found) === '[{"type":"table","count":1},{"type":"cube","count":2}]', JSON.stringify(found));
+    check('the working document is read as well as the plain one', JSON.stringify(partsTheBoardDoesNotKnow(cubes)) === JSON.stringify(found));
+    check('a gate that is in no group is not a cube, and neither is one whose group is not a name',
+      partsTheBoardDoesNotKnow({ elements: [{ type: 'gate' }, { type: 'gate', group: '' }, { type: 'gate', group: 7 }, { type: 'gate', group: null }] }).length === 0);
+    check('two gates in one group are one cube', JSON.stringify(partsTheBoardDoesNotKnow({ elements: [{ type: 'gate', group: 'a' }, { type: 'gate', group: 'a' }] })) === '[{"type":"cube","count":1}]');
+    const hadFetch2 = globalThis.fetch;
+    let sent = 0;
+    globalThis.fetch = async () => {
+      sent += 1;
+      return { ok: true, status: 200, text: async () => '{}' };
+    };
+    try {
+      let refusedCube = null;
+      try {
+        await publishTrack({ author: 'Ada Rook', document: toPlain(cubes), origin: 'http://board.test' });
+      } catch (e) {
+        refusedCube = e;
+      }
+      check('publishing a track with a cube is refused, with the sentence, and nothing is sent',
+        Boolean(refusedCube) && /1 table and 2 cubes\./.test(refusedCube.message) && sent === 0, String(refusedCube && refusedCube.message));
+    } finally {
+      globalThis.fetch = hadFetch2;
+    }
+  }
 
   const hadFetch = globalThis.fetch;
   let calls = 0;
@@ -8961,6 +9009,404 @@ function suiteHoopHex() {
 }
 
 
+/*
+ * A CUBE. The designer's cube is a frame you fly in through one face of and out of through another, and a
+ * whoop room's frame is pipe, so a cube is what it is made of: ONE GATE FOR EACH FACE, six squares of pipe
+ * that share their edges. Nothing in the physics, the course, the race or the views knows a new thing: a
+ * face is a gate, and the two passes that fly the cube are two gates in the flying order. What is new is a
+ * layout that puts the faces where a cube's are, a group that says they are one piece, and a tool that
+ * lays them in one click.
+ *
+ * EACH OF THE TWELVE EDGES IS BUILT ONCE, by taking sides away that already exist: the front and the back
+ * keep their four sides; the left and the right have no uprights (the front and back's stand at the corners);
+ * the top and the bottom are gaps in the lattice (their four sides are the bars the others carry). So the
+ * pipe is twelve lengths and eight three way corners, which is what a cube of pipe is.
+ */
+async function suiteCube() {
+  console.log('\nthe whoop builder: a cube');
+  const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+  const E = GATE_OPENING_DEFAULT;
+  const t = CUBE_PIPE_OD / 2;
+  const d = E / 2 + t;
+
+  /* THE LAYOUT */
+  {
+    const faces = cubeFaces(E, t, 0);
+    check('the faces are named front, back, left, right, top and bottom', CUBE_FACES.join() === 'front,back,left,right,top,bottom');
+    check('a cube on the floor has five, because the sixth is under the floor', faces.map((f) => f.face).join() === 'front,back,left,right,top');
+    const by = (name) => faces.find((f) => f.face === name);
+    check('each upright face stands half an opening and a pipe from the middle, on its own side, facing out',
+      near(by('front').x, d) && near(by('front').y, 0) && near(by('front').yaw, 0)
+      && near(by('back').x, -d) && near(Math.abs(by('back').yaw), Math.PI) && near(by('left').y, d) && near(by('left').yaw, Math.PI / 2)
+      && near(by('right').y, -d) && near(by('right').yaw, -Math.PI / 2), JSON.stringify(faces));
+    check('every upright face stands on the floor at its own sill, which is the lift', faces.filter((f) => f.pitch === 0).every((f) => f.sillH === 0));
+    check('the top is flat, over the middle, a pipe above the top edge: its sill is the same distance as the faces', near(by('top').pitch, Math.PI / 2) && near(by('top').x, 0) && near(by('top').y, 0) && near(by('top').sillH, d));
+    check('the front and back keep all four sides, the left and right have no uprights, the top has no frame of its own',
+      by('front').unbuiltSides.length === 0 && by('back').unbuiltSides.length === 0 && !by('front').unbuilt
+      && by('left').unbuiltSides.join() === 'left,right' && by('right').unbuiltSides.join() === 'left,right'
+      && by('top').unbuilt === true);
+    const lifted = cubeFaces(E, t, d);
+    check('a cube lifted by half an opening and a pipe has a sixth face, flat, under the middle, with the floor to stand on',
+      lifted.length === 6 && near(lifted.find((f) => f.face === 'bottom').sillH, 0) && near(lifted.find((f) => f.face === 'top').sillH, 2 * d)
+      && lifted.filter((f) => f.pitch === 0).every((f) => near(f.sillH, d)));
+    check('and one lifted by less has five: the bottom would be under the floor', cubeFaces(E, t, d - 0.01).length === 5);
+    check('every number is finite for any size a document can hold',
+      [[0.1, 0.005, 0], [2, 0.05, 3], [0.7, 0.013, 0.4]].every(([e2, t2, l]) => cubeFaces(e2, t2, l).every((f) => [f.x, f.y, f.yaw, f.pitch, f.sillH].every(Number.isFinite))));
+  }
+
+  /* PLACING ONE */
+  {
+    const doc = createTrack('cube', 'micro');
+    const made = placeCube(doc, { x: 5, y: 6 });
+    check('a cube is five gates in one group, reported by id', made.ids.length === 5 && doc.elements.length === 5 && typeof made.group === 'string' && made.group.length > 0);
+    const els = made.ids.map((id) => elementById(doc, id));
+    check('all five are gates of the same group, with their heading pinned so the auto rule leaves them square',
+      els.every((e) => e.type === 'gate' && e.group === made.group && e.yawOverridden === true));
+    const front = els[0];
+    const top = els.find((e) => Math.abs(e.pitch) > 1);
+    check('the front is where the layout says, and the top is flat, over the middle, with no frame of its own',
+      near(front.position.x, 5 + d) && near(front.position.y, 6) && near(top.position.x, 5) && near(top.position.y, 6) && top.unbuilt === true && near(top.dims.sillH, d));
+    check('the passes are the two the cube is flown by, the back and then the front: straight through, the way the front faces', doc.sequence.length === 2
+      && doc.sequence[0].elementId === made.ids[1] && doc.sequence[1].elementId === made.ids[0], doc.sequence.map((q) => elementById(doc, q.elementId).position.x).join());
+    check('in at the back and out at the front: against the back\'s normal and along the front\'s', doc.sequence[0].entry === -1 && doc.sequence[1].entry === 1,
+      doc.sequence.map((q) => q.entry).join());
+    check('and it says which faces the passes went through', made.passes.join() === 'back,front');
+    {
+      const d4 = createTrack('faces', 'micro');
+      const m4 = placeCube(d4, { x: 5, y: 6 }, { passes: ['top', 'right'] });
+      check('given two other faces the passes go through those: in at the top, out at the right, in that order',
+        m4.passes.join() === 'top,right' && d4.sequence.length === 2
+        && d4.sequence[0].elementId === m4.ids[CUBE_FACES.indexOf('top')] && d4.sequence[1].elementId === m4.ids[CUBE_FACES.indexOf('right')]);
+      const d5 = createTrack('nobottom', 'micro');
+      const m5 = placeCube(d5, { x: 5, y: 6 }, { passes: ['top', 'bottom'] });
+      check('a face this cube does not have is not flown: on the floor it has no bottom, so the pair is the back and the front',
+        m5.passes.join() === 'back,front' && d5.sequence.length === 2);
+      const d6 = createTrack('lifted', 'micro');
+      const m6 = placeCube(d6, { x: 5, y: 6 }, { lift: 0.5, passes: ['top', 'bottom'] });
+      check('lifted off the floor it has one, and can be flown down through and out underneath', m6.passes.join() === 'top,bottom' && m6.ids.length === 6);
+      const d7 = createTrack('same', 'micro');
+      check('the same face twice is not a pair', placeCube(d7, { x: 5, y: 6 }, { passes: ['top', 'top'] }).passes.join() === 'back,front');
+    }
+
+    /* The ghost and the placing read one list: what would be laid is what is laid. */
+    {
+      const d8 = createTrack('items', 'micro');
+      const plan = cubeItems(d8, { x: 5, y: 6 }, { yaw: Math.PI / 2 });
+      const laid = placeCube(d8, { x: 5, y: 6 }, { yaw: Math.PI / 2 });
+      check('the faces the room draws faint before the click are the faces the click lays: one list, five items, each where its gate is',
+        plan.items.length === 5 && plan.items.every((it, i) => {
+          const el = elementById(d8, laid.ids[i]);
+          return it.face === CUBE_FACES[i] && near(it.position.x, el.position.x, 1e-6) && near(it.position.y, el.position.y, 1e-6) && near(wrapAngle(it.yaw - el.yaw), 0, 2e-6)
+            && near(it.props.pitch, el.pitch) && near(it.props.dims.sillH, el.dims.sillH, 1e-6) && (it.props.unbuilt === true) === (el.unbuilt === true);
+        }), plan.items.map((it) => it.face).join());
+      check('and planning it changes nothing in the track', d8.elements.length === 5 && d8.sequence.length === 2);
+    }
+
+    /* Grouped pieces. */
+    check('any face names the whole cube', groupMembers(doc, made.ids[3]).map((e) => e.id).sort().join() === [...made.ids].sort().join());
+    check('a gate that is in no group is only itself', (() => {
+      const g = placeOnTrack(doc, 'gate', { x: 9, y: 6 });
+      return groupMembers(doc, g.id).length === 1 && groupMembers(doc, g.id)[0] === g;
+    })());
+    check('a selection of one face becomes the five, and one of a gate outside stays one',
+      [...expandGroups(doc, [made.ids[2]])].sort().join() === [...made.ids].sort().join() && expandGroups(doc, [doc.elements[5].id]).size === 1);
+    check('nothing is invented for an id that is not there', expandGroups(doc, ['el-999']).size === 1 && expandGroups(doc, []).size === 0);
+    check('the document reads back as it was written, group and flags and all',
+      roundTripsCleanly(doc) && deserialize(serialize(doc)).repairs.length === 0
+      && deserialize(serialize(doc)).doc.elements.filter((e) => e.group === made.group).length === 5
+      && deserialize(serialize(doc)).doc.elements.find((e) => e.unbuilt === true) !== undefined);
+    check('a group that is not a name is not kept, so nothing can put a number or an object there',
+      (() => {
+        const raw = JSON.parse(serialize(doc));
+        raw.elements[0].group = 12;
+        raw.elements[1].group = { a: 1 };
+        raw.elements[2].group = '';
+        const back = deserialize(JSON.stringify(raw)).doc;
+        return back.elements.slice(0, 3).every((e) => !('group' in e));
+      })());
+  }
+
+  /* THE PIPE: twelve lengths, eight corners */
+  {
+    const doc = createTrack('cube', 'micro');
+    placeCube(doc, { x: 5, y: 6 });
+    const merged = mergeMembers(membersOf(doc));
+    check('the pipe is twelve lengths, one for each edge of a cube, none built twice', membersOf(doc).length === 12 && merged.length === 12, `${membersOf(doc).length} raw, ${merged.length} merged`);
+    const kinds = new Map();
+    for (const n of nodesOf(merged)) {
+      const k = fittingKind(n.ends.map((e) => e.dir), n.at.z < 0.05 && n.ends.length === 1 && n.ends[0].dir.z > 0.99);
+      kinds.set(k, (kinds.get(k) ?? 0) + 1);
+    }
+    check('and its corners are eight three way corners, the fitting RaceGOW\'s own list names', kinds.size === 1 && kinds.get('3-way corner') === 8, JSON.stringify([...kinds]));
+    const sheet = buildSheet(doc);
+    check('the sheet says 12 pipes and 8 corners for it', sheet.members === 12 && sheet.parts.fittings.some((f) => f.kind === '3-way corner' && f.count === 8), JSON.stringify(sheet.parts.fittings));
+    check('and lists its five gates as faces of a cube, not as five gates to build: each says its pipe is shared, and the flat one says it has none of its own',
+      sheet.pieces.length === 5 && sheet.pieces.every((p) => p.label === 'Cube face')
+      && sheet.pieces.filter((p) => /shares its pipe with the rest of the cube/.test(p.note)).length === 4
+      && sheet.pieces.filter((p) => /no frame of its own/.test(p.note)).length === 1, JSON.stringify(sheet.pieces.map((p) => [p.label, p.note])));
+    check('while a gate beside it is a gate, as it was', (() => {
+      const d9 = createTrack('beside', 'micro');
+      placeCube(d9, { x: 5, y: 6 });
+      placeOnTrack(d9, 'gate', { x: 8, y: 6 });
+      const s9 = buildSheet(d9);
+      return s9.pieces.filter((p) => p.label === 'Gate' && p.note === '').length === 1 && s9.pieces.filter((p) => p.label === 'Cube face').length === 5;
+    })());
+    const lift = createTrack('lifted', 'micro');
+    placeCube(lift, { x: 5, y: 6 }, { lift: 0.5 });
+    check('a cube lifted off the floor has its six faces and stands on four legs: sixteen pipes', lift.elements.length === 6 && mergeMembers(membersOf(lift)).length === 16,
+      `${lift.elements.length} faces, ${mergeMembers(membersOf(lift)).length} pipes`);
+  }
+
+  /* THE COURSE THE GAME FLIES, and the real race on it */
+  {
+    /* The stations exactly as scene.js hands them to the race, and a straight flight through them. */
+    const race = (doc) => {
+      const course = courseFromDocument(doc);
+      const gates = course.stations.map((st) => ({
+        position: { x: st.x, y: st.baseY, z: st.z }, heading: st.yaw, pitch: st.pitch, flyOrder: st.flyOrder, virtual: false,
+        apertures: [{ shape: 'square', index: 0, sillH: st.structure.dims.sillH, centreY: st.centreY, clearW: st.clearW, clearH: st.clearH }],
+      }));
+      return { course, gates, centre: (st) => ({ x: st.x, y: st.baseY + st.centreY, z: st.z }) };
+    };
+    const lerp = (a, b, n) => Array.from({ length: n + 1 }, (_, i) => ({ x: a.x + (b.x - a.x) * i / n, y: a.y + (b.y - a.y) * i / n, z: a.z + (b.z - a.z) * i / n }));
+    const fly = (gates, pts) => {
+      const r = new Race(gates, 'micro');
+      let ms = 0;
+      for (let i = 1; i < pts.length; i += 1) {
+        r.update(pts[i - 1], pts[i], ms, ms);
+        ms += 5;
+      }
+      return r;
+    };
+    const doc = createTrack('cube', 'micro');
+    const made = placeCube(doc, { x: 5, y: 6 });
+    const { course, gates, centre } = race(doc);
+    check('the course has two stations, one for each pass, and the cube\'s five gates are structures', course.stations.length === 2 && course.structures.filter((x) => x.type === 'gate').length === 5);
+    const first = centre(course.stations[0]);
+    const second = centre(course.stations[1]);
+    const mid = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2, z: (first.z + second.z) / 2 };
+    const ahead = { x: first.x + (first.x - mid.x) * 2, y: first.y, z: first.z + (first.z - mid.z) * 2 };
+    const past = { x: second.x + (second.x - mid.x) * 2, y: second.y, z: second.z + (second.z - mid.z) * 2 };
+    const through = fly(gates, lerp(ahead, past, 400));
+    check('flown in at the back and out at the front, the real race credits both passes', through.lapStartMs != null && through.splits.length === 1 && through.next === 0, `next ${through.next}, ${through.splits.length} splits`);
+    /* And the front of the cube faces along the way it was placed: a gate before it and one after it, in a row, is a line that runs through it. */
+    {
+      const row = createTrack('row', 'micro');
+      placeOnTrack(row, 'gate', { x: 3, y: 6 });
+      const there = { x: 5, y: 6 };
+      const cube = placeCube(row, there, { yaw: placementFor(row, there, 'gate').yaw });
+      placeOnTrack(row, 'gate', { x: 7, y: 6 });
+      const warnedRow = collectWarnings(row, buildPath(row)).map((w) => w.code);
+      check('a cube between two gates in a row is flown straight through with the line, and the rules do not call any face backwards',
+        !warnedRow.includes('reversal') && cube.passes.join() === 'back,front', warnedRow.join());
+    }
+    const side = (p) => ({ x: p.x, y: p.y + 1.6, z: p.z });
+    check('the same flight above the cube does not', fly(gates, lerp(side(ahead), side(past), 400)).lapStartMs == null);
+    check('and the other way, front to back, is not the order', fly(gates, lerp(past, ahead, 400)).lapStartMs == null);
+
+    /* The designer's own example: in at the top and out at the right. */
+    const doc2 = createTrack('cube two', 'micro');
+    const m2 = placeCube(doc2, { x: 5, y: 6 });
+    const byFace = (name) => elementById(doc2, m2.ids[CUBE_FACES.indexOf(name)]);
+    for (const q of [...doc2.sequence]) {
+      removeFromSequence(doc2, q.id);
+    }
+    addToSequence(doc2, byFace('top').id, 0);
+    addToSequence(doc2, byFace('right').id, 0);
+    applyAutoFaces(doc2);
+    check('flown in at the top and out at the right the passes are a gate flown down and a gate flown outward',
+      doc2.sequence[0].entry === -1 && doc2.sequence[1].entry === 1, doc2.sequence.map((q) => q.entry).join());
+    const r2 = race(doc2);
+    const topC = r2.centre(r2.course.stations[0]);
+    const rightC = r2.centre(r2.course.stations[1]);
+    const cubeC = { x: topC.x, y: topC.y - d * MICRO_SCALE, z: topC.z };
+    const up = { x: cubeC.x, y: topC.y + 1.5, z: cubeC.z };
+    const beyond = { x: cubeC.x + (rightC.x - cubeC.x) * 2.5, y: cubeC.y, z: cubeC.z + (rightC.z - cubeC.z) * 2.5 };
+    const via = fly(r2.gates, [...lerp(up, cubeC, 200), ...lerp(cubeC, beyond, 200)]);
+    check('and the real race credits the top and then the right', via.lapStartMs != null && via.splits.length === 1 && via.next === 0, `next ${via.next}`);
+    const off = (p) => ({ x: p.x + 3, y: p.y, z: p.z });
+    check('three metres to one side it credits nothing', fly(r2.gates, [...lerp(off(up), off(cubeC), 100), ...lerp(off(cubeC), off(beyond), 100)]).lapStartMs == null);
+    check('and the reverse flight, right then top, is not the order', fly(r2.gates, [...lerp(beyond, cubeC, 200), ...lerp(cubeC, up, 200)]).lapStartMs == null);
+  }
+
+  /* THE GAME BUILDS THE WHOLE CUBE, and not only the faces that are flown */
+  {
+    /* The world builds a gate for every station and for nothing else, so a face the line does not go through would be
+     * missing from the game: a cube with two faces and a gap. The course lists the faces of a group that are built and
+     * not flown, `loose`, and the scene builds those as solid pipe with nothing to score. Real game: scripts/builder-flow-check.js. */
+    const doc = createTrack('cube', 'micro');
+    const made = placeCube(doc, { x: 5, y: 6 });
+    const idOf = (face) => made.ids[CUBE_FACES.indexOf(face)];
+    const loose = (dc) => (courseFromDocument(dc).loose ?? []).map((l) => l.elementId).sort().join();
+    const course = courseFromDocument(doc);
+    check('flown in at the back and out at the front, the faces that are not flown but are built are the left and the right: the top has no pipe to build',
+      loose(doc) === [idOf('left'), idOf('right')].sort().join(), loose(doc));
+    for (const face of ['left', 'right']) {
+      const l = (course.loose ?? []).find((x) => x.elementId === idOf(face));
+      const structure = course.structures.find((x) => x.id === idOf(face));
+      const el = elementById(doc, idOf(face));
+      check(`the ${face} face is placed where its structure is, at its own size and height`,
+        l != null && structure != null && l.structure === structure && l.x === structure.x && l.z === structure.z && l.baseY === structure.baseY
+        && near(l.clearW, structure.dims.clearW) && near(l.clearH, structure.dims.clearH) && near(l.centreY, structure.dims.sillH + structure.dims.clearH / 2), l ? JSON.stringify({ x: l.x, z: l.z }) : 'not listed');
+      /* The mesh is built facing along the normal: its local minus z is the direction of travel through it, which for a
+       * rotation about the vertical by yaw is (-sin yaw, -cos yaw), and the face's normal in the scene is (cos a, -sin a). */
+      check(`the ${face} face is built facing straight out from the cube, upright`,
+        l != null && near(-Math.sin(l.yaw), Math.cos(el.yaw), 1e-6) && near(-Math.cos(l.yaw), -Math.sin(el.yaw), 1e-6) && near(l.pitch, 0, 1e-9), l ? `${l.yaw} ${l.pitch}` : '');
+      check(`and its sides are the ones it has: no uprights, and its top and bottom bars`,
+        structure != null && structure.meshSides != null && structure.meshSides.xNeg === false && structure.meshSides.xPos === false
+        && structure.meshSides.top === true && structure.meshSides.bottom === true, JSON.stringify(structure?.meshSides));
+    }
+    check('the two faces that are flown are stations and not loose', course.stations.length === 2 && !(course.loose ?? []).some((l) => l.elementId === idOf('front') || l.elementId === idOf('back')));
+
+    /* Other passes, other faces. */
+    {
+      const d2 = createTrack('cube two', 'micro');
+      const m2 = placeCube(d2, { x: 5, y: 6 }, { passes: ['top', 'right'] });
+      const id2 = (face) => m2.ids[CUBE_FACES.indexOf(face)];
+      check('flown in at the top and out at the right, the front, the back and the left are the faces the game builds without a target',
+        loose(d2) === [id2('front'), id2('back'), id2('left')].sort().join(), loose(d2));
+      const d3 = createTrack('cube none', 'micro');
+      const m3 = placeCube(d3, { x: 5, y: 6 });
+      for (const q of [...d3.sequence]) {
+        removeFromSequence(d3, q.id);
+      }
+      const id3 = (face) => m3.ids[CUBE_FACES.indexOf(face)];
+      check('a cube nobody flies is still built, all four of its upright faces, and is solid pipe',
+        loose(d3) === [id3('front'), id3('back'), id3('left'), id3('right')].sort().join(), loose(d3));
+      const d4 = createTrack('cube lifted', 'micro');
+      const m4 = placeCube(d4, { x: 5, y: 6 }, { lift: 0.5 });
+      check('a cube lifted off the floor has no more to build: the top and the bottom are flat and have no pipe of their own',
+        !loose(d4).includes(m4.ids[CUBE_FACES.indexOf('top')]) && !loose(d4).includes(m4.ids[CUBE_FACES.indexOf('bottom')]) && loose(d4).split(',').length === 2, loose(d4));
+    }
+
+    /* A track that has no group is the course it always was. */
+    {
+      const plain = createTrack('plain', 'micro');
+      placeOnTrack(plain, 'startPads', { x: 3, y: 6 });
+      placeOnTrack(plain, 'gate', { x: 4, y: 6 });
+      placeOnTrack(plain, 'gate', { x: 5, y: 6 });
+      const spare = placeOnTrack(plain, 'gate', { x: 6, y: 6 });
+      removeFromSequence(plain, plain.sequence[plain.sequence.length - 1].id);
+      const c = courseFromDocument(plain);
+      check('a track with no group has no such list: not an empty one, none, so its course is the same object it was', !('loose' in c) && c.stations.length === 2 && c.structures.some((x) => x.id === spare.id));
+      check('and a gate that is left out of the order is still not built in the game: only a group changes that', loose(plain) === '');
+    }
+  }
+
+  /* THE RULES DO NOT SHOUT AT A CUBE */
+  {
+    const warned = (doc) => collectWarnings(doc, buildPath(doc)).map((w) => w.code);
+    const doc = createTrack('cube', 'micro');
+    placeCube(doc, { x: 5, y: 6 });
+    const codes = warned(doc);
+    check('a cube with its two passes has no warning about the three faces that are not flown, none about spacing or headings, and none about the heights',
+      !codes.some((c) => c === 'unsequenced' || c === 'rg-spacing' || c === 'rg-square-headings' || c === 'rg-ground-centre' || c === 'rg-ceiling' || c === 'no-face' || c === 'close-stations'), codes.join());
+    const bare = createTrack('bare', 'micro');
+    const b = placeCube(bare, { x: 5, y: 6 });
+    for (const q of [...bare.sequence]) {
+      removeFromSequence(bare, q.id);
+    }
+    check('a cube that nothing flies is said to be, once, as the one piece it is: the exemption is for a cube that is flown',
+      warned(bare).filter((c) => c === 'unsequenced').length === 1 && b.ids.length === 5, warned(bare).join());
+    const said = collectWarnings(bare, buildPath(bare)).find((w) => w.code === 'unsequenced');
+    check('and the sentence names a cube, and points at one of its faces so the room can mark it',
+      Boolean(said) && /^Cube is on the field but not in the flying order/.test(said.message) && /It is still built, and solid\.$/.test(said.message) && b.ids.includes(said.elementId), said && said.message);
+    check('a gate that nobody flies is said as it always was, with nothing added', (() => {
+      const d5 = createTrack('spare gate', 'micro');
+      const g5 = placeOnTrack(d5, 'gate', { x: 5, y: 6 });
+      removeFromSequence(d5, d5.sequence.find((q) => q.elementId === g5.id).id);
+      const w5 = collectWarnings(d5, buildPath(d5)).find((w) => w.code === 'unsequenced');
+      return Boolean(w5) && w5.message === 'Gate is on the field but not in the flying order, so the line ignores it.';
+    })());
+    const two = createTrack('two bare', 'micro');
+    placeCube(two, { x: 4, y: 6 });
+    placeCube(two, { x: 8, y: 6 });
+    for (const q of [...two.sequence]) {
+      removeFromSequence(two, q.id);
+    }
+    check('and two cubes that nothing flies are said to be twice, once each', warned(two).filter((c) => c === 'unsequenced').length === 2);
+    check('a gate beside the cube that nobody flies is still said to be', (() => {
+      const d2 = createTrack('beside', 'micro');
+      placeCube(d2, { x: 5, y: 6 });
+      const g = placeOnTrack(d2, 'gate', { x: 9, y: 6 });
+      removeFromSequence(d2, d2.sequence.find((q) => q.elementId === g.id).id);
+      return warned(d2).filter((c) => c === 'unsequenced').length === 1;
+    })());
+  }
+
+  /* MOVING, TURNING, COPYING, REPLACING: as one piece */
+  {
+    const doc = createTrack('cube', 'micro');
+    const made = placeCube(doc, { x: 5, y: 6 });
+    const before = made.ids.map((id) => ({ ...elementById(doc, id).position, yaw: elementById(doc, id).yaw }));
+    turnGroups(doc, made.ids, Math.PI / 2);
+    const turned = made.ids.map((id) => elementById(doc, id));
+    check('a quarter turn carries every face round the middle: the front goes to the left of the middle, and every heading a quarter on',
+      near(turned[0].position.x, 5) && near(turned[0].position.y, 6 + d) && near(turned[1].position.x, 5) && near(turned[1].position.y, 6 - d)
+      && turned.every((e, i) => near(wrapAngle(e.yaw - before[i].yaw), Math.PI / 2, 2e-6)), JSON.stringify(turned.map((e) => [e.position.x, e.position.y])));
+    check('and the middle has not moved: the faces still average to it', near(turned.reduce((a, e) => a + e.position.x, 0) / 5, 5) && near(turned.reduce((a, e) => a + e.position.y, 0) / 5, 6));
+    turnGroups(doc, made.ids, -Math.PI / 2);
+    check('turned back it is where it was', made.ids.every((id, i) => near(elementById(doc, id).position.x, before[i].x, 1e-9) && near(elementById(doc, id).position.y, before[i].y, 1e-9)));
+    check('the pipe is still twelve, whichever way it was turned', mergeMembers(membersOf(doc)).length === 12);
+    turnGroups(doc, made.ids, 0.3);
+    check('and a turn that is not a quarter is allowed and keeps the faces square to one another: every pair of faces is still where a cube has it',
+      near(Math.hypot(elementById(doc, made.ids[0]).position.x - elementById(doc, made.ids[1]).position.x, elementById(doc, made.ids[0]).position.y - elementById(doc, made.ids[1]).position.y), 2 * d, 2e-6));
+
+    const c2 = createTrack('copy', 'micro');
+    const one = placeCube(c2, { x: 4, y: 6 });
+    const seqBefore = c2.sequence.length;
+    const copies = copyElements(c2, one.ids);
+    const copied = copies.map((id) => elementById(c2, id));
+    check('a copy of a cube is a cube: five new gates, in a group of their own, that is not the first one\'s',
+      copies.length === 5 && copied.every((e) => e.group === copied[0].group) && copied[0].group !== one.group && !copies.some((id) => one.ids.includes(id)));
+    check('and it is flown the way the first is, in two passes and not five', c2.sequence.length === seqBefore + 2
+      && c2.sequence.slice(-2).every((q) => copies.includes(q.elementId)));
+    check('and the first is as it was', one.ids.every((id) => elementById(c2, id).group === one.group));
+    check('a face of a cube is not turned into a hoop or a pole from the card: it is not one piece', replacementsFor(c2, [one.ids[0]]).length === 0 && replacementsFor(c2, one.ids).length === 0);
+    check('and asked for anyway it is left alone: the same five gates in the same group, and nothing changed', (() => {
+      const changed = replaceWith(c2, one.ids, 'hoop');
+      return changed.length === 0 && one.ids.every((id) => elementById(c2, id).type === 'gate' && elementById(c2, id).group === one.group);
+    })());
+
+    check('a cube that has lost a face in a file edited by hand still turns about its middle, which is its flat face and does not move', (() => {
+      const d4 = createTrack('gone', 'micro');
+      const m4 = placeCube(d4, { x: 5, y: 6 });
+      const flat = elementById(d4, m4.ids[CUBE_FACES.indexOf('top')]);
+      d4.elements = d4.elements.filter((e) => e.id !== m4.ids[CUBE_FACES.indexOf('right')]);
+      turnGroups(d4, [flat.id], Math.PI / 2);
+      return near(flat.position.x, 5, 1e-9) && near(flat.position.y, 6, 1e-9);
+    })());
+    check('an ungrouped piece is turned as it always was: turnGroups leaves a gate alone', (() => {
+      const d3 = createTrack('gate', 'micro');
+      const g = placeOnTrack(d3, 'gate', { x: 5, y: 6 });
+      const was = { x: g.position.x, y: g.position.y, yaw: g.yaw };
+      turnGroups(d3, [g.id], 1);
+      return g.position.x === was.x && g.position.y === was.y && g.yaw === was.yaw;
+    })());
+  }
+
+  /* THEIR CUBE IS OURS NOW */
+  {
+    const f = importFpvEvents({
+      arena: { w: 6, d: 6 },
+      gates: [
+        { typeId: 'tinywhoop-cube', x: 3, z: 3, height: 0, rotY: 0, dir: 'top>right', prop: false },
+        { typeId: 'square-75', x: 5, z: 3, height: 0, rotY: 0, dir: 'forward', prop: false },
+      ],
+    });
+    const cubeFaces2 = f.doc.elements.filter((e) => e.group);
+    const said = reportLines(f.report).join(' | ');
+    check('their cube is one of ours: five gates in a group, 750 mm, where it stood, and the gate after it is a gate', cubeFaces2.length === 5 && f.doc.elements.length === 6
+      && cubeFaces2.every((e) => near(e.dims.clearW, 0.75)), said);
+    check('flown in at the top and out at the right, in their order, before the gate after it',
+      f.doc.sequence.length === 3 && f.doc.sequence.slice(0, 2).every((q) => cubeFaces2.some((e) => e.id === q.elementId))
+      && Math.abs(elementById(f.doc, f.doc.sequence[0].elementId).pitch) > 1 && f.doc.sequence[2].elementId === f.doc.elements.find((e) => !e.group).id);
+    check('and the report says what it did and that the file does not say which side of the cube its left and right are',
+      /#1 is a cube, 750 mm/.test(said) && /in at the top and out at the right/.test(said) && /does not say/.test(said), said);
+    check('it round trips and needs no repair', roundTripsCleanly(f.doc) && deserialize(serialize(f.doc)).repairs.length === 0);
+  }
+}
+
 async function main() {
   if (process.argv.includes('--emit')) {
     process.stdout.write(serialize(demoTrack()));
@@ -9015,6 +9461,7 @@ async function main() {
   suiteRoomParts();
   suiteApertureShapes();
   suiteHoopHex();
+  await suiteCube();
   await suiteShareLink();
   suiteBuildSheet();
   suiteImportFpv();

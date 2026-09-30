@@ -1817,11 +1817,14 @@ export class View3D {
     if (whoop) {
       this.buildTagSpecs(doc);
     }
-    if (whoop && this.host.selection.size === 1) {
-      const only = elementById(doc, [...this.host.selection][0]);
-      if (only && kindOf(only) === KIND.APERTURE) {
-        this.buildRing(this.groups.get(only.id), only);
-      }
+    /* The ring at the foot of the one piece that is selected, or of a whole group that is: a cube has it at
+     * its middle, where its flat face is, and turning it turns every face. */
+    const picked = [...this.host.selection];
+    const ringFor = picked.length === 1
+      ? elementById(doc, picked[0])
+      : (picked.length > 1 ? this.wholeGroupAnchor(doc, picked) : null);
+    if (whoop && ringFor && kindOf(ringFor) === KIND.APERTURE) {
+      this.buildRing(this.groups.get(ringFor.id), ringFor);
     }
 
     if (this.host.path && this.host.path.samples.length > 1) {
@@ -2928,6 +2931,20 @@ export class View3D {
     return g;
   }
 
+  /* When what is selected is every piece of one group, the piece the ring is drawn at: the flat one, which is over
+   * the middle of a cube, or the first. Null for anything else. */
+  wholeGroupAnchor(doc, ids) {
+    const first = elementById(doc, ids[0]);
+    if (!first || !first.group) {
+      return null;
+    }
+    const members = doc.elements.filter((e) => e.group === first.group);
+    if (members.length !== ids.length || !members.every((m) => ids.includes(m.id))) {
+      return null;
+    }
+    return members.find((m) => Math.abs(m.pitch || 0) > 1) ?? members[0];
+  }
+
   /*
    * THE RING AT A SELECTED GATE'S FOOT, and the knob on it where the gate
    * faces: drag it and the gate turns (edit3d.js), in quarter turns unless Alt
@@ -3063,7 +3080,7 @@ export class View3D {
 
   /* The ghost is a list of pieces, because a row of gates is several. */
   setGhosts(list) {
-    const key = list.map((g) => `${g.type}|${g.position.x.toFixed(4)}|${g.position.y.toFixed(4)}|${g.yaw.toFixed(4)}`).join(';');
+    const key = list.map((g) => `${g.type}|${g.position.x.toFixed(4)}|${g.position.y.toFixed(4)}|${g.yaw.toFixed(4)}|${g.props ? `${g.props.pitch}|${g.props.dims.sillH}` : ''}`).join(';');
     if (this.ghost && this.ghost.key === key) {
       return;
     }
@@ -3101,6 +3118,12 @@ export class View3D {
         }
         const el = createElement(this.host.doc, g.type, g.position, g.yaw);
         el.id = '__ghost';
+        /* A face of a cube is a gate with a tilt, sizes and sides of its own. */
+        if (g.props) {
+          const { dims, ...rest } = g.props;
+          Object.assign(el, rest);
+          Object.assign(el.dims, dims);
+        }
         const node = this.buildElement(el, []);
         node.traverse((o) => {
           if (!o.material) {
@@ -3113,7 +3136,7 @@ export class View3D {
             }
           }
         });
-        if (def.kind === KIND.APERTURE) {
+        if (def.kind === KIND.APERTURE && !g.props) {
           const ap = aperturesOf(el)[0];
           const arrow = arrowMesh({ x: Math.cos(g.yaw), y: Math.sin(g.yaw), z: 0 }, Math.max(0.3, ap.clearW * 0.85), COL.arrow, 0.7);
           arrow.position.set(0, 0, ap.centerH);

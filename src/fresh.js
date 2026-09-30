@@ -229,6 +229,7 @@
     'src/maps/preload.js',
     'src/maps/registry.js',
     'src/partners/roster.js',
+    'src/props/aperture.js',
     'src/props/buildings.js',
     'src/props/catalog.js',
     'src/props/course.js',

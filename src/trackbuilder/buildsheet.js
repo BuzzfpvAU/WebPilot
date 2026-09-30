@@ -504,10 +504,17 @@ export function buildSheet(doc, opts = {}) {
     } else {
       heights.push({ bottom: el.position.z, top: el.position.z + (el.dims.height || 0) });
     }
-    const label = r.kind === KIND.APERTURE && stacked && r.els.length > 1
-      ? `Stack of ${r.els.length}`
-      : labelOf(el.type, 'micro');
-    const note = isUnbuilt(el) && r.els.length === 1 ? 'no frame of its own: the opening is marked by its neighbours' : '';
+    /* A face of a cube is not a gate to build: its pipe is the cube's, counted once in the parts, and the
+     * row says so, so nobody cuts five gates' worth for it. */
+    const face = Boolean(el.group) && r.els.length === 1;
+    const label = face
+      ? 'Cube face'
+      : (r.kind === KIND.APERTURE && stacked && r.els.length > 1
+        ? `Stack of ${r.els.length}`
+        : labelOf(el.type, 'micro'));
+    const note = isUnbuilt(el) && r.els.length === 1
+      ? 'no frame of its own: the opening is marked by its neighbours'
+      : (face ? 'shares its pipe with the rest of the cube' : '');
     /* A piece of furniture is built at its nearest quarter turn, so that is the
      * way the sheet says it faces. */
     const heading = isRoomType(el.type) ? placedYaw('quarter', el.yaw) : el.yaw;

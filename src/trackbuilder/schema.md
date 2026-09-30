@@ -241,6 +241,7 @@ course; that is what `sequence` is for.
 | `logoId` | string | **Ground logos only.** The `id` of the entry in `branding.logos` this footprint is painted with. Empty means the course's first logo. Not a dimension. |
 | `unbuilt` | `true`, or absent | **Apertures only.** The opening is a GAP IN THE LATTICE rather than a gate with a frame of its own: it scores, it lights, it carries its number and it pins the racing line, and no pipe is built for it in the world, the export, the preview or the card. The pipe that bounds it belongs to the structures around it. Written only when true, so an ordinary gate's JSON is unchanged. RaceGOW builds this way wherever a leg is carried up past a bar: the opening over the bar has the bar below and a pole beside and nothing else, and drawing a square there puts PVC in mid air. See `isUnbuilt` in `elements.js` and `TRACK-FROM-GIF.md`. |
 | `unbuiltSides` | array of strings, or absent | **Apertures only.** The sides of the frame that have no pipe, taken away one at a time: any of `"top"`, `"bottom"`, `"left"`, `"right"`, each once, written in that order. The opening still scores, lights, carries its number and pins the racing line; only the pipe is gone, along with what belongs to it (an upright's foot, fittings and printed sleeve, the top bar's header board). Four sides per STRUCTURE: `left` and `right` are the two uprights, the whole height of a stack, `top` is the bar over the top opening and `bottom` the bar under the lowest. A bar between two openings of a stack holds both up and is not one of the four. Left and right are as seen facing the gate, the same reading `flagSide` has: `left` is the `-widthAxis` upright and `top` the `+heightAxis` bar. Written only when at least one side is missing, so a gate with all four is the same JSON it was before this existed; a name that is not a side is dropped on read with a repair note. `unbuilt: true` means all four and more (no pipe at all), and wins when both are present. See `FRAME_SIDES` in `elements.js`, and `meshSidesFor` in `src/game/trackdoc.js` for how the race field, which builds each gate facing its first pass, turns these into its own frame. |
+| `group` | string, or absent | **Apertures only.** A name shared by the gates that are one object: today, the faces of a cube. A name and nothing else, at most 40 characters, made by the builder (`grp-1`, `grp-2`) and meaningful only to be the same on every member; anything that is not a non-empty string is dropped on read with a repair note, so the gate is on its own. The builder selects, moves, turns, copies and removes a group as one piece, and a group is not replaced with another part. Written only when there is one, so a gate on its own is the same JSON it was before this existed. A gate in a group is BUILT in the world whether or not the flying order goes through it, as solid pipe with nothing to score, which a gate on its own is not: see `loose` in `src/game/trackdoc.js` and **A cube** below. |
 
 ### Nothing floats
 
@@ -345,6 +346,32 @@ each lowest corner. A reader repairs `levels` to 1, since there is no stack of
 hoops. `frameSides` and `unbuiltSides` mean nothing for either, which has no
 four sides; `unbuilt` still takes the frame away and leaves the opening. A
 track that holds one is not published to the board until the board knows them.
+
+**A cube.** RaceGOW's cube is twelve pipes and eight corners with a gate in
+each face, flown in at one face and out at another. It is stored as what it
+is made of: five ordinary `gate` elements, six when it is lifted a half
+opening and a pipe off the floor, that share a `group`. The front and the back
+keep all four sides. The left and the right have `unbuiltSides` of `left` and
+`right`, because their uprights are the front's and the back's. The top, and
+the bottom when there is one, are flat (`pitch` a quarter turn) and `unbuilt`,
+because a flat face is a gap in the lattice: the twelve edges are all pipe
+already. A new cube is flown straight through, in at the back and out at the
+front, the way the front faces; the two passes are ordinary `sequence` entries
+that name two of its faces and can be changed like any others, and only the
+faces the order goes through score. The layout is worked out in
+`src/trackbuilder/cube.js` from the opening, the pipe and the lift alone, so
+the document holds no word for a cube of its own.
+
+The game builds a group whole. It builds a gate for every pass and for nothing
+else, so a gate the order leaves out is on the field in the builder and not in
+the world, and for a gate on its own that is the rule and stays. A face of a
+group that no pass goes through is built as solid pipe with nothing to score,
+nothing to light and no number (`course.loose` in `src/game/trackdoc.js`, put
+up by `coursePlacements` in `src/render/scene.js`), so the sides of a cube are
+there to be hit. A course whose document has no group has no such list, and
+so is the object it was. A track that holds a cube is not published to the
+board until the board knows a `group`: the board would keep the five gates,
+lose what makes them one, and fly two faces of it.
 
 A map also holds the freestyle assets, of two more kinds, `structure` and
 `zone`, and roads and vehicles, of two more, `road` and `vehicle`; they are

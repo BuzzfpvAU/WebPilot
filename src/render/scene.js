@@ -3066,6 +3066,26 @@ function courseProps(course, height, scene, colliders, baker, kit, padDecks = []
 function coursePlacements(course) {
   const byElement = new Map();
   const out = [];
+  /* What obstacle() and the shaped and tilted builders are handed for one structure at one opening's size. */
+  const specFor = (structure, clearW, clearH) => ({
+    kindName: structure.type,
+    clearW,
+    clearH,
+    sillH: structure.dims.sillH ?? 0,
+    stack: structure.dims.stack ?? 1,
+    levelPitch: structure.dims.levelPitch,
+    /* An opening that is a gap in the lattice: it scores and it
+     * lights, and no pipe is built for it. See isUnbuilt in
+     * src/trackbuilder/elements.js. */
+    unbuilt: structure.unbuilt === true,
+    /* 'circle' for a hoop and 'hex' for a hex gate; not there for a gate. */
+    ...(structure.shape ? { shape: structure.shape } : {}),
+    /* Sides taken away one at a time, already in THIS mesh's frame:
+     * xNeg and xPos uprights, top and bottom members. Undefined on
+     * every gate that has all four, which is every gate that has
+     * ever shipped. See meshSidesFor in src/game/trackdoc.js. */
+    sides: structure.meshSides,
+  });
   course.stations.forEach((st, i) => {
     if (st.virtual) {
       const structure = st.structure;
@@ -3112,25 +3132,7 @@ function coursePlacements(course) {
     if (!pl) {
       const structure = st.structure;
       pl = {
-        spec: {
-          kindName: st.type,
-          clearW: st.clearW,
-          clearH: st.clearH,
-          sillH: structure.dims.sillH ?? 0,
-          stack: structure.dims.stack ?? 1,
-          levelPitch: structure.dims.levelPitch,
-          /* An opening that is a gap in the lattice: it scores and it
-           * lights, and no pipe is built for it. See isUnbuilt in
-           * src/trackbuilder/elements.js. */
-          unbuilt: structure.unbuilt === true,
-          /* 'circle' for a hoop and 'hex' for a hex gate; not there for a gate. */
-          ...(structure.shape ? { shape: structure.shape } : {}),
-          /* Sides taken away one at a time, already in THIS mesh's frame:
-           * xNeg and xPos uprights, top and bottom members. Undefined on
-           * every gate that has all four, which is every gate that has
-           * ever shipped. See meshSidesFor in src/game/trackdoc.js. */
-          sides: structure.meshSides,
-        },
+        spec: specFor(structure, st.clearW, st.clearH),
         x: st.x,
         z: st.z,
         baseY: st.baseY,
@@ -3167,6 +3169,30 @@ function coursePlacements(course) {
       elementId: st.elementId,
     });
   });
+  /*
+   * The faces of a group that no pass goes through (`loose` in
+   * src/game/trackdoc.js): the sides of a cube. Built like any other gate and
+   * given no station, so they are solid and there is nothing to score, nothing
+   * to light and no number. A course that has no group has none of these.
+   */
+  for (const l of course.loose ?? []) {
+    const structure = l.structure;
+    out.push({
+      loose: true,
+      spec: specFor(structure, l.clearW, l.clearH),
+      x: l.x,
+      z: l.z,
+      baseY: l.baseY,
+      yaw: l.yaw,
+      pitch: l.pitch,
+      isStart: false,
+      plateIndex: course.stations.length,
+      primary: 0,
+      elementId: l.elementId,
+      dress: structure.dress,
+      stations: [],
+    });
+  }
   return out;
 }
 
@@ -5298,12 +5324,20 @@ export async function buildFieldScene(shell, onProgress, course = null, quality 
     /* The builder says which of its parts have to stay live. It used to be
      * found by matching materials against g's DIRECT children, which a
      * tilted gate breaks: its lit parts hang off a pivot, so the search
-     * missed them and the baker swallowed a ShaderMaterial. */
+     * missed them and the baker swallowed a ShaderMaterial.
+     *
+     * A face that is not flown has no target to light, so its live parts are
+     * taken off and dropped: nothing drives them, and left on they would
+     * glow at whatever they were made at. */
     for (const part of made.animate) {
       part.removeFromParent();
-      anim.add(part);
+      if (!st.loose) {
+        anim.add(part);
+      }
     }
-    scene.add(anim);
+    if (!st.loose) {
+      scene.add(anim);
+    }
     /*
      * How high this one stands, from the builder rather than from a bounding
      * box. A box would be measured after the lit parts have been moved out,

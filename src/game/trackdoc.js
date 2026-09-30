@@ -167,6 +167,24 @@ function meshSidesFor(el, t, sides) {
   };
 }
 
+/*
+ * THE HEADING AND THE TILT A GATE'S MESH IS BUILT AT, for a direction of travel
+ * `t` through it (document frame): the mesh faces along the travel, and a
+ * flat gate, which has no horizontal travel to face along, takes the
+ * structure's own yaw. One definition for the stations, which have a line's
+ * tangent to read it from, and for the faces of a group that no line goes
+ * through, which are built facing along their own normal.
+ */
+function meshFrameFor(t, structure) {
+  const travel = { x: t.x, y: t.z, z: -t.y };
+  const heading = headingForTravel(travel.x, travel.z);
+  return {
+    yaw: heading == null ? structure.yaw : heading,
+    /* The angle the direction of travel dips below the horizontal. */
+    tilt: Math.asin(Math.max(-1, Math.min(1, travel.y))),
+  };
+}
+
 /* Document yaw to scene yaw. A GATE's document yaw is a plane normal, so
  * the scene heading is a quarter turn on from it. Everything else (a wall,
  * a flag, the start pads) is a heading about up, and adding that quarter
@@ -558,27 +576,22 @@ function buildCourse(raw) {
     const index = Math.min(Math.max(0, knot.seq.apertureIndex ?? 0), apertures.length - 1);
     const ap = apertures[index];
 
-    /* The travel direction, document frame to scene frame. */
-    const t = knot.tangent;
-    const travel = { x: t.x, y: t.z, z: -t.y };
-    const heading = headingForTravel(travel.x, travel.z);
-
     /*
+     * The travel direction, document frame to scene frame, and from it the
+     * heading and the pitch.
+     *
      * A flat dive gate has no horizontal travel at all, so there is no
      * heading to read off it. Fall back to the structure's own yaw, which is
      * still a real direction: it is the azimuth the opening's width runs
      * across, and with the pitch below it makes a complete frame.
-     */
-    const yaw = heading == null ? structure.yaw : heading;
-
-    /*
+     *
      * Pitch, as the angle the direction of travel dips below the horizontal.
      * The document's own pitch is a property of the PLANE and the entry sign
      * says which way through it; what the gate has to be built and scored
      * against is the direction the quad actually goes, so the two are folded
      * together here and the station carries one angle.
      */
-    const tilt = Math.asin(Math.max(-1, Math.min(1, travel.y)));
+    const { yaw, tilt } = meshFrameFor(knot.tangent, structure);
 
     /* The mesh is built facing the FIRST pass through it, so that pass is
      * the one that says which of its sides is which. */
@@ -607,6 +620,56 @@ function buildCourse(raw) {
       entry: knot.seq.entry,
       cue: '',
       virtual: false,
+    });
+  }
+
+  /*
+   * THE FACES OF A GROUP THAT NO PASS GOES THROUGH, which are still built.
+   *
+   * The world builds a gate for every station and for nothing else, so a gate
+   * the flying order leaves out is in the document, in the builder's room and
+   * on the build sheet, and not on the field. That is what the line ignoring
+   * it means, and it is the rule for a gate on its own. A cube is five gates
+   * that are one object and are flown through two of their faces: the other
+   * three are the sides of it, and a cube with two faces and a gap is not the
+   * object. So a face that belongs to a group is built whether or not it is
+   * flown, as solid pipe and with nothing to score, and this is the list of
+   * them, built the way a station would build them if the line went through
+   * the face along its own normal. A face with no pipe at all (a flat top or
+   * bottom is a gap in the lattice) has nothing to build and is not listed.
+   *
+   * NO KEY AT ALL WHEN THERE IS NONE. A group is a new field, no track that
+   * exists has one, and a course with nothing in this list is the object it
+   * was before the list did.
+   */
+  const flown = new Set(stations.map((st) => st.elementId));
+  const loose = [];
+  for (const el of doc.elements) {
+    const structure = byElement.get(el.id);
+    if (!el.group || flown.has(el.id) || !structure || structure.kind !== KIND.APERTURE || structure.unbuilt) {
+      continue;
+    }
+    const normal = apertureFrame(el.yaw, el.pitch).normal;
+    const { yaw, tilt } = meshFrameFor(normal, structure);
+    if (structure.frameSides && !structure.meshSides) {
+      structure.meshSides = meshSidesFor(el, normal, structure.frameSides);
+    }
+    const ap = aperturesOf(el)[0];
+    const pos = toScene(field, { x: el.position.x, y: el.position.y });
+    loose.push({
+      elementId: el.id,
+      structure,
+      x: pos.x,
+      z: pos.z,
+      baseY: elev(el.position.z),
+      centreY: ap.centerH * gateScale,
+      clearW: ap.clearW * gateScale,
+      clearH: ap.clearH * gateScale,
+      ...(ap.shape ? { shape: ap.shape } : {}),
+      yaw,
+      pitch: tilt,
+      name: structure.name,
+      type: el.type,
     });
   }
 
@@ -706,6 +769,7 @@ function buildCourse(raw) {
     trackClass: cls,
     structures,
     stations,
+    ...(loose.length ? { loose } : {}),
     spawn,
     line,
     guide,

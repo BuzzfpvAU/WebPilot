@@ -144,12 +144,24 @@ export function collectWarnings(doc, path) {
     out.push(note('no-start', 'No start pads. The line runs from the first element to the last and the lap does not close. Press S to place them.'));
   }
 
+  /* A cube is one piece however many gates it is made of, so it is said once, by its first face. */
+  const groupsSaid = new Set();
   for (const el of unsequencedElements(doc)) {
     if (legs.has(el.id)) {
       continue;
     }
+    if (el.group) {
+      if (groupsSaid.has(el.group)) {
+        continue;
+      }
+      groupsSaid.add(el.group);
+    }
     const def = ELEMENTS[el.type];
-    out.push(warn('unsequenced', `${el.name || def.label} is on the field but not in the flying order, so the line ignores it.`, {
+    const called = el.group ? 'Cube' : (el.name || def.label);
+    /* A gate the order leaves out is not built in the world; a cube is (see `loose` in src/game/trackdoc.js), and
+     * the difference is worth saying to whoever took its passes away. */
+    const aside = el.group ? ' It is still built, and solid.' : '';
+    out.push(warn('unsequenced', `${called} is on the field but not in the flying order, so the line ignores it.${aside}`, {
       elementId: el.id,
     }));
   }

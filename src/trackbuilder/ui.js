@@ -629,8 +629,14 @@ export class Panels {
       const apertures = ids
         .map((id) => elementById(doc, id))
         .filter((e2) => e2 && ELEMENTS[e2.type]?.kind === KIND.APERTURE);
-      if (apertures.length) {
-        this.renderGatePresets(host, apertures);
+      /* A cube's faces are placed for the size they are, so a size chosen for them is not a thing to offer: the
+       * presets are for the gates that are not part of one. */
+      if (apertures.some((e2) => e2.group)) {
+        host.append(el('p', 'tb-help', 'A cube is one piece, five gates that share their pipe. It is flown in at one face and out at another: change which with the Fly order tool.'));
+      }
+      const loose = apertures.filter((e2) => !e2.group);
+      if (loose.length) {
+        this.renderGatePresets(host, loose);
       }
       return;
     }
@@ -1759,6 +1765,16 @@ export class Panels {
     this.renderEmpty();
   }
 
+  /* Whether what is selected is every piece of one group, which is what a cube is when it is picked. */
+  wholeGroup(doc, ids) {
+    const first = elementById(doc, ids[0]);
+    if (!first || !first.group) {
+      return false;
+    }
+    const members = doc.elements.filter((e) => e.group === first.group);
+    return members.length === ids.length && members.every((m) => ids.includes(m.id));
+  }
+
   /*
    * THE CARD BY THE SELECTED PIECE: six fields and three buttons, in inches
    * with the millimetres beside them, because a pilot standing in a hall with a
@@ -1811,8 +1827,12 @@ export class Panels {
     close.setAttribute('aria-label', 'Let go of it');
 
     if (ids.length > 1) {
-      head.append(el('strong', null, `${ids.length} selected`), close);
-      card.append(head, el('p', 'tb-help', 'Drag one to move them together. Q and E turn them. Arrow keys nudge them.'));
+      /* A whole cube says what it is: it is one piece, and the two faces it is flown through are the passes. */
+      const cube = this.wholeGroup(doc, ids);
+      head.append(el('strong', null, cube ? 'Cube' : `${ids.length} selected`), close);
+      card.append(head, el('p', 'tb-help', cube
+        ? 'One piece: gates that share their pipe. It is flown in at one face and out at another, and the Fly order tool changes which. Drag it to move it. Q and E turn it. Arrow keys nudge it.'
+        : 'Drag one to move them together. Q and E turn them. Arrow keys nudge them.'));
       const swap = this.replaceField(ids);
       if (swap) {
         card.append(swap);
@@ -2300,6 +2320,10 @@ export class Panels {
         : (doc.sequence.length
           ? 'Fly order: click the next piece. A piece again is another pass. Backspace takes the last pass off. Esc puts the tool away.'
           : 'Fly order: click the first piece the lap goes through, then the next. A piece again is another pass. Esc puts the tool away.');
+    } else if (this.host.isWhoopRace() && this.host.armed === 'cube') {
+      text = touched
+        ? 'Tap the floor to put a cube down: five gates in one piece, flown straight through along the way it faces. The tool stays armed. Tap Cube again to put it away.'
+        : 'Click the floor to put a cube down: five gates in one piece, flown straight through along the way it faces. The tool stays armed. Right click or Esc puts it away.';
     } else if (this.host.isWhoopRace() && (this.host.armed === 'row' || this.host.armed === 'ruler')) {
       text = this.host.armed === 'row'
         ? 'Drag along the floor to lay a row of two or three gates, 30 in apart. One click lays a pair. Right click or Esc puts the tool away.'

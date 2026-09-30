@@ -2042,10 +2042,10 @@ kase('import from the designer', async () => {
     const go = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-modal button')].find((x) => x.textContent === 'Import pasted text'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
     await click(page, go.x, go.y);
     await page.until("!!document.querySelector('#tb-modal h2') && /came across/.test(document.querySelector('#tb-modal h2').textContent)", 10000);
-    const doc = await json(page, '({ name: window.trackBuilder.doc.name, cls: window.trackBuilder.doc.trackClass, types: window.trackBuilder.doc.elements.map((e) => e.type), seq: window.trackBuilder.doc.sequence.length })');
+    const doc = await json(page, '({ name: window.trackBuilder.doc.name, cls: window.trackBuilder.doc.trackClass, types: window.trackBuilder.doc.elements.map((e) => e.type), seq: window.trackBuilder.doc.sequence.length, grouped: window.trackBuilder.doc.elements.filter((e) => e.group).length })');
     check('it opens as a whoop track named for where it came from', doc.cls === 'micro' && doc.name === 'Synthetic (from the FPV Events designer)', doc.name);
-    check('two gates, a pole and a waypoint for the cube in the flying order, and the banner standing in the room and not flown',
-      doc.types.join() === 'gate,gate,pole,waypoint,banner' && doc.seq === 4, `${doc.types.join()} ${doc.seq}`);
+    check('two gates and a pole, their cube as a cube of five gates in the flying order in two passes, and the banner standing in the room and not flown',
+      doc.types.join() === 'gate,gate,pole,gate,gate,gate,gate,gate,banner' && doc.grouped === 5 && doc.seq === 5, `${doc.types.join()} ${doc.seq} ${doc.grouped}`);
     const said = await page.evaluate("document.getElementById('tb-modal').textContent");
     check('the dialog says what was kept, changed and left out, and that the banner became one of ours',
       /Kept/.test(said) && /Changed/.test(said) && /Left out/.test(said) && /it became a banner/.test(said) && /cube/.test(said) && /tape measurement/.test(said), said.slice(0, 200));
@@ -2703,7 +2703,7 @@ kase('furniture', async () => {
       return { open: !m.hidden, title: m.querySelector('h2')?.textContent ?? '', text: m.textContent, inputs: m.querySelectorAll('input').length };
     })()`);
     check('Publish on a track with a table in it says the board does not know them yet, in a dialog, and asks for nothing',
-      said.open && said.title === 'Not on the board yet' && /does not know a table, a chair, a banner, a hoop or a hex gate/.test(said.text) && /This one has 1 table, 1 chair and 1 banner/.test(said.text) && said.inputs === 0,
+      said.open && said.title === 'Not on the board yet' && /does not know a table, a chair, a banner, a hoop, a hex gate or a cube/.test(said.text) && /This one has 1 table, 1 chair and 1 banner/.test(said.text) && said.inputs === 0,
       JSON.stringify(said));
     await page.evaluate("document.querySelector('#tb-modal .tb-btn').click(), 1");
     await page.sleep(150);
@@ -2892,6 +2892,383 @@ kase('a hoop and a hex gate', async () => {
     check('the build sheet has the hex gate\'s six pipes and lists the hoop as one thing to bring', sheet.members === 6 && sheet.other.some((o) => o.label === 'Hoop' && o.count === 1) && sheet.pieces.join() === 'Hoop,Hex gate', JSON.stringify(sheet));
 
     check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A CUBE. RaceGOW's cube is five gates that share their pipe: one tool, one click, one piece for everything
+ * a pilot does to it, flown in at one face and out at another. What is asserted is what a hand does and what
+ * the game builds: the key and the ghost, the click, picking any face, dragging, turning, copying, removing,
+ * undo, what Publish says, and the world the game makes of it, counted in the real game.
+ */
+kase('a cube', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    const palette = await json(page, `[...document.querySelectorAll('#tb-palette .tb-tool')].map((b) => ({
+      label: b.querySelector('.tb-tool-label').textContent,
+      key: b.querySelector('.tb-tool-key').textContent,
+    }))`);
+    const cubeTool = palette.find((p) => p.label === 'Cube');
+    check('the palette has a Cube tool with the key K', Boolean(cubeTool) && cubeTool.key === 'K', JSON.stringify(palette.map((p) => p.label)));
+
+    const group = () => json(page, `window.trackBuilder.doc.elements.map((e) => ({ id: e.id, type: e.type, group: e.group ?? null, x: e.position.x, y: e.position.y, z: e.position.z, yaw: e.yaw, pitch: e.pitch, sillH: e.dims.sillH, unbuilt: e.unbuilt === true, sides: e.unbuiltSides ?? null }))`);
+    const seq = () => json(page, 'window.trackBuilder.doc.sequence.map((q) => ({ id: q.elementId, entry: q.entry }))');
+    const selected = () => json(page, '[...window.trackBuilder.selection].sort()');
+    const settle = async () => {
+      await page.sleep(200);
+      await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    };
+
+    /* THE KEY, THE GHOST AND THE CLICK */
+    const floor = await screenOf(page, 'view3d', 5, 6, 0);
+    await key(page, 'KeyK');
+    check('K arms the cube', (await page.evaluate('window.trackBuilder.armed')) === 'cube');
+    check('and the coach line says what a click does', await page.evaluate("/cube/i.test(document.getElementById('tb-coach')?.textContent ?? document.body.textContent)"));
+    await mouse(page, 'mouseMoved', floor.x, floor.y, 0);
+    await page.sleep(400);
+    check('with it armed the ghost is the five faces, drawn faint, and none of them can be picked',
+      (await page.evaluate('window.trackBuilder.view3d.ghost ? window.trackBuilder.view3d.ghost.items.length : 0')) === 5
+      && (await page.evaluate('window.trackBuilder.view3d.ghostGroup ? window.trackBuilder.view3d.ghostGroup.children.length : 0')) === 5
+      && (await page.evaluate('window.trackBuilder.doc.elements.length')) === 0);
+    const steps = await undoCount(page);
+    await click(page, floor.x, floor.y);
+    await settle();
+    let els = await group();
+    check('a click lays five gates of one group as one undo step', els.length === 5 && els.every((e) => e.type === 'gate' && e.group && e.group === els[0].group) && (await undoCount(page)) === steps + 1,
+      JSON.stringify(els.map((e) => e.group)));
+    const top = els.find((e) => e.unbuilt && Math.abs(e.pitch) > 1);
+    const cx = top.x;
+    const cy = top.y;
+    check('at the point that was clicked: the flat face is over the middle of the cube', Math.abs(cx - 5) < 0.06 && Math.abs(cy - 6) < 0.06, `${cx}, ${cy}`);
+    let q = await seq();
+    check('flown straight through: two passes, the back and then the front, the back against its normal and the front along it',
+      q.length === 2 && q[0].entry === -1 && q[1].entry === 1 && q[0].id !== q[1].id
+      && els.find((e) => e.id === q[0].id).x < cx && els.find((e) => e.id === q[1].id).x > cx, JSON.stringify(q));
+    check('and all five are selected, the tool staying armed for the next one', (await selected()).length === 5 && (await page.evaluate('window.trackBuilder.armed')) === 'cube');
+    await key(page, 'Escape');
+    await settle();
+    check('Escape puts the tool away, the cube stays picked, and the card says it is a cube',
+      (await page.evaluate('window.trackBuilder.armed')) === null && (await selected()).length === 5
+      && (await page.evaluate("document.querySelector('#tb-card .tb-card-head strong')?.textContent")) === 'Cube');
+    await key(page, 'Escape');
+    check('and the next lets go of it', (await selected()).length === 0);
+    check('no warning in the lap strip or on any piece for a cube on its own',
+      (await json(page, `window.trackBuilder.warnings.filter((w) => w.level === 'warn' && !['no-start'].includes(w.code)).map((w) => w.code)`)).length === 0,
+      JSON.stringify(await json(page, `window.trackBuilder.warnings.map((w) => w.code)`)));
+
+    /* PICKING ANY FACE PICKS THE CUBE */
+    const left = els.find((e) => Math.abs(e.y - cy) > 0.2 && Math.abs(e.x - cx) < 0.01 && e.y > cy);
+    const at = await screenOf(page, 'view3d', left.x, left.y, 0.3556);
+    await click(page, at.x, at.y);
+    check('a click on one face picks all five', (await selected()).length === 5, JSON.stringify(await selected()));
+
+    /* DRAG IT: every face goes by the same amount, as one step */
+    const before = await group();
+    const dragFrom = await screenOf(page, 'view3d', left.x, left.y, 0.3556);
+    const dragTo = await screenOf(page, 'view3d', left.x + 0.5, left.y - 0.4, 0.3556);
+    const stepsDrag = await undoCount(page);
+    await drag(page, dragFrom, dragTo);
+    await settle();
+    let after = await group();
+    const moves = after.map((e, i) => ({ dx: e.x - before[i].x, dy: e.y - before[i].y }));
+    check('dragging a face moves the whole cube by one and the same amount, as one undo step',
+      moves.every((m) => Math.abs(m.dx - moves[0].dx) < 1e-6 && Math.abs(m.dy - moves[0].dy) < 1e-6) && Math.hypot(moves[0].dx, moves[0].dy) > 0.3 && (await undoCount(page)) === stepsDrag + 1,
+      JSON.stringify(moves[0]));
+    check('and it is still five gates in one group with the two passes', after.length === 5 && new Set(after.map((e) => e.group)).size === 1 && (await seq()).length === 2);
+
+    /* TURN IT */
+    const shapeBefore = await group();
+    const flat = shapeBefore.find((e) => e.unbuilt && Math.abs(e.pitch) > 1);
+    const stepsTurn = await undoCount(page);
+    await key(page, 'KeyQ');
+    await settle();
+    const turned = await group();
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    const tf = turned.find((e) => e.id === flat.id);
+    check('Q turns the whole cube a quarter about the middle: every face has gone round with it, the flat one has not moved, as one step',
+      turned.every((e, i) => Math.abs(Math.abs(wrap(e.yaw - shapeBefore[i].yaw)) - Math.PI / 2) < 1e-4 && Math.abs(wrap(e.yaw - shapeBefore[i].yaw) - wrap(turned[0].yaw - shapeBefore[0].yaw)) < 1e-4)
+      && Math.abs(tf.x - flat.x) < 1e-6 && Math.abs(tf.y - flat.y) < 1e-6 && (await undoCount(page)) === stepsTurn + 1);
+    const turnAngle = wrap(turned[0].yaw - shapeBefore[0].yaw);
+    const rigid = turned.every((e, i) => {
+      const ox = shapeBefore[i].x - flat.x;
+      const oy = shapeBefore[i].y - flat.y;
+      const rx = ox * Math.cos(turnAngle) - oy * Math.sin(turnAngle);
+      const ry = ox * Math.sin(turnAngle) + oy * Math.cos(turnAngle);
+      return Math.abs(e.x - (flat.x + rx)) < 2e-6 && Math.abs(e.y - (flat.y + ry)) < 2e-6;
+    });
+    check('and it is the same cube turned, not five gates turned where they stood: each is where the turn puts it', rigid);
+    await key(page, 'KeyE');
+    await settle();
+    const back = await group();
+    check('E turns it back to where it was, to the last digit', back.every((e, i) => Math.abs(e.x - shapeBefore[i].x) < 2e-6 && Math.abs(e.y - shapeBefore[i].y) < 2e-6 && Math.abs(wrap(e.yaw - shapeBefore[i].yaw)) < 2e-6));
+
+    /* COPY IT AND REMOVE THE COPY */
+    const stepsCopy = await undoCount(page);
+    await key(page, 'KeyD', 2);
+    await settle();
+    els = await group();
+    const ids0 = new Set(back.map((e) => e.id));
+    const fresh = els.filter((e) => !ids0.has(e.id));
+    q = await seq();
+    check('Control D makes another cube: five more gates in a group of their own, the copy is what is selected, one step',
+      els.length === 10 && fresh.length === 5 && new Set(fresh.map((e) => e.group)).size === 1 && fresh[0].group !== back[0].group
+      && (await selected()).length === 5 && (await selected()).every((id) => fresh.some((e) => e.id === id)) && (await undoCount(page)) === stepsCopy + 1, `${els.length} gates`);
+    check('and it is flown the way the first is: two more passes, in the same order, through its own back and front', q.length === 4 && q[2].entry === -1 && q[3].entry === 1
+      && fresh.some((e) => e.id === q[2].id) && fresh.some((e) => e.id === q[3].id), JSON.stringify(q));
+    const stepsDelete = await undoCount(page);
+    await key(page, 'Delete');
+    await settle();
+    check('Delete takes the copy and its passes out, and only them, as one step', (await group()).length === 5 && (await seq()).length === 2 && (await undoCount(page)) === stepsDelete + 1);
+    await key(page, 'KeyZ', 2);
+    await settle();
+    check('and Control Z brings all of it back', (await group()).length === 10 && (await seq()).length === 4);
+    await key(page, 'KeyZ', 2);
+    await settle();
+    check('and one more takes the copy away again, leaving the cube as it was', (await group()).length === 5 && (await seq()).length === 2
+      && (await group()).every((e, i) => Math.abs(e.x - back[i].x) < 2e-6 && Math.abs(e.y - back[i].y) < 2e-6));
+
+    /* WHAT THE LAP STRIP AND THE PLAN SHOW */
+    const chips = await json(page, `[...document.querySelectorAll('#tb-lapbar .tb-chip')].map((c) => c.textContent + '|' + (c.dataset.kind ?? ''))`);
+    check('the lap strip shows the two passes, both gates, and the plus that adds another', chips.join() === '1|gate,2|gate,+|', JSON.stringify(chips));
+    await page.evaluate("window.trackBuilder.setMode('2d'), 1");
+    await page.sleep(300);
+    const planFace = await screenOf(page, 'view2d', left.x + moves[0].dx, left.y + moves[0].dy);
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(300);
+    /* A gate that has an upright taken away is drawn with a red cross where it stood. The left and the right of a cube have
+     * none of theirs because the front and the back carry them, and a cross at each corner of a cube says something is
+     * missing from it. Pixels near the red of the cross, in a window at each corner of the cube. */
+    const flatNow = (await group()).find((e) => e.unbuilt && Math.abs(e.pitch) > 1);
+    const corners = [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([sx, sy]) => [flatNow.x + sx * 0.3689, flatNow.y + sy * 0.3689]);
+    let red = 0;
+    for (const [x, y] of corners) {
+      const c = await screenOf(page, 'view2d', x, y);
+      red += await page.evaluate(`(() => {
+        const cv = window.trackBuilder.view2d.canvas;
+        const r = cv.getBoundingClientRect();
+        const k = cv.width / r.width;
+        const px = Math.round((${c.x} - r.left) * k);
+        const py = Math.round((${c.y} - r.top) * k);
+        const w = Math.round(10 * k);
+        const data = cv.getContext('2d').getImageData(px - w, py - w, 2 * w, 2 * w).data;
+        let n = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (Math.abs(data[i] - 255) < 30 && Math.abs(data[i + 1] - 125) < 30 && Math.abs(data[i + 2] - 125) < 30) {
+            n += 1;
+          }
+        }
+        return n;
+      })()`);
+    }
+    check('on the plan the corners of a cube carry no red cross: nothing is missing from it', red === 0, `${red} red pixels`);
+    await click(page, planFace.x, planFace.y);
+    check('on the plan a click on a face picks the whole cube too', (await selected()).length === 5, JSON.stringify(await selected()));
+    await page.evaluate("window.trackBuilder.setMode('3d'), 1");
+    await page.sleep(300);
+
+    /* THE BOARD DOES NOT KNOW IT */
+    await page.evaluate('window.trackBuilder.publishBtn.click(), 1');
+    await page.sleep(250);
+    const said = await json(page, `(() => {
+      const m = document.getElementById('tb-modal');
+      return { open: !m.hidden, text: m.textContent, inputs: m.querySelectorAll('input').length };
+    })()`);
+    check('Publish says the board does not know a cube yet, that this track has 1, and asks for nothing',
+      said.open && /a hex gate or a cube/.test(said.text) && /This one has 1 cube\./.test(said.text) && said.inputs === 0, JSON.stringify(said));
+    await page.evaluate("document.querySelector('#tb-modal .tb-btn').click(), 1");
+    await page.sleep(150);
+
+    /* THE SHEET: twelve pipes, eight corners */
+    const sheet = JSON.parse(await page.evaluate(`(async () => {
+      const { buildSheet } = await import('/src/trackbuilder/buildsheet.js');
+      const s = buildSheet(window.trackBuilder.doc);
+      return JSON.stringify({ members: s.members, fittings: s.parts.fittings });
+    })()`));
+    check('the build sheet says twelve pipes and eight three way corners for it', sheet.members === 12 && sheet.fittings.some((f) => f.kind === '3-way corner' && f.count === 8), JSON.stringify(sheet));
+
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+
+    /* THE WORLD: fly it. The game builds every face, counted in the game's own collider set: the front and the
+     * back are two uprights, a top bar and two feet each, the left and the right are a top bar each, and the
+     * top has no pipe at all. The four stubs are the obstacle kind and the eight tubes the gate kind. */
+    await page.evaluate('window.trackBuilder.flyThisTrack(), 1').catch(() => {});
+    await page.sleep(2500);
+    await page.until('window.__mode === "flight" && typeof window.__colliderShapes === "function"', 120000);
+    await page.sleep(1500);
+    const got = await json(page, 'window.__colliderShapes()');
+    check('in the game the cube is all there: eight tubes and four feet, and nothing else in the world but the room\'s own walls',
+      got.byKind.gate === 8 && got.byKind.obstacle === 4 && got.capsules === 12 && got.boxes === (got.byKind.wall ?? 0),
+      JSON.stringify({ capsules: got.capsules, boxes: got.boxes, byKind: got.byKind }));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A CUBE IS FLOWN THROUGH ANY TWO OF ITS FACES. The designer's own example is in at the top and out at the
+ * right: the Fly order tool takes the passes off and puts two others on, by clicking the faces, and the world
+ * the game builds is the same cube whichever two it is flown through.
+ */
+kase('a cube flown through other faces', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('cube');
+      app.placeAt({ x: 5, y: 6, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.sleep(300);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const els = await json(page, `window.trackBuilder.doc.elements.map((e) => ({ id: e.id, x: e.position.x, y: e.position.y, yaw: e.yaw, pitch: e.pitch, sillH: e.dims.sillH }))`);
+    const flat = els.find((e) => Math.abs(e.pitch) > 1);
+    const rightFace = els.find((e) => Math.abs(e.y - (flat.y - 0.3689)) < 0.01 && Math.abs(e.x - flat.x) < 0.01);
+    const seq = () => json(page, 'window.trackBuilder.doc.sequence.map((q) => ({ id: q.elementId, entry: q.entry }))');
+    check('to begin with it is flown straight through', (await seq()).length === 2);
+
+    await key(page, 'KeyO');
+    check('O arms the Fly order tool', (await page.evaluate('window.trackBuilder.armed')) === 'route');
+    await key(page, 'Backspace');
+    await key(page, 'Backspace');
+    check('Backspace twice takes both passes off, and the cube is still all there', (await seq()).length === 0 && els.length === 5);
+    check('and nothing shouts about a cube that nothing flies but the one sentence, once', (await json(page, `window.trackBuilder.warnings.filter((w) => w.code === 'unsequenced').length`)) === 1);
+
+    const topAt = await screenOf(page, 'view3d', flat.x, flat.y, 0.7245);
+    await click(page, topAt.x, topAt.y);
+    let q = await seq();
+    check('a click on the top face is a pass through the top face, and only it', q.length === 1 && q[0].id === flat.id, JSON.stringify(q));
+    const rightAt = await screenOf(page, 'view3d', rightFace.x, rightFace.y, 0.3556);
+    await click(page, rightAt.x, rightAt.y);
+    q = await seq();
+    check('and a click on the right face is the next: in at the top and out at the right, the top flown down through and the right flown outward',
+      q.length === 2 && q[0].id === flat.id && q[1].id === rightFace.id && q[0].entry === -1 && q[1].entry === 1, JSON.stringify(q));
+    check('and there is no warning of a face that is not flown: it is the same cube', (await json(page, `window.trackBuilder.warnings.filter((w) => w.code === 'unsequenced').length`)) === 0);
+    await key(page, 'Escape');
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+
+    /* The world: the same eight tubes and four feet, whichever two faces it is flown through. */
+    await page.evaluate('window.trackBuilder.flyThisTrack(), 1').catch(() => {});
+    await page.sleep(2500);
+    await page.until('window.__mode === "flight" && typeof window.__colliderShapes === "function"', 120000);
+    await page.sleep(1500);
+    const got = await json(page, 'window.__colliderShapes()');
+    check('in the game it is the same cube: eight tubes and four feet, the front, the back and the left built with nothing to score',
+      got.byKind.gate === 8 && got.byKind.obstacle === 4 && got.capsules === 12 && got.boxes === (got.byKind.wall ?? 0),
+      JSON.stringify({ capsules: got.capsules, boxes: got.boxes, byKind: got.byKind }));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A CUBE BY TOUCH. A tap with the tool armed lays it, a tap on any face picks the whole cube and puts the card
+ * up, the card's Turn turns all of it, and one finger pulled on a face carries all of it.
+ */
+kase('a cube by touch', async () => {
+  const page = await openBuilder('?class=micro', 1024, 768, { touch: true });
+  try {
+    await trapToasts(page);
+    const els = () => json(page, `window.trackBuilder.doc.elements.map((e) => ({ id: e.id, group: e.group ?? null, x: e.position.x, y: e.position.y, yaw: e.yaw, pitch: e.pitch }))`);
+    /* The tools are at the foot of the palette, which is a column that scrolls on a screen this short. */
+    await page.evaluate(`(() => {
+      const b = [...document.querySelectorAll('#tb-palette .tb-tool')].find((x) => x.querySelector('.tb-tool-label')?.textContent === 'Cube');
+      b.scrollIntoView({ block: 'center' });
+      return 1;
+    })()`);
+    await page.sleep(200);
+    await tool(page, 'Cube');
+    check('touching the Cube tool arms it', (await page.evaluate('window.trackBuilder.armed')) === 'cube');
+    const coach = await page.evaluate("document.getElementById('tb-coach')?.textContent ?? ''");
+    check('and the line above the room says tap, what a tap does, and how to put the tool away: the Cube button again, there is no plus for it',
+      /Tap the floor/.test(coach) && /cube/i.test(coach) && /Tap Cube again to put it away/.test(coach) && !/plus/i.test(coach), coach);
+    const at = await screenOf(page, 'view3d', 5, 6.5, 0);
+    await tap(page, at);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    let list = await els();
+    check('a tap lays five gates of one group, as one step, and the tool is still armed', list.length === 5 && new Set(list.map((e) => e.group)).size === 1 && (await undoCount(page)) === 1
+      && (await page.evaluate("window.trackBuilder.armed === 'cube'")), `${list.length} gates, ${await undoCount(page)} steps`);
+    await key(page, 'Escape');
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(200);
+
+    const face = list.find((e) => Math.abs(e.pitch) < 1 && e.x > list.find((f) => Math.abs(f.pitch) > 1).x + 0.1);
+    const on = await screenOf(page, 'view3d', face.x, face.y, 0.35);
+    await tap(page, on);
+    check('a tap on one face picks all five, and the card says it is a cube',
+      (await page.evaluate('window.trackBuilder.selection.size')) === 5 && (await page.evaluate("document.querySelector('#tb-card .tb-card-head strong')?.textContent")) === 'Cube');
+    const before = await els();
+    const turnAt = await json(page, `(() => {
+      const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === 'Turn');
+      if (!b) return null;
+      const r = b.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    check('the card has a Turn button', Boolean(turnAt));
+    await tap(page, turnAt);
+    await page.sleep(200);
+    const turned = await els();
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    check('and it turns all five a quarter together, as one step', turned.every((e, i) => Math.abs(Math.abs(wrap(e.yaw - before[i].yaw)) - Math.PI / 2) < 1e-4) && (await undoCount(page)) === 2, `${await undoCount(page)} steps`);
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(200);
+
+    const start = await els();
+    const grabFace = start.find((e) => Math.abs(e.pitch) < 1);
+    const grab = await screenOf(page, 'view3d', grabFace.x, grabFace.y, 0.35);
+    const drop = await screenOf(page, 'view3d', grabFace.x + 0.5, grabFace.y - 0.4, 0.35);
+    await swipe(page, grab, drop, { steps: 10 });
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const moved = await els();
+    const d = moved.map((e, i) => ({ dx: e.x - start[i].x, dy: e.y - start[i].y }));
+    check('one finger pulled on a face carries all five by the same amount, as one step',
+      d.every((m) => Math.abs(m.dx - d[0].dx) < 1e-6 && Math.abs(m.dy - d[0].dy) < 1e-6) && Math.hypot(d[0].dx, d[0].dy) > 0.3 && (await undoCount(page)) === 3, `${JSON.stringify(d[0])}; ${await undoCount(page)} steps`);
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * WHAT THE GHOST SHOWS IS WHAT THE CLICK LAYS. Next to a gate the gate tool's magnet would take the piece 30 in
+ * along the gate's width, which is a side by side pair and is not where a cube goes (it is 30 in wide itself),
+ * so the cube has no such magnet, and the faint faces under the pointer are where the click puts the cube.
+ */
+kase('a cube ghost is where the click lays it', async () => {
+  const page = await openBuilder();
+  try {
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('gate');
+      app.placeAt({ x: 5, y: 6, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.sleep(300);
+    await key(page, 'KeyK');
+    /* A hand's distance from the spot the gate's magnet would take a piece to: 30 in along its width. */
+    const near = await screenOf(page, 'view3d', 5.02, 6.79, 0);
+    await mouse(page, 'mouseMoved', near.x, near.y, 0);
+    await page.sleep(400);
+    const ghost = await json(page, `window.trackBuilder.view3d.ghost.items.map((g) => ({ x: g.position.x, y: g.position.y, yaw: g.yaw }))`);
+    check('the ghost is five faces', ghost.length === 5);
+    await click(page, near.x, near.y);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const laid = await json(page, `window.trackBuilder.doc.elements.filter((e) => e.group).map((e) => ({ x: e.position.x, y: e.position.y, yaw: e.yaw }))`);
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    check('and the five gates the click lays are exactly where they were shown, face by face, heading by heading',
+      laid.length === 5 && laid.every((g, i) => Math.abs(g.x - ghost[i].x) < 1e-6 && Math.abs(g.y - ghost[i].y) < 1e-6 && Math.abs(wrap(g.yaw - ghost[i].yaw)) < 1e-6),
+      JSON.stringify({ ghost: ghost[4], laid: laid[4] }));
     check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
   } finally {
     await page.close();

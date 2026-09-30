@@ -655,6 +655,54 @@ export function dressOrder(doc) {
   return slots;
 }
 
+/* The longest a group's name is kept. It is an id the builder makes ("grp-3"), and this is only a bound. */
+const GROUP_NAME_MAX = 40;
+
+/*
+ * PIECES THAT ARE ONE PIECE. A cube is five or six gates, one for each face, that share their pipe, and
+ * moving one face of it is not a thing anybody means, so the faces carry a `group` and a selection of one
+ * is a selection of all. Nothing else in the document knows: every face is an ordinary gate to the path,
+ * the course, the race and the views, which is the reason a cube can be made of them.
+ *
+ * The members of the group an element is in, itself among them, or just itself when it is in none. An id
+ * that is not in the document has no members.
+ */
+export function groupMembers(doc, id) {
+  const el = elementById(doc, id);
+  if (!el) {
+    return [];
+  }
+  return el.group ? doc.elements.filter((e) => e.group === el.group) : [el];
+}
+
+/* A selection, grown to every piece of every group it touches. An id that is not in the document is kept as
+ * it came, and nothing is added for it. */
+export function expandGroups(doc, ids) {
+  const out = new Set();
+  for (const id of ids) {
+    out.add(id);
+    const el = elementById(doc, id);
+    if (el && el.group) {
+      for (const e of doc.elements) {
+        if (e.group === el.group) {
+          out.add(e.id);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/* A name for a new group that no piece in the document has. */
+export function newGroupId(doc) {
+  const taken = new Set(doc.elements.map((e) => e.group).filter(Boolean));
+  let n = taken.size + 1;
+  while (taken.has(`grp-${n}`)) {
+    n += 1;
+  }
+  return `grp-${n}`;
+}
+
 export function startPadsOf(doc) {
   return doc.elements.find((e) => kindOf(e) === KIND.START);
 }
@@ -1047,6 +1095,19 @@ export function normalize(raw) {
         el.unbuiltSides = sides;
       }
     }
+    /* A group: elements that are one piece and are edited together, which is what a cube is (five or six
+     * gates, each a face). Kept on apertures, and only when it is a name, so an ordinary gate's JSON is
+     * the shape it was and nothing can put a number or an object there. What a group means lives in
+     * groupMembers, above. */
+    if (def.kind === KIND.APERTURE && rawEl.group !== undefined) {
+      if (typeof rawEl.group === 'string') {
+        if (rawEl.group.trim() !== '') {
+          el.group = rawEl.group.slice(0, GROUP_NAME_MAX);
+        }
+      } else {
+        repairs.push(`${id}: group was not a name, so it is on its own.`);
+      }
+    }
     doc.elements.push(el);
   }
 
@@ -1280,6 +1341,9 @@ export function toPlain(doc) {
         const sides = normalizeUnbuiltSides(el.unbuiltSides);
         if (sides.length) {
           out.unbuiltSides = sides;
+        }
+        if (typeof el.group === 'string' && el.group.trim() !== '') {
+          out.group = el.group.slice(0, GROUP_NAME_MAX);
         }
       }
       return out;

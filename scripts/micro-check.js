@@ -59,6 +59,8 @@ import { airframeById } from '../configs/airframes.js';
 import { GATE_SCALE, MICRO_SCALE } from '../src/game/track.js';
 import { GATE_OPENING_MAX, PIPE_OD, POLE_FROM_GATE_MIN } from '../src/trackbuilder/racegow.js';
 import { PRESETS, presetsForClass } from '../src/trackbuilder/presets.js';
+import { placeCube } from '../src/trackbuilder/snap.js';
+import { buildSheet } from '../src/trackbuilder/buildsheet.js';
 import {
   buildAll, buildTrack, renderPresets, PRESETS_PATH, UNIT,
 } from './racegow-lattice.js';
@@ -160,6 +162,41 @@ function pipeline(cls) {
         JSON.stringify(dims));
     }
   }
+}
+
+/*
+ * A CUBE, end to end. It is not a palette element, it is a tool that lays five or six gates in one group, so the
+ * pipeline above does not place it. Laid, written, read, warned, made into a course and a plan, and counted on the
+ * build sheet: each stage sees five gates of a group and two passes, and the course lists the three faces that no
+ * pass goes through, because the world builds a gate for every pass and would otherwise leave the sides out.
+ */
+function cubePipeline() {
+  console.log('\n--- a cube ---');
+  const doc = createTrack('Check cube', 'micro');
+  const made = placeCube(doc, { x: 5, y: 6 });
+  check('a cube is five gates of one group, flown through two faces', made.ids.length === 5 && doc.elements.length === 5 && doc.sequence.length === 2
+    && doc.elements.every((e) => e.group === made.group), `${doc.elements.length} elements, ${doc.sequence.length} passes`);
+  const plain = toPlain(doc);
+  const back = normalize(JSON.parse(JSON.stringify(plain))).doc;
+  check('the group, the flat faces and the passes survive a write and a read',
+    back.elements.filter((e) => e.group === made.group).length === 5 && back.elements.filter((e) => e.unbuilt === true).length === 1
+    && back.sequence.length === 2 && JSON.stringify(toPlain(back)) === JSON.stringify(plain));
+  const warns = collectWarnings(back, buildPath(back));
+  check('the warnings run, and none of them is about a face that is not flown',
+    warns.every((w) => typeof w.message === 'string' && w.message.length > 0) && !warns.some((w) => w.code === 'unsequenced'),
+    warns.map((w) => w.code).join());
+  const course = courseFromDocument(back);
+  check('the course has two stations and lists the two faces that are built and not flown',
+    course.stations.length === 2 && Array.isArray(course.loose) && course.loose.length === 2, `${course.stations.length} stations, ${(course.loose || []).length} loose`);
+  const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+  check('every number in it is finite', [...course.stations, ...course.loose].every((q) => [q.x, q.z, q.yaw, q.pitch, q.clearW, q.clearH, q.centreY].every(finite)));
+  const plan = planFromDocument(back);
+  check('the plan builds, every mark a number', Boolean(plan) && plan.marks.every((m) => finite(m.x) && finite(m.y)));
+  const sheet = buildSheet(back);
+  check('the sheet counts twelve pipes for it, and eight corners',
+    sheet.members === 12 && sheet.parts.fittings.some((f) => f.kind === '3-way corner' && f.count === 8), `${sheet.members} pipes`);
+  const lone = normalize(JSON.parse(JSON.stringify(toPlain(createTrack('none', 'micro'))))).doc;
+  check('a course with no group has no list of loose faces at all', !('loose' in courseFromDocument(lone)));
 }
 
 function raceDemo() {
@@ -826,6 +863,7 @@ function specGuard() {
 }
 
 pipeline('micro');
+cubePipeline();
 pipeline('full');
 raceDemo();
 raceTheDerivedLine();

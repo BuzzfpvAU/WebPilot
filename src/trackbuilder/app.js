@@ -35,7 +35,7 @@ import {
   createTrack, createElement, deepClone, deserialize, duplicateTrack,
   elementById, kindOf, normalize, startPadsOf, touch,
   aperturesOf, toPlain, logosOf, brandingBytes, newLogoId, dressOrder, setSideBuilt,
-  LOGO_SLOTS, BRANDING_MAX_CHARS,
+  LOGO_SLOTS, BRANDING_MAX_CHARS, expandGroups,
 } from './model.js';
 import { applyAutoFaces, clearOverride, flipFace, setYaw } from './faces.js';
 import {
@@ -45,8 +45,8 @@ import {
 import { applyFigure, upgradeStackedFigures } from './figures.js';
 import { apertureAt, flyAgain, focusFor, removeLastPass, MAX_PASSES } from './passes.js';
 import {
-  QUARTER, copyElements, magnetFor, moveToPlace, nearestQuarter, placeOnTrack, placeRow as layRow, replaceWith,
-  rowPlan, turnStepFor,
+  QUARTER, copyElements, magnetFor, moveToPlace, nearestQuarter, placeCube, placementFor, placeOnTrack, placeRow as layRow,
+  replaceWith, rowPlan, turnGroups, turnStepFor,
 } from './snap.js';
 import { buildPath, passYawOf } from './path.js';
 import { collectWarnings, freestyleReport, labeller, sortWarnings } from './warnings.js';
@@ -874,10 +874,12 @@ export class App {
   /* ---------------- selection ---------------- */
 
   setSelection(ids, additive = false) {
+    /* A piece of a group is the whole group: a face of a cube is not something to move on its own. */
+    const wanted = expandGroups(this.doc, ids);
     if (!additive) {
-      this.selection = new Set(ids);
+      this.selection = wanted;
     } else {
-      for (const id of ids) {
+      for (const id of wanted) {
         this.selection.add(id);
       }
     }
@@ -892,10 +894,15 @@ export class App {
   }
 
   toggleSelection(id) {
+    const members = expandGroups(this.doc, [id]);
     if (this.selection.has(id)) {
-      this.selection.delete(id);
+      for (const m of members) {
+        this.selection.delete(m);
+      }
     } else {
-      this.selection.add(id);
+      for (const m of members) {
+        this.selection.add(m);
+      }
     }
     this.pruneActiveNode();
     this.keepPickedSide();
@@ -1602,6 +1609,10 @@ export class App {
     if (type === 'ruler') {
       return;
     }
+    if (type === 'cube') {
+      this.placeCubeAt(world);
+      return;
+    }
     const def = ELEMENTS[type];
     const freestyle = docModeOf(this.doc) === 'freestyle';
 
@@ -1678,6 +1689,24 @@ export class App {
   }
 
   /*
+   * A CUBE, from the tool: five gates in one group, laid where the faces of a cube are and flown straight
+   * through, in at the back and out at the front, one undo step, and what is selected after (all of it, as a
+   * group is). The heading is the one a gate would be given here, so the cube faces along the line as a gate
+   * does. The rule is placeCube in snap.js.
+   */
+  placeCubeAt(world) {
+    if (!this.isWhoopRace()) {
+      return;
+    }
+    const yaw = placementFor(this.doc, world, 'gate').yaw;
+    let made = null;
+    this.edit('place a cube', (d) => { made = placeCube(d, world, { yaw }); });
+    if (made) {
+      this.setSelection(made.ids);
+    }
+  }
+
+  /*
    * A ROW OF GATES, from where a drag began to where it ended: two or three
    * ordinary gates 30 in apart, one undo step, and what is selected after. The
    * rule is layRow in snap.js.
@@ -1733,8 +1762,18 @@ export class App {
     }
   }
 
-  rotateSelected(yaw) {
+  rotateSelected(yaw, leadId = null) {
+    /* A group turns as one piece, about its own middle: by as much as the piece under the ring has been turned
+     * to, so every face goes round with it. */
+    const lead = leadId ? elementById(this.doc, leadId) : null;
+    const grouped = [...this.selection].filter((id) => elementById(this.doc, id)?.group);
+    if (grouped.length && lead && lead.group) {
+      turnGroups(this.doc, grouped, wrapAngle(yaw - lead.yaw));
+    }
     for (const id of this.selection) {
+      if (elementById(this.doc, id)?.group) {
+        continue;
+      }
       /* setYaw, not the two fields by hand: turning a gate has to pin which
        * way its passes are flown as well as which way it points, or the
        * auto rule takes the direction back the moment the drag ends. */
@@ -4444,10 +4483,12 @@ export class App {
       return;
     }
     this.edit('rotate', (d) => {
+      /* A cube turns a quarter about its middle with every face; the pieces that are not in a group turn as they do. */
+      turnGroups(d, [...this.selection], Math.sign(degrees) * QUARTER);
       for (const id of this.selection) {
         const element = elementById(d, id);
         /* A road turns by its nodes and a vehicle by its road. */
-        if (element && ![KIND.ANNOTATION, KIND.ROAD, KIND.VEHICLE].includes(kindOf(element))) {
+        if (element && !element.group && ![KIND.ANNOTATION, KIND.ROAD, KIND.VEHICLE].includes(kindOf(element))) {
           /* A whoop gate steps a quarter turn, which is what RaceGOW can
            * build; a building steps a whole quarter turn, from wherever the
            * compass has it, rather than fifteen degrees it cannot hold. */

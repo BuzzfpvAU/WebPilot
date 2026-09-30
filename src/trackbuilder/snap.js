@@ -24,15 +24,17 @@
 
 import {
   ELEMENTS, KIND, MICRO_PALETTE_ORDER, trackClassOf, docModeOf, defaultDims, defaultPitch, defaultZ, apertureShapeOf,
+  FRAME_TUBE_OD,
 } from './elements.js';
 import {
   envelopeFor, GATE_OPENING_DEFAULT, GATE_SPACING_MIN, GATE_SPACING_MAX, GATE_SPACING_NOMINAL, inches,
-  POLE_FROM_GATE_MIN, POLE_FROM_POLE_MIN,
+  POLE_FROM_GATE_MIN, POLE_FROM_POLE_MIN, PIPE_OD,
 } from './racegow.js';
 import {
   apertureCenter, aperturesOf, createElement, deepClone, elementById, entryAnchor, isSequenceable, kindOf,
-  newElementId, setSideBuilt,
+  newElementId, newGroupId, setSideBuilt,
 } from './model.js';
+import { cubeFaces } from './cube.js';
 import { addToSequence, gateNumbers, moveInSequence, removeFromSequence } from './sequence.js';
 import { applyFigure, defaultFigure } from './figures.js';
 import { applyAutoFaces, defaultYawFor, lastAnchorOf } from './faces.js';
@@ -346,15 +348,29 @@ export function copyElements(doc, ids, offset = null) {
   }
   const shift = offset ?? copyOffsetFor(doc, copyable);
   const made = [];
+  /* A copy of a group is a group of its own: a name that is not the first one's, or moving either would move
+   * both. And it is flown the way the first is, in the passes the first is flown in and not once for each
+   * piece, so a copy of a cube is two passes and not five. */
+  const groups = new Map();
+  const copyOf = new Map();
+  const passes = doc.sequence.filter((q) => copyable.some((el) => el.id === q.elementId && el.group));
   for (const src of copyable) {
     const copy = deepClone(src);
     copy.id = newElementId(doc);
     copy.name = '';
     copy.position.x = round6(src.position.x + shift.x);
     copy.position.y = round6(src.position.y + shift.y);
+    if (src.group) {
+      if (!groups.has(src.group)) {
+        /* Taken as soon as the copy is in the document, so the next group of a copy of several gets another. */
+        groups.set(src.group, newGroupId(doc));
+      }
+      copy.group = groups.get(src.group);
+    }
     doc.elements.push(copy);
     made.push(copy.id);
-    if (isSequenceable(copy)) {
+    copyOf.set(src.id, copy.id);
+    if (isSequenceable(copy) && !copy.group) {
       addToSequence(doc, copy.id, 0);
       const fig = defaultFigure(copy);
       if (fig !== 'single') {
@@ -362,7 +378,121 @@ export function copyElements(doc, ids, offset = null) {
       }
     }
   }
+  for (const q of passes) {
+    const seq = addToSequence(doc, copyOf.get(q.elementId), q.apertureIndex ?? 0);
+    if (seq && q.overridden) {
+      seq.entry = q.entry;
+      seq.overridden = true;
+    }
+  }
   return made;
+}
+
+/*
+ * THE FACES OF A CUBE AS IT WOULD BE LAID, in the terms a gate is made of: where each stands, which way it
+ * faces, and the tilt, the sizes and the sides it is given. The room draws these faint under the pointer
+ * before the click and placeCube makes gates of them on it, so what is shown is what is laid. Nothing in the
+ * track is touched.
+ *
+ * `at` is the middle of the cube on the floor, `yaw` the way its front faces, `lift` how far its bottom
+ * stands off the floor, `edge` the opening of every face. Each item is { face, position, yaw, props }, and
+ * props is what a gate made from it is given besides its place: pitch, dims, unbuilt, unbuiltSides.
+ */
+export function cubeItems(doc, at, opts = {}) {
+  const cls = trackClassOf(doc);
+  const edge = opts.edge ?? defaultDims('gate', cls).clearW;
+  const tube = (cls === 'micro' ? PIPE_OD : FRAME_TUBE_OD) / 2;
+  const yaw = opts.yaw ?? 0;
+  const lift = Math.max(0, opts.lift ?? 0);
+  const cs = Math.cos(yaw);
+  const sn = Math.sin(yaw);
+  const items = cubeFaces(edge, tube, lift).map((f) => ({
+    face: f.face,
+    position: { x: round6(at.x + f.x * cs - f.y * sn), y: round6(at.y + f.x * sn + f.y * cs), z: 0 },
+    yaw: round6(wrapAngle(f.yaw + yaw)),
+    props: {
+      pitch: f.pitch,
+      dims: { clearW: edge, clearH: edge, sillH: round6(f.sillH) },
+      ...(f.unbuilt ? { unbuilt: true } : {}),
+      ...(f.unbuiltSides.length ? { unbuiltSides: [...f.unbuiltSides] } : {}),
+    },
+  }));
+  return { items, edge, lift };
+}
+
+/*
+ * A CUBE, in one click: five gates, or six when it is lifted clear of the floor, in one group, laid where
+ * the faces of a cube are (cube.js), with their headings pinned so the auto rule leaves them square, and
+ * flown straight through, in at the back and out at the front, which is the way its front faces and so the
+ * way the line runs when the tool gives it the heading a gate would have. The faces the flight does not use
+ * are still there, and still solid and still pipe. Turn the two passes to another pair of faces with the Fly
+ * order tool.
+ *
+ * `opts` is cubeItems's, and `passes` is the two faces it is flown by, in at the first and out at the
+ * second (back and front unless it is told; a face this cube does not have is not flown, and the two it does
+ * have take its place). Returns the ids in the order of CUBE_FACES, the group they are in, and the names of
+ * the faces the passes went through.
+ */
+export function placeCube(doc, at, opts = {}) {
+  const group = newGroupId(doc);
+  const { items } = cubeItems(doc, at, opts);
+  const ids = [];
+  for (const item of items) {
+    const el = createElement(doc, 'gate', item.position, item.yaw);
+    Object.assign(el.dims, item.props.dims);
+    el.pitch = item.props.pitch;
+    el.yawOverridden = true;
+    el.group = group;
+    if (item.props.unbuilt) {
+      el.unbuilt = true;
+    }
+    if (item.props.unbuiltSides) {
+      el.unbuiltSides = [...item.props.unbuiltSides];
+    }
+    doc.elements.push(el);
+    ids.push(el.id);
+  }
+  const made = items.map((it) => it.face);
+  const named = (opts.passes ?? ['back', 'front']).filter((face) => made.includes(face));
+  const flown = named.length === 2 && named[0] !== named[1] ? named : ['back', 'front'];
+  for (const face of flown) {
+    addToSequence(doc, ids[made.indexOf(face)], 0);
+  }
+  return { ids, group, passes: flown };
+}
+
+/*
+ * TURN EVERY GROUP THAT IS IN `ids` about its own middle, by `delta` radians: each face goes round the middle
+ * and its heading goes round by as much, so the cube is the same cube, facing another way. The middle of a
+ * cube is where its flat face is (the faces stand round it and the flat one is over it), and where the faces
+ * average to when it has none. A piece that is in no group is left as it is: it has its own way of turning.
+ * Returns whether anything turned.
+ */
+export function turnGroups(doc, ids, delta) {
+  const done = new Set();
+  let turned = false;
+  for (const id of ids) {
+    const first = elementById(doc, id);
+    if (!first || !first.group || done.has(first.group)) {
+      continue;
+    }
+    done.add(first.group);
+    const members = doc.elements.filter((e) => e.group === first.group);
+    const flat = members.find((e) => Math.abs(e.pitch || 0) > 1);
+    const cx = flat ? flat.position.x : members.reduce((a, e) => a + e.position.x, 0) / members.length;
+    const cy = flat ? flat.position.y : members.reduce((a, e) => a + e.position.y, 0) / members.length;
+    const cs = Math.cos(delta);
+    const sn = Math.sin(delta);
+    for (const e of members) {
+      const dx = e.position.x - cx;
+      const dy = e.position.y - cy;
+      e.position.x = round6(cx + dx * cs - dy * sn);
+      e.position.y = round6(cy + dx * sn + dy * cs);
+      e.yaw = round6(wrapAngle(e.yaw + delta));
+    }
+    turned = true;
+  }
+  return turned;
 }
 
 /*
@@ -795,6 +925,11 @@ export function replacementsFor(doc, ids) {
   if (!group || pieces.some((el) => !group.includes(el.type))) {
     return [];
   }
+  /* A face of a cube is not one piece: it is a gate that is part of five more, and turning it into a hoop
+   * would take a side out of a cube. */
+  if (pieces.some((el) => el.group)) {
+    return [];
+  }
   const same = pieces.every((el) => el.type === pieces[0].type);
   return MICRO_PALETTE_ORDER.filter((t) => group.includes(t) && !(same && t === pieces[0].type));
 }
@@ -822,7 +957,7 @@ export function replaceWith(doc, ids, type) {
   const changed = [];
   for (const id of new Set(ids)) {
     const el = elementById(doc, id);
-    if (!el || el.type === type || !group.includes(el.type)) {
+    if (!el || el.type === type || !group.includes(el.type) || el.group) {
       continue;
     }
     const from = el.type;

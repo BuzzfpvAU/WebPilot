@@ -61586,3 +61586,195 @@ Stage 0 repair, named), 0 throw on either side.
                              world-golden are the physics evidence), `shots.js` and a hand flight (offered at
                              the end of the turn), `lint:input`, and `lint:catalog` (cannot run in this
                              container). Nothing was tried on a real phone or tablet, or on a real GPU.
+
+## 2026-09-30 | builder | Whoop builder, Stage 4 finishes: the cube
+
+The sixth and last of the six parts the owner asked for on 2026-09-30 (the answers are recorded in the entry
+"Stage 4 begins" and are not repeated). Decision 6, the board, is still unanswered and nothing in the
+LeaderBoard or landing repositories was touched. The simulator still refuses to publish a track that holds
+any of the six parts, and now counts a cube by its group.
+
+### What was built
+
+A cube is what RaceGOW's cube is made of: **one gate for each face, five on the floor and six when it stands
+clear of it, that share a `group`.** Nothing in the path, the race or the views had to learn a new shape,
+because a face is a gate and the two passes that fly a cube are two gates in the flying order. (The game was
+the exception, and is the next section.)
+
+- **`src/trackbuilder/cube.js` (new, pure).** `cubeFaces(edge, tube, lift)`: front, back, left, right and top
+  on the floor, and a bottom when the cube is lifted by half an opening and a pipe (the sixth face of a cube on
+  the floor would be under it). The front and the back keep four sides. The left and the right have
+  `unbuiltSides` left and right, because their uprights are the front's and the back's. The top and the bottom
+  are flat (`pitch` a quarter turn) and `unbuilt`, a gap in the lattice. So every one of the twelve edges is
+  pipe once: twelve lengths and eight three way corners, and the sheet says so without being told (sixteen
+  lengths when it is lifted, on four legs).
+- **The group (`model.js`).** An optional `group` on an aperture: a name of at most 40 characters, dropped with
+  a repair note when it is anything else. `groupMembers`, `expandGroups`, `newGroupId`. A gate on its own is
+  the same JSON it was.
+- **Laying, turning, copying (`snap.js`).** `cubeItems` is the one list the ghost draws and `placeCube` lays.
+  `turnGroups` turns a cube about its flat face, which is its middle, and every heading goes round by as much.
+  A copy is a group of its own and is flown in two passes, not five. A face is not replaced with another part
+  (`replacementsFor`, `replaceWith`).
+- **The room (`app.js`, `edit3d.js`, `view3d.js`, `view2d.js`, `ui.js`).** A Cube tool (K, and its button on a
+  touch screen) with a ghost of the five faces under the pointer that snaps as the click does. A click on any
+  face picks all of them; one drag moves them, Q and E and the ring at the foot turn them, Control D copies
+  them and Delete removes them, each as one undo step. The card says Cube. The Fly order tool changes the two
+  faces it is flown through: take the passes off and click two faces (in at the top and out at the right is
+  that). On the plan, the red crosses that mark an upright taken away are not drawn on a cube.
+- **The flying order (`sequence.js`, `warnings.js`).** A cube with a face in the order is not warned about for
+  its other faces. One that nothing flies is said once, as a cube, and the sentence says it is still built.
+- **The sheet (`buildsheet.js`).** Its gates are listed as Cube faces that share their pipe, and the parts
+  count the twelve pipes once.
+- **The importer (`importfpv.js`).** Their cube gates were a waypoint at the middle of the cube. They are a cube
+  now, at their size and height and heading, flown in at the face the file names first and out at the second
+  ("top>right"). The file does not say from which side its left and right are seen, so that is read as ours and
+  the report says so.
+- **The board (`share/board.js`).** A cube is counted by its group, after the parts that have a type of their
+  own, and refused with them: the board would keep the gates and lose what makes them one.
+- **Documents and checks.** `schema.md` (the field and a section on the cube), the plan, `micro:check` (a cube
+  through the whole pipeline), `check:builder` (four new cases, two old ones brought up to date), the self test.
+
+### The game did not build every face
+
+Found by counting the real game's colliders after Fly this track on a cube: **6 gate capsules and 4 stubs where
+the cube's own geometry says 8 and 4.** The world builds a gate for every station and for nothing else, so a gate
+that the flying order leaves out is in the document, in the room and on the sheet, and not on the field. That is
+the rule for a gate on its own and it stays. For a cube it meant the left and the right faces were missing from
+the world: a cube with two faces and a gap. Nothing I had checked could see it. The real `Race` credited the
+passes, and the builder's picture is the builder's.
+
+The fix is additive and gated on the new field. `courseFromDocument` lists the faces of a group that no pass
+goes through and that have some pipe (`course.loose`; no key at all, not an empty list, when there is none),
+built the way a station would build them if the line went through the face along its own normal, and
+`coursePlacements` in `scene.js` builds each as solid pipe with no station: nothing to score, nothing lit, no
+number. The heading and the tilt of a mesh come from one function now, `meshFrameFor`, which the stations use
+too. This is world content, not the physics model's shape (no plant, ABI or build change), and it is written
+here so that the owner can say otherwise.
+
+Counted again in the real game: a cube on the floor is 8 gate capsules and 4 stubs, a lifted one 12 and 4, and a
+cube flown in at the top and out at the right is the same 8 and 4. `check:builder` runs the first and the last,
+each after a real Fly this track; the lifted one was run by hand. Without the list the case fails at 6.
+
+### Physics: no change (the answer to 5, again)
+
+`git diff --stat -- src/native dist configs vendor scripts/build-wasm.sh tests/goldens` is empty. A cube brings no
+shape the physics has not been given: its tubes, posts and stubs are the capsules of an ordinary gate, from the
+same `obstacle()` and `tiltedGate()`. It was flown, not only claimed:
+
+- **The spike, before any code.** Six face gates, top then right, through the real `Race` in Node: the order is
+  credited, the reverse is not, and a flight three metres to one side is not.
+- **The real `Race` on a cube laid as the tool lays it.** In at the back and out at the front is credited; above
+  the cube and front to back are not. In at the top and out at the right is credited and the reverse is not.
+- **The real game's collider census,** above, and on the tracks that exist (next section).
+- **`check:room`** is unchanged at 71 checks and passes. I did not add a flight through a cube to it: there is
+  no capsule kind, shape or count in a cube that a gate does not have, and `whoop:gates` flies those. It is a
+  small addition if the owner wants one.
+
+### Where this departs from the plan, and why
+
+- **Five faces on the floor, not six.** The sixth is under the floor. A cube lifted by half an opening and a
+  pipe has it, and can be flown up through.
+- **A change in the game,** which the plan did not see. Above.
+- **In at the back and out at the front is what a new cube is flown through,** not the plan's example (in at
+  the top and out at the right, which is two clicks with the Fly order tool). The first version was in at the
+  front and out at the back, and a cube laid on a straight line between two gates raised a false "faces back
+  towards" warning on its second pass, because the line runs the way the front faces. A test (a cube between
+  two gates in a row) fails with the first default and passes with this one. The two warnings the last gate of
+  any straight row gets, because the lap comes back, are not the cube's and are unchanged.
+- **A cube is one piece and nothing edits a face.** The inspector offers no size presets for it, and the card
+  does not offer to turn it into a hoop. A hand edited file can still hold a group with a face missing: it
+  turns about its flat face, and the game builds what is there.
+- **A copy lands 2.2 m from the original,** the rule for a group (the box of everything, from each piece's
+  reach, plus 30 in), which for a cube is about twice the width it has. It is clear of it and not close to it.
+
+### The tracks that exist are not touched
+
+- **Documents.** Against the code as it was before the whole whoop builder work (`31433d8`), on this tree: the same
+  report as the last stage, line for line. 431 documents: 390 identical in every respect, the same 41 differ (each a
+  Stage 0 repair, named), 0 throw on either side.
+- **The real game.** Every shipped whoop track (eight) and every saved five inch track in `tracks/json` (ten) was
+  flown to the game's start by the old tree and by this one, and the game's collider set was counted by kind: total,
+  capsules, boxes and every kind, identical on all eighteen. That is the check that covers `scene.js`, which the
+  differential above cannot see.
+- **The other canvases and the animation.** The 5 inch and freestyle canvases, in six states (empty and loaded, on the plan and in the room), are
+  pixel identical to the old tree: 1,440,000 pixels each, none differ, largest difference 0. The eight shipped
+  whoop tracks exported through the real Export animation button are byte identical to the old tree's, the same
+  SHA-256, frame count and size.
+
+### What went wrong
+
+- **The game.** See above: I had written that a cube is ordinary gates so nothing in the game has to learn about it,
+  and that was wrong for a gate the order leaves out. It was found by counting, not by looking.
+- **A default that fought the line.** In at the front and out at the back. Found by placing a cube between two gates
+  and reading the warnings, before any test existed for it.
+- **A ghost that was not the click.** The ghost snapped as a gate, whose magnet takes a piece 30 in along a gate's
+  width, and the click did not, so next to a gate the faint cube and the laid cube were 2 cm and a quarter turn
+  apart. Found by reading the diff, shown by a new case, fixed. A cube has no magnet.
+- **Crosses at a cube's corners on the plan.** The mark for an upright taken away was drawn for the left and the
+  right, four red crosses that say something is missing. 110 red pixels in the check, none after.
+- **Touch words copied from another tool.** "Tap the plus again" is the Fly order tool's; a cube is put away by
+  tapping Cube again. The check for the line now fails on the old words.
+- **Mutations.** Twenty of the cube's. Two survived at first: turning about the mean and about the flat face are the
+  same for a whole cube (a test now turns a cube that has lost a face), and the guard in `replaceWith` was only
+  reached through the guard in `replacementsFor` (a test now calls it directly). All are caught.
+- **Weak checks of mine.** A check in the second new case that was `true`, replaced with the toast and error checks it
+  stood for; and the new cases' first expectations were wrong about the card (hidden while a tool is armed), Escape,
+  how many undo steps a copy and a delete are, and the plus chip on the lap strip.
+- **Two old flow checks** that named the old importer's waypoint and the old five part sentence. Both are the
+  intended change and were brought up to date.
+- **Displaced comments.** Two of my insertions sat between an existing doc comment and its function. Found on
+  reading the diff.
+- **Still there, not mine, not fixed.** The lap strip's kind marks (`tall`, `flat`, `pole`, `cone`) have never taken
+  effect; one timing check in the self test (a 300 element map) fails about one run in twenty four when eight run at once.
+
+### Decisions for the owner (also asked in the reply)
+
+- **6, the board.** Still open, now six parts: a table, a chair, a banner, a hoop, a hex gate and a cube. A cube is a
+  `group` field the board does not read. Until it is taught, or the owner says otherwise, the simulator refuses all six.
+- **A cube that nothing flies.** I made it stay built and solid, and said once. The alternative is what a gate does:
+  not built at all.
+- **In at the back and out at the front** as what a new cube is flown through.
+- **Their cube's left and right.** Read as ours, and said in the report. A real file with a cube in it would settle it.
+- **The copy offset,** 2.2 m, if it should be closer.
+
+### RUN LOG
+
+    files                    src/trackbuilder/cube.js (new); src/trackbuilder/model.js, snap.js, sequence.js,
+                             warnings.js, elements.js, app.js, edit3d.js, view3d.js, view2d.js, ui.js,
+                             buildsheet.js, importfpv.js, schema.md, selftest.js; src/game/trackdoc.js;
+                             src/render/scene.js; src/share/board.js; scripts/micro-check.js,
+                             builder-flow-check.js; src/fresh.js (generated); the plan
+    self test                node src/trackbuilder/selftest.js: 1765 passed, 0 failed (1682 before; 83 new, written before the
+                             code they check)
+    mutations                20 of the cube's (group, turning, copying, selection, warnings, the sides, the
+                             game's list three ways, the facing, the board's count twice, the default passes,
+                             replace with twice, the importer's size, the flat faces): all caught
+    physics                  npm run check:room: 71 passed, 0 failed (unchanged); check:world-golden: all passed;
+                             git diff --stat over src/native dist configs vendor scripts/build-wasm.sh
+                             tests/goldens is empty, and so is vendor/betaflight
+    browser check            npm run check:builder: all 38 cases pass, exit 0, 449 assertions (34 cases and 397 before). New
+                             cases: "a cube" (the palette, K, the ghost, a click, picking any face, dragging,
+                             turning, copying, removing, undo, the lap strip, the plan and its corners, Publish,
+                             the sheet, and the real game's colliders after Fly this track), "a cube flown through
+                             other faces" (Fly order, top then right, and the same world), "a cube by touch" and
+                             "a cube ghost is where the click lays it". Two old cases brought up to date (the
+                             importer's cube, the sentence Publish says). The first, without the game's list,
+                             fails at 6 gate capsules
+    device check             npm run lint:devices: PASS; lint:responsive: PASS; lint:boot: 9 of 9
+    the rest                 micro:check exit 0, with a new cube pipeline of 8 checks that fails without the game's list;
+                             whoop:gates 21 of 21; check:path 12 passed; check:props all passed; lint:presets 4 of
+                             4; lint:nouns PASS; lint:fc 33 of 33; lint:partners 45 passed; lint:preload up to
+                             date (boot 127 modules, city 75, built 33; 240 served); check:fresh 18 passed; the
+                             documents differential 390 of 431 identical, 0 throw
+    real game                the collider census: a cube on the floor 8 gate capsules and 4 stubs, lifted 12
+                             and 4, flown top then right 8 and 4; eight whoop tracks and ten saved five inch
+                             tracks identical to the old tree, kind by kind
+    animation                the real Export animation button on a track with a floor cube, a lifted cube, a
+                             gate and a hoop: 88 frames, 512 by 512, no error from the page; the lit pane is the
+                             face being flown at
+    dashes and non ASCII     none added (scanned over the 1578 added lines, cube.js included)
+    not run                  `npm run verify` (no physics, plant, ABI or build change, and check:room and
+                             world-golden are the physics evidence), `shots.js` and a hand flight (offered at
+                             the end of the turn), `lint:input`, and `lint:catalog` (cannot run in this
+                             container). Nothing was tried on a real phone or tablet, or on a real GPU. Nothing
+                             in the LeaderBoard or the front door was touched or re-vendored.

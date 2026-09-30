@@ -853,7 +853,7 @@ export class View2D {
       if (turnsOf(el.type) === 'quarter' && offCompass(raw) > QUARTER_TURN / 4) {
         this.host.noteOffCompass(el);
       }
-      this.host.rotateSelected(snapYaw(el.type, raw, e.altKey));
+      this.host.rotateSelected(snapYaw(el.type, raw, e.altKey), el.id);
       return;
     }
 
@@ -1898,9 +1898,13 @@ export class View2D {
    * bar lands on a line and is drawn dashed, so the plan says which pipe is
    * gone for any tilt without a case for each. Red, the exit colour, because
    * it marks something that is not there.
+   *
+   * NOT FOR A FACE OF A CUBE. Its left and right have no uprights because the front and the back
+   * carry them at the corners, and the cube is drawn as one piece: four red crosses at its corners
+   * say something is missing from it, and nothing is.
    */
   drawMissingSides(ctx, el) {
-    if (!hasMissingSides(el)) {
+    if (!hasMissingSides(el) || el.group) {
       return;
     }
     const levels = aperturesOf(el);

@@ -468,6 +468,17 @@ right, in Node through the real `Race`. Its costs are six elements in the
 document for one cube, a group concept the builder does not have, and an auto
 rule that has to leave all six faces alone (they are all pinned).
 
+*Built as recommended, 2026-09-30 (PROGRESS.md, "the cube").* The spike flew top then right through
+the real `Race` and it credited the order and refused the reverse and a flight beside it. Two things
+differ from the paragraph above. A cube on the floor is five faces, not six: the sixth would be under
+the floor, and a cube lifted by half an opening and a pipe has it. And the game needed one small
+addition the plan did not see: the world builds a gate for every pass and for nothing else, so the
+faces of a cube that no pass goes through were missing from it. The course now lists the faces of a
+group that no pass goes through (`loose`, in `src/game/trackdoc.js`) and the scene builds them as
+solid pipe with nothing to score. A track with no group has no such list, and the census of the real
+game's colliders on the eight shipped whoop tracks and ten saved five inch tracks is identical to the
+code before this work.
+
 ### 4.4 Physics: none planned
 
 The plant takes any static solid as `sim_world_box` (axis aligned) or
@@ -550,8 +561,9 @@ rotY, dir, prop }], measurements }`. The mapping worked in the scratch script:
 - **Heading:** their `rotY` minus 90 degrees, pinned.
 - **Height** becomes sill height. Gates at one spot with different heights become
   a stack, flown in their order.
-- **Poles** become poles. Cube passes become waypoints until the cube exists.
-  Tables, chairs and banners are dropped and listed until Stage 4.
+- **Poles** become poles. Cube passes became waypoints until the cube existed; a cube is now a
+  cube of gates, flown in at the face the file names first and out at the second (Stage 4).
+  Tables, chairs and banners were dropped and listed until Stage 4, and are ours now.
 
 It reports what it kept, approximated and dropped, as our other importers do. Their
 API sends no CORS headers, so a page on webfpv.org cannot fetch a link; importing
@@ -667,7 +679,11 @@ physics needed nothing, and `npm run check:room` flies the real module through e
 board's refusal is in `publishTrack`. Hoop and hex are in too (PROGRESS.md, "a hoop and a hex gate"): an
 opening's shape inscribed in its rectangle, `src/props/aperture.js` for the arithmetic, the pass test clipped
 exactly against the shape, the frame a run of capsules from one function that the game, the room and a
-flight check all read; `check:room` flies them. Left: the cube spike, the cube.
+flight check all read; `check:room` flies them. The cube is in too (PROGRESS.md, "the cube"): five
+gates that share a `group`, a tool that lays them in one click, selected, moved, turned, copied and removed as one
+piece, flown in at the back and out at the front unless the Fly order tool says two other faces, and built whole in
+the game (counted in the real game's collider set). Decision 6, the board, is still open, so publishing refuses
+all six parts. Left of Stage 4: nothing but the owner flying it.
 
 **Stage 5. Ways out (optional),** in the order of 5.4.
 

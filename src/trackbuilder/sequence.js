@@ -351,5 +351,8 @@ export function faceLabel(doc, seq) {
  * the sequence panel's "not in the course" list. */
 export function unsequencedElements(doc) {
   const used = new Set(doc.sequence.map((s) => s.elementId));
-  return doc.elements.filter((e) => isSequenceable(e) && !used.has(e.id));
+  /* A cube is flown through two of its faces and the others are not forgotten: a piece of a group that has
+   * a face in the flying order is part of what is flown. A group that has none is said to be, face by face. */
+  const flown = new Set(doc.elements.filter((e) => e.group && used.has(e.id)).map((e) => e.group));
+  return doc.elements.filter((e) => isSequenceable(e) && !used.has(e.id) && !(e.group && flown.has(e.group)));
 }

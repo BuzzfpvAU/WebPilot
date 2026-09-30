@@ -24,12 +24,16 @@
  *   Direction. "back" is flown the other way through the gate.
  *   Poles are poles, in the flying order where they stand in theirs.
  *
- * WHAT DOES NOT, said in the report and never silently: their cube gates have no
- * element in a whoop room yet, so each pass is a waypoint at the middle of the
- * cube; a type this does
+ * WHAT DOES NOT, said in the report and never silently: a type this does
  * not know is dropped by name, and so is their start marker; the tape
  * measurements are not kept (a layout fact belongs in the build sheet); a gate
  * outside our 10 by 12 m hall is dropped.
+ *
+ * A CUBE is ours now (src/trackbuilder/cube.js): five gates in one group, or six when it stands
+ * clear of the floor, laid where the faces of a cube are, at the size and the height it had and
+ * the way it faced, and flown in at the face the file names first and out at the second ("top>right").
+ * Their file names faces and does not say from which side its left and right are seen, so that is
+ * read as ours (left is to the left of the way the cube faces) and the report says so.
  *
  * HOOPS AND HEXES are ours now (src/props/aperture.js): a hoop and a hex gate, where they
  * stood, at the width and the height they had, with the direction they were flown. A hoop is
@@ -72,7 +76,7 @@ import { createTrack, createElement, normalize } from './model.js';
 import { addToSequence } from './sequence.js';
 import { applyAutoFaces } from './faces.js';
 import { GATE_OPENING_MAX, GATE_OPENING_MIN, inches } from './racegow.js';
-import { nearestQuarter } from './snap.js';
+import { nearestQuarter, placeCube } from './snap.js';
 import { ROOM_SIZES, clampRoomSize } from '../props/room.js';
 import { HEX_HEIGHT_RATIO } from '../props/aperture.js';
 
@@ -109,6 +113,21 @@ const NAMES = {
 
 /* The three of theirs that are furniture in ours. */
 const FURNITURE = ['table', 'chair', 'banner'];
+
+/* The faces of a cube by the words their file uses for them ("top>right" is in at the top and out at
+ * the right), and ours. Forward and back are the two a plain gate's direction uses. */
+const CUBE_WORDS = {
+  top: 'top', bottom: 'bottom', left: 'left', right: 'right', front: 'front', forward: 'front', back: 'back', backward: 'back',
+};
+
+/* The two faces a cube is flown through, from the file's direction, and whether the file said. */
+function cubePasses(dir) {
+  const parts = String(dir ?? '').toLowerCase().split('>').map((w) => CUBE_WORDS[w.trim()]);
+  if (parts.length === 2 && parts[0] && parts[1] && parts[0] !== parts[1]) {
+    return { faces: parts, said: true };
+  }
+  return { faces: ['back', 'front'], said: false };
+}
 
 /*
  * The three sizes of one of ours, from the one number of theirs: a table's length,
@@ -317,16 +336,28 @@ export function importFpvEvents(input) {
         report.approximated.push(`#${e.n} is a banner, ${mm(e.def.size)} wide: it became a banner ${mm(dims.width)} wide and ${mm(dims.height)} high, at the nearest quarter turn to its heading. The file does not say how tall it is or which way its face looks, so check both.`);
       }
     } else if (shape === 'cube') {
-      const el = createElement(doc, 'waypoint', { x: p.x, y: p.y, z: g.height + e.def.size / 2 }, 0);
-      doc.elements.push(el);
-      target = { el, level: 0 };
-      report.approximated.push(`#${e.n} is a pass through a cube (${mm(e.def.size)}): a whoop room has no cube yet, so it became a waypoint at the middle of the cube.`);
+      /* Two passes, in the order of their list, through the two faces the file names. */
+      const want = cubePasses(g.dir);
+      const cube = placeCube(doc, { x: p.x, y: p.y }, {
+        yaw, lift: Math.max(0, g.height), edge: e.def.size, passes: want.faces,
+      });
+      const flown = cube.passes;
+      const asked = flown.join() === want.faces.join();
+      report.approximated.push(`#${e.n} is a cube, ${mm(e.def.size)}: it became a cube of gates ${mm(e.def.size)} across, ${want.said && asked
+        ? `flown in at the ${flown[0]} and out at the ${flown[1]}`
+        : `flown straight through, in at the back and out at the front, because ${want.said ? 'this cube has no such face' : 'the file names no faces'}`}. The file does not say which side of the cube its left and right are seen from, so check them.`);
+      if (e.def.size > GATE_OPENING_MAX + 1e-6 || e.def.size < GATE_OPENING_MIN - 1e-6) {
+        if (!tooBig.includes(e.def.size)) {
+          tooBig.push(e.def.size);
+        }
+      }
+      continue;
     }
     if (!target) {
       continue;
     }
     const seq = addToSequence(doc, target.el.id, target.level);
-    if (seq && shape !== 'cube' && shape !== 'pole') {
+    if (seq && shape !== 'pole') {
       seq.entry = g.dir === 'back' ? -1 : 1;
       seq.overridden = true;
     }
