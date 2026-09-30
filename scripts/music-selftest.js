@@ -382,6 +382,122 @@ m.setEnabled(true);
 check('and the bus comes back on the right bed',
   Math.abs(m.gain.gain.value - 0.5 * MUSIC_BUS) < 1e-9, `${m.gain.gain.value}`);
 
+/*
+ * bug-453fb074, "SOUND JUST STOPPED WORKING", a Mac and a radio. A browser
+ * suspends the context for its own reasons and nothing asked for it back:
+ * start() had a resume, but the shell only calls start() while there is no
+ * context, so the line could not run. Measured in the real shell, suspending
+ * the context and pressing a key and clicking left it suspended, its clock
+ * stopped, with the settings saying sound was on. The browser half is in
+ * scripts/input-check.js; this is the rule, with a context that says what it
+ * is told and counts what it is asked.
+ */
+console.log('\nthe sound context: a browser that takes it away is asked to give it back');
+{
+  const { MotorAudio } = await import('../src/render/audio.js');
+  const unhandled = [];
+  const onUnhandled = (e) => unhandled.push(String(e));
+  process.on('unhandledRejection', onUnhandled);
+  const fakeCtx = (state) => {
+    const on = [];
+    return {
+      state,
+      resumes: 0,
+      refuse: false,
+      addEventListener(type, fn) {
+        if (type === 'statechange') {
+          on.push(fn);
+        }
+      },
+      resume() {
+        this.resumes += 1;
+        if (this.refuse) {
+          return Promise.reject(new Error('needs a gesture'));
+        }
+        this.state = 'running';
+        return Promise.resolve();
+      },
+      /* The browser changes the state on its own and tells the page. */
+      browserSets(s) {
+        this.state = s;
+        for (const fn of on) {
+          fn();
+        }
+      },
+    };
+  };
+  const rig = (state, enabled = true) => {
+    const a = new MotorAudio();
+    const c = fakeCtx(state);
+    a.ctx = c;
+    a.enabled = enabled;
+    a.watchState(c);
+    return { a, c };
+  };
+  const flush = () => new Promise((r) => setTimeout(r, 5));
+
+  let r = rig('suspended');
+  r.a.wake();
+  check('a suspended context is resumed by wake', r.c.resumes === 1 && r.c.state === 'running', `${r.c.resumes} ${r.c.state}`);
+  r = rig('interrupted');
+  r.a.wake();
+  check('and an interrupted one, which is Safari\'s word for it', r.c.resumes === 1 && r.c.state === 'running', `${r.c.resumes} ${r.c.state}`);
+  r = rig('running');
+  r.a.wake();
+  check('a running context is left alone', r.c.resumes === 0);
+  const bare = new MotorAudio();
+  bare.wake();
+  check('with no context yet, wake does nothing and does not throw', bare.ctx === null);
+
+  r = rig('suspended');
+  r.c.refuse = true;
+  r.a.wake();
+  await flush();
+  check('a resume the browser refuses, for want of a gesture, is not an unhandled rejection', unhandled.length === 0, unhandled.join());
+
+  r = rig('suspended');
+  r.a.start();
+  check('start on an existing suspended context resumes it, the line that could not run before, and turns sound on',
+    r.c.resumes === 1 && r.a.enabled === true, `${r.c.resumes} ${r.a.enabled}`);
+
+  r = rig('running');
+  r.c.browserSets('suspended');
+  check('a context the browser suspends on its own is asked back with no gesture: a radio pilot makes none',
+    r.c.resumes === 1 && r.c.state === 'running', `${r.c.resumes} ${r.c.state}`);
+  r = rig('running', false);
+  r.c.browserSets('suspended');
+  check('but not when the pilot has sound off: nothing is asked of a context nobody wants', r.c.resumes === 0);
+
+  r = rig('running');
+  r.c.refuse = true;
+  for (let i = 0; i < 6; i += 1) {
+    r.c.browserSets('suspended');
+  }
+  await flush();
+  check('a browser that will not have it is asked three times, and then left alone, not argued with in a loop',
+    r.c.resumes === 3, `${r.c.resumes}`);
+  r.c.refuse = false;
+  r.a.wake();
+  check('a gesture asks again whatever the count, and it comes back', r.c.resumes === 4 && r.c.state === 'running', `${r.c.resumes} ${r.c.state}`);
+  r.c.browserSets('suspended');
+  check('and it gives the automatic tries their allowance back', r.c.resumes === 5, `${r.c.resumes}`);
+  r.c.refuse = true;
+  r.c.browserSets('running');
+  r.c.browserSets('suspended');
+  r.c.browserSets('suspended');
+  r.c.browserSets('suspended');
+  r.c.browserSets('suspended');
+  await flush();
+  check('running again resets it too: three more tries, and no more', r.c.resumes === 8, `${r.c.resumes}`);
+
+  check('the report says what the browser is doing with the context, for a ticket',
+    JSON.stringify(rig('suspended').a.report()) === '{"state":"suspended","on":true}'
+    && JSON.stringify(new MotorAudio().report()) === '{"state":"none","on":false}',
+    JSON.stringify([rig('suspended').a.report(), new MotorAudio().report()]));
+
+  process.off('unhandledRejection', onUnhandled);
+}
+
 console.log(fails.length ? `\n${fails.length} failed` : '\nall passed');
 for (const f of fails) {
   console.log(`  FAIL ${f}`);

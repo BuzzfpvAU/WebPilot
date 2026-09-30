@@ -1852,6 +1852,50 @@ async function keyboardPage(page) {
   const line = await ev('const c = window.__craftState(); return JSON.stringify({ landed: c.landed, thr: input.channels.throttle, air: input.kbAir });')
     .then(JSON.parse);
   check('R puts it on the start line, parked, with the keys at idle', line.landed && line.thr === 0 && !line.air, JSON.stringify(line));
+
+  /* --------------------------------------------------------------------
+   * 10. The sound. bug-453fb074, "SOUND JUST STOPPED WORKING", a Mac and a
+   *     radio. A browser suspends the audio context for its own reasons and
+   *     nothing asked for it back. Measured on this page before the fix:
+   *     suspending it, then pressing a key and clicking, left it suspended
+   *     with its clock stopped, for good, while the settings said sound was
+   *     on. The rule itself is in scripts/music-selftest.js; this is the
+   *     shell's wiring of it.
+   * ------------------------------------------------------------------ */
+  section('sound: a context the browser takes away is asked back, by a gesture, by itself and on the tab coming forward: bug-453fb074');
+  const audioState = () => page.evaluate('window.__audio && window.__audio.ctx ? window.__audio.ctx.state : "none"');
+  /* `spent` is the browser that will not resume without a gesture: the
+   * allowance for asking on its own is used up first. */
+  const suspend = (spent) => page.evaluate(`(async () => { const a = window.__audio; ${spent ? 'a.selfWakes = 99;' : ''}
+    await a.ctx.suspend(); return 1; })()`);
+  const running = (ms = 3000) => page.until('window.__audio.ctx.state === "running"', ms).then(() => true, () => false);
+  check('the page has an audio context and it is running, to start from', await audioState() === 'running', await audioState());
+
+  await suspend(false);
+  check('suspended with no gesture at all, as a radio pilot flies: it comes back on its own', await running(), await audioState());
+
+  await suspend(true);
+  const suspendedNow = await audioState();
+  await page.cdp.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed', x: 300, y: 300, button: 'left', clickCount: 1,
+  }, page.sessionId);
+  await page.cdp.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased', x: 300, y: 300, button: 'left', clickCount: 1,
+  }, page.sessionId);
+  check('a browser that will not resume unasked: a click brings it back',
+    suspendedNow === 'suspended' && await running(), `${suspendedNow} then ${await audioState()}`);
+
+  await suspend(true);
+  await page.tap('KeyK');
+  check('and so does a key', await running(), await audioState());
+
+  await suspend(true);
+  await page.evaluate("document.dispatchEvent(new Event('visibilitychange')), 1");
+  check('and the tab coming back to the front', await running(), await audioState());
+
+  const report = await page.evaluate('JSON.stringify(window.__perfProbe().audio)').then(JSON.parse);
+  check('a bug report says what the context is doing, and whether the pilot has sound on',
+    report.state === 'running' && report.on === true && report.sound === true && typeof report.volume === 'number', JSON.stringify(report));
 }
 
 async function freestylePage(page) {
