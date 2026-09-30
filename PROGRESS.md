@@ -59794,3 +59794,33 @@ the browser listed. The sim now says this itself on Safari and iPad, where it
 used to tell you to plug the radio in."
 
 Nothing was written to the board. bug-616cc604 is open.
+
+### The owner's answer, 2026-09-30
+
+"push to main", after the summary above: what was run, what was not, and the
+reply for the ticket. It covered the push. The verification scale asked for
+was not chosen, so no pass beyond the RUN LOG above was run, and nobody has
+yet looked at these words in a real Safari or on a real iPad. Nothing was
+written to the board: whether to answer bug-616cc604, and the three tickets
+that share its cause, is still the owner's.
+
+main had not moved from a6766a4, fetched and checked just before the push, so
+it went to main as a fast-forward of ccr-07e2c12d-fuvn2z (a6766a4..3c1c9fd):
+no merge commit, no rebase and no force. The clone is still shallow, so the
+check was `git merge-base --is-ancestor origin/main HEAD`, which is true
+because a6766a4 is the commit's own parent.
+
+### Live on webfpv.org
+
+main moved a6766a4..3c1c9fd, and webfpv.org/sim served it within about 90 s:
+src/ui/stickhelp.js, src/input/input.js, src/ui/ui.js and src/main.js, read
+off the live site with a cache busting query, each hash the same as the
+commit. The polls went 0 of 4 at 3 s and 31 s, 2 of 4 at 59 s and 4 of 4 at
+87 s, so the comparison can tell old from new. No module was added or
+removed, so src/fresh.js is unchanged.
+
+That says the served files are the ones tested here. It says nothing about
+what a pilot in Safari sees, which is the owner's look: what to do and what
+would count as wrong are under "For the owner" above. The live site was not
+loaded in a browser for this check, so as not to add a visit to its
+statistics.
