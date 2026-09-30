@@ -60094,6 +60094,515 @@ and what would count as wrong are under "For the owner" above. The live site
 was not loaded in a browser for this check, so as not to add a visit to its
 statistics.
 
+## 2026-09-30 | board | Two tickets answered, and the 27 open feel reports closed wontfix
+
+Board only. Nothing in this repository changed but this entry: no code, no
+plant, no module ABI and no build.
+
+### The ask
+
+"close all tickets addressed and alll flight feel tickets", said after the
+pause menu fix was on main and live. Taken as the tickets this session worked
+on, and every ticket of kind feel whatever its status. The two entries above
+hold draft replies for the two tickets, offered and not posted; this turn
+posts them as the resolutions.
+
+### Read before writing
+
+The unfiltered listing caps at 200 and the board holds 298, so the oldest 98
+are not in it, and a count made from it was one short: bug-1dfe790c, a feel
+report filed at 06:59 UTC today, is open on the server and absent from the
+listing. `?status=open` and `?status=in_progress` ask the server itself, as
+the entry of 27 September said to. They gave 33 open and 1 in progress: 27
+feel (26 open, and bug-08577148 in progress), 5 wrong and 2 blocking. Each was
+fetched by id before it was touched, and each still had an empty resolution.
+
+The fixes the notes cite were re-hashed against the live site just before the
+first write: padgate.js, stickhelp.js, ui.js, input.js and main.js on
+webfpv.org/sim, each equal to the working tree, and origin/main still at
+596ed9e.
+
+### The two tickets, both fixed
+
+Written 07:05 and 07:06 UTC, each read back and equal to the text below
+character for character. They are the drafts of the two entries above, adapted
+to the board's voice: the commit, the reload advice and what to send if it is
+still wrong. The pause menu note adds two candid lines, that a switch the
+radio sends as a button still acts and that their own radio was not flown.
+
+bug-2d93629e, fixed:
+
+    Fixed, live now (commit 01c00e3). The pause menu was listening to your
+    radio the moment it opened, so letting go of the sticks, a small bump or
+    setting the radio down could read as roll right, which selects Resume,
+    or roll left, which is Back and is also Resume there. A menu opened from
+    flight now waits until the sticks have been at rest for half a second,
+    and roll has to be held for a fifth of a second to count. So pause, let
+    go, give it a moment, then hold roll right to select. A switch the radio
+    sends as a button still selects or goes back, on purpose. Reload the
+    page first (Ctrl+Shift+R if it still behaves the old way). We reproduced
+    this with a simulated TX15 and have not flown yours, so if it still
+    happens please send another report from the menu: it now records what
+    the radio did to the menu.
+
+bug-616cc604, fixed:
+
+    Answered, and the sim now says it too (commit 3c1c9fd). Your radio,
+    cable and port are most likely fine: Safari usually does not show a web
+    page a USB radio, and on an iPad every browser is Safari underneath, so
+    no browser there can. On the MacBook, plug the Pocket in first and pick
+    joystick on the radio when it asks, then open webfpv.org in Chrome, Edge
+    or Firefox and use Settings, Choose joystick, then Calibrate sticks. On
+    Safari and iPad the sim used to tell you to plug the radio in; it now
+    says the browser is the likely cause, and a bug report records what the
+    browser listed. Reload first (Ctrl+Shift+R if it looks unchanged). If
+    the radio still does not show in Chrome, please send another report from
+    that screen.
+
+Why bug-616cc604 is fixed and not wontfix. What changed is the sim's words and
+what a report records. The radio still does not appear in Safari, and nothing
+the page does can make it. The nearest earlier ticket on the same cause,
+bug-c3ecb273 (a Pocket in Safari), was closed fixed for the same kind of
+change, "Answered, and the reason it was hard to find has been fixed", and
+this note opens the same way and says what did and did not change. The two
+plain Safari radio tickets before it, bug-7d3064fc and bug-40980a75, were
+closed wontfix with no note. Either reading is defensible and the owner may
+prefer the other: one POST changes it. The reporter's email, which sits in
+that ticket's Expected field, is in neither the note nor this file.
+
+### The 27 feel tickets, wontfix, no note
+
+wontfix with an empty resolution, which is how the sweeps of the 19th, 21st
+and 24th closed theirs. Written 07:06:54 to 07:07:37 UTC, each read back as
+wontfix, resolution empty, kind still feel: 27 of 27, none skipped, none
+failed. Each was checked open or in progress, still feel and still without a
+note immediately before its own write. Nothing was stopped by the session's
+permission check this time, as it was on the 24th: the ask named the scope.
+
+bug-08577148 was in progress, held out of the 24 September sweep to wait for a
+report that carries `stick.flight`. Every newer feel report carries it, which
+is what that ticket was waiting for in general, though not from its own
+reporter. It is closed with the rest because the ask said all. It is the one
+to reopen if that was not meant.
+
+What they said, for the record, since a closed ticket drops out of the open
+view. Verdicts: twitchy 8, about right 7, floppy 7, soft 4, stiff 1. Noticed:
+locked in, no complaints 4; throttle is touchy 3; bounces back after a stop 2;
+wobbles in propwash 2; yaw is lazy 2; floaty, carries too far 1; slow to
+answer the stick 1. 26 of 27 carry `stick.flight`; bug-08577148 is the one
+that does not. At the commonest setting, slider 100 percent and 2.02 g, ten
+pilots gave floppy 4, twitchy 2, about right 2, soft 1 and stiff 1, so one
+setting drew both ends of the scale. Reporter names are left out.
+
+    bug-08577148  21 Sep 11:31  floppy       75%  1.22 g
+        bounces back after a stop; wobbles in propwash. "quiere caer muy
+        rapido el drone mientras recupero el ya aterriza y no le da la fuerza
+        de empuje en mi tbs mambo"
+    bug-243613fc  29 Sep 10:21  about right 100%  1.62 g
+        bounces back after a stop
+    bug-d95651ec  29 Sep 11:05  twitchy      60%  0.97 g
+    bug-9c7ac61c  29 Sep 11:34  twitchy     100%  1.62 g
+        throttle is touchy
+    bug-bc0a769c  29 Sep 11:36  about right 100%  1.62 g
+        throttle is touchy
+    bug-52170dd7  29 Sep 13:11  about right 100%  1.62 g
+        locked in, no complaints. "I guess the gravity is a bit high. in real
+        world I can do inverted yaw in a low distance to the ground, but
+        cannot do it here. touch the ground too quickly."
+    bug-b32a0c8d  29 Sep 13:15  about right  90%  1.46 g
+        locked in, no complaints. "great simulator. good job."
+    bug-1020ab86  29 Sep 13:25  soft        100%  2.02 g
+        "whoop is not fast"
+    bug-4449c627  29 Sep 13:47  soft        100%  1.62 g
+        yaw is lazy
+    bug-39a165a8  29 Sep 15:41  twitchy     140%  2.27 g
+        "too twitchy, not as smooth as a real drone, feels like flying a
+        spring"
+    bug-a60851cb  29 Sep 16:19  soft        100%  1.62 g
+    bug-cbc8a131  29 Sep 17:20  soft         90%  1.46 g
+        "When starting wierdly sticks to the ground"
+    bug-bf885155  29 Sep 18:00  twitchy     100%  2.02 g
+    bug-5e4fd54d  29 Sep 18:11  about right 120%  2.43 g
+        "toggle for the side of screen effects"
+    bug-5e10a62e  29 Sep 19:02  floppy      100%  2.02 g
+        "to fast for a whoop"
+    bug-3a6d6538  29 Sep 23:07  twitchy     100%  2.02 g
+        floaty, carries too far
+    bug-b900f383  29 Sep 23:50  about right 100%  2.02 g
+        locked in, no complaints. "Muchas gracias por esto"
+    bug-84fff4fc  30 Sep 01:12  about right 100%  2.02 g
+        locked in, no complaints
+    bug-2e0d3499  30 Sep 01:36  floppy      100%  2.02 g
+        slow to answer the stick
+    bug-5e901faf  30 Sep 01:53  twitchy      60%  0.97 g
+    bug-2912cecc  30 Sep 04:37  twitchy     120%  2.43 g
+        throttle is touchy
+    bug-dc3ce167  30 Sep 04:52  floppy       60%  0.97 g
+        wobbles in propwash; yaw is lazy
+    bug-562ceaec  30 Sep 05:35  twitchy     115%  1.86 g
+        "make it so it spins less out of control"
+    bug-9cdc8061  30 Sep 06:02  stiff       100%  2.02 g
+    bug-a66e2d08  30 Sep 06:02  floppy      100%  2.02 g
+    bug-322e81e4  30 Sep 06:04  floppy      100%  2.02 g
+    bug-1dfe790c  30 Sep 06:59  floppy      120%  2.43 g
+
+Comments that read like more than taste, none investigated: bug-cbc8a131,
+"When starting wierdly sticks to the ground"; bug-52170dd7, gravity "a bit
+high" and touching the ground too quickly to do an inverted yaw low down;
+bug-08577148, in Spanish, the quad falls fast and lacks the thrust to recover,
+on a TBS Mambo at slider 75 percent, which is 1.22 g; bug-5e4fd54d asks for a
+toggle for the side of screen effects. bug-1020ab86 ("whoop is not fast") and
+bug-5e10a62e ("to fast for a whoop") point opposite ways at the same 2.02 g.
+
+### The board now
+
+298 tickets, from the server's own status filters, which sum to 298: 141
+fixed, 151 wontfix, 1 duplicate, 5 open, none in progress. No feel ticket is
+open. The five open ones are not addressed by anything in this session and
+were not touched:
+
+    bug-f42ae325  wrong      No yaw on controller. Chrome on Android, a
+                             BETAFPV LR3PRO; the report's own check lists yaw
+                             as dead, travel 0 to 0 over 33 s
+    bug-52a66f69  wrong      Pitch is not reaching sim. Firefox on Linux, a
+                             Pocket calibrated in mode 3; its check lists
+                             pitch as dead, travel 0 to 0 over 43 s
+    bug-a18b2ed9  blocking   The French phone report, no drone drawn. Cause
+                             not found
+    bug-453fb074  wrong      Sound stopped. Chrome on a Mac, a RADIOMASTER
+                             SIM. Read, not investigated
+    bug-d1d3f4fb  wrong      Keyboard does nothing. Chrome, 1366 by 768, sent
+                             from How to fly. Read, not investigated. It
+                             carries the new stick.menu block (gate open,
+                             nothing logged) and lists no pad; the gate only
+                             ever acts on a pad
+
+### What went wrong
+
+- The first read back of bug-2d93629e failed on my side: I piped curl into a
+  Python script and gave the script its own source on a heredoc, so it read an
+  empty stdin. The write had already returned 200 with the ticket echoed as
+  fixed. The next helper used Python's urllib and got a 403 from the site's
+  edge, which refuses that client's default user agent. curl is accepted and
+  every other read and write this turn used it, so the helper now shells out
+  to curl. No header was changed to get past the 403. Both reads then matched
+  exactly.
+
+- The first parse of the 27 reports matched none of them, because the reports
+  put a newline between their sentences and the pattern expected a space. It
+  printed 0 of 27 before anything was written from it.
+
+- The count of feel tickets to close was 26 until the server filter showed 27.
+  Trusting the capped listing would have left bug-1dfe790c open with nothing
+  to say why.
+
+### Not done
+
+- No code changed, so the verification scale asked after the two code turns
+  (none, cheap, shots, verify, fly it) was not asked again and was never
+  chosen. Nobody has flown either fix on a real radio or in a real Safari. The
+  board now says fixed for both, which is a statement about what shipped and
+  not about what a pilot felt.
+
+- The other five open tickets got no reply, and no French reply was drafted
+  for bug-a18b2ed9. bug-f42ae325 and bug-52a66f69 are dead axis reports; the
+  nearest precedent, bug-338cd29b on 27 September, was wontfix with advice,
+  and bug-52a66f69 reads like a calibrated map that points at an axis that
+  never moves, which is worth a look before it is closed that way.
+
+### For the owner
+
+To reverse any of these, POST https://webfpv.org/board/api/bugs/<id> with
+{"status":"open","resolution":""}, or "in_progress". Only the board was
+written. bug-08577148 and bug-616cc604 are the two closes that are judgement
+calls, for the reasons above.
+
+### RUN LOG
+
+    board reads      status=open, in_progress, fixed, wontfix, duplicate,
+                     limit=500: 5 + 0 + 141 + 151 + 1 = 298
+    board writes     29 POSTs to /board/api/bugs/<id>, all HTTP 200: 2 fixed
+                     with a note, 27 wontfix with none
+    read back        29 of 29 by id: status as written; 2 of 2 notes exact
+                     (810 and 726 characters); 27 of 27 resolutions empty
+    served files     5 of 5 equal to the working tree before the first write
+    git diff --check clean, exit 0
+    dash scan (Node) no en or em dash in any added line
+    npm run verify   not run: no code, plant, ABI or build changed
+    lint, shots      not run: nothing to lint or fly
+
+## 2026-09-30 | input, audio, recovery | The open tickets worked through: three fixed, three left alone
+
+Nothing here touches the plant, the module ABI, the build or the physics
+model. The three fixes are the shell's: a hand over between the keys and the
+thumbs, a sound context that is asked back, and where a crash is set down. All
+three are on the branch and not on main, and nothing was written to the board.
+
+### The ask
+
+"please work through the bug tickets, if you can replicate or find root cause,
+then fix, if its not possible then don't churn tokens on something that might
+be user error." Six tickets were open, after the 27 feel reports and the two
+answered tickets were closed earlier today. What became of each:
+
+    bug-d1d3f4fb  keyboard does nothing    replicated, root caused, fixed
+    bug-453fb074  sound stopped            class replicated, fixed; the
+                                           trigger is not known
+    bug-fe9215c0  clipping on walls        a cause measured, fixed; the
+                                           crash contact not reproduced
+    bug-f42ae325  no yaw                   not actionable here, left open
+    bug-52a66f69  no pitch                 not actionable here, left open
+    bug-a18b2ed9  French phone report      not touched again, left open
+
+### bug-d1d3f4fb: the keyboard on a touchscreen laptop
+
+"keyboard doesn't work it when I press the keboard it doesn't move anything."
+A Chromebook (CrOS, Chrome 152, 1366 by 768, two cores, Intel graphics), no
+radio, and the report's `stick.flight` says 93.5 s flown on the touch sticks
+and 0 s on the keys, though `keyToScreen` counted 64 key presses, so the keys
+were reaching the page.
+
+ROOT CAUSE, by reading and then by measuring. The thumb sticks mount wherever
+navigator reports touch points (a Chromebook 2-in-1, a Windows touch laptop),
+the frame loop shows them in flight, and poll() in src/input/input.js took the
+touch branch when they were active and never read a key. The header of
+touchsticks.js said a touchscreen laptop "ALSO keeps its keyboard". It did
+not. Reproduced in the real shell in headless Chromium at 1366 by 768: with
+touch emulation on, holding W, the right arrow and D left throttle, roll and
+yaw at 0 with the plates up, and the same page with touch off read 0.34 for
+each.
+
+THE DESIGN, and why not just letting the keys through. The shell decides a
+good deal from isTouchPrimary(): the flight mode (a key pilot is forced to
+angle in a race because a key is a bang bang input, a thumb pilot is not), the
+ghost gimbals, the turtle cue, the rate profile. Merging keys over the thumbs
+would have flown a keyboard pilot in acro. So InputManager.hand is 'thumbs' or
+'keys': a stick key takes the sticks, a finger takes them back, isTouchPrimary
+follows it, and the shell puts the plates away while the keys have them, so a
+touchscreen laptop pilot on the keys is, to everything else in the shell, a
+desktop keyboard pilot. The change of hand is an edge (a held key does not win
+the sticks back on every poll), Escape, R, M and the rest are not stick keys,
+and the collective is carried across both ways: the keys start at the level
+the thumbs left, with the airborne latch set if the quad is up, and the
+thumbs' sticky throttle starts where the keys left it, so nothing is punched.
+
+Measured after: keys 0.34 for W, the arrow and D; the plates gone and the
+keyboard the primary; a real touch through CDP brings the plates back at the
+same throttle (0.35 before, 0.35 after); a drag on the plate rolls it (0.42);
+a key takes it again.
+
+### bug-453fb074: the sound
+
+"SOUND JUST STOPPED WORKING." Chrome on a Mac, a radio, 23 s flown, sound
+setting on. The report carried nothing about audio.
+
+A hole, and it is real. MotorAudio.start() resumes a suspended context, but
+the shell calls start() only while there is no context yet (wakeAudio in
+main.js), so that line could not run after the first gesture, and nothing
+listened for statechange. The comment on flyIfLinked says wakeAudio resumes
+the context on the first key or click; it did not. A browser suspends a
+context for its own reasons (an output device changing, a sleep, a tab put
+away, and 'interrupted' on Safari), and after that the sound is gone until
+reload. Reproduced in the real shell: suspending the context and then pressing
+a key and clicking left it suspended with its clock stopped at 0.7 s, for
+good, with the settings saying sound was on. The music goes through the same
+context, so it goes too.
+
+The fix is MotorAudio.wake(), called on every gesture, when the tab comes
+back, and by stateChanged when the context changes state on its own: a radio
+pilot makes no keypress and no click, and a page that has had one gesture may
+resume in Chrome without another. Three automatic tries and then it waits for
+a gesture, so a browser that suspends again at once is not argued with in a
+loop; running again, or a gesture, gives the tries back. Measured after: all
+three ways back work, the clock moves again (1.5 s, 2.36 s, 3.17 s). The perf
+block of a bug report now carries audio: the context's state, whether sound is
+on and the volume.
+
+What is NOT known is whether a suspended context is what this pilot met. It is
+what the symptom looks like from the pilot's chair and it is the only hole I
+found on reading the audio path, and the next sound report will say, because
+it now carries the state. A context that stays running and silent (a device
+change Chrome mishandles) would not be helped by any of this.
+
+### bug-fe9215c0: walls
+
+"partially clipping on to walls when crashing on them and stutters until it
+can finally get away from the wall." Expected: "maybe respawn further from
+objects and walls after a crash." Firefox 157 on Windows, a Radiomaster GX12,
+120 Hz. The report says only that the map was `built`: a map the pilot made,
+or Hibari Yard until they have made one. The address carried an old
+`?map=field`, which the shell no longer has. The measurements below are on
+Hibari Yard, as the example.
+
+This ground has been walked before: the wall tap that stuck, the belly first
+tap, the crash judged per step, the thrash catch, the rest spot with takeoff
+room. None of it explains a quad that sits against a wall and stutters for a
+while after a crash, except one thing the earlier entries did on purpose. The
+set down after a crash took the NEAREST spot whose parked hull, prop discs
+included, was clear, and "touching is not overlap", so it could be a
+centimetre off a wall, and the first touch of the sticks leans it into the
+brick. That is the pilot's picture and it is their suggestion. It was measured
+before it was believed: 1434 crashes 0.12 m off the faces of the yard's 104
+wall boxes at three heights, through the shell's own search. Every one was set
+down; the least room round the parked hull was 1 cm, 20 had under 2 cm, 70
+under 5 cm, 232 under 10 cm, and the median 15 cm.
+
+The change is in findRestSpot (src/game/collide.js): a spot with a swept
+diameter of room on every side (0.347 m, the measure the takeoff room already
+uses, eight directions, restRoomAt) is preferred to a nearer one without it,
+if it is within a metre of the nearest clear spot, and with none the nearest
+clear spot is taken as before. On the same crashes: every one still set down,
+none under 5 cm, the median room 47 cm, 1420 of 1434 with the full room, the
+median set down 0.50 m from the crash (0.25 before), the 90th percentile 2.75
+m (2.72) and the longest 3.5 m as before.
+
+Alternatives measured and dropped. An ABSOLUTE cap on how far the roomy spot
+may be: the 3D reading is confounded by crash height (a crash 1.4 m up "moves"
+1.4 m to the ground), and in plan it gave the room for 57 percent of the
+crashes at 0.5 m and 70 percent at 1 m. A RELATIVE cap, no farther than the
+nearest clear spot plus X: 0.75 m and above give exactly the uncapped outcome,
+0.5 m leaves 14 under 5 cm. One metre was taken, so the preference can never
+drag a craft far in a narrow gap, and it leaves the rings' widest step of 0.75
+m room to be crossed.
+
+What this is not: it does not reproduce the crash itself. A craft that meets a
+wall nose first and holds itself to the face under power, taking a contact
+every pass until the thrash catch fires at 700 ms, is the earlier entries'
+finding and is still what it was. If the pilot meant that, this changes
+nothing about it. Their own words fit the set down, and the fix is the thing
+they asked for; that is as far as the evidence goes.
+
+### Left alone, and why
+
+- bug-f42ae325, "No yaw on controller": Chrome on Android, a BETAFPV LR3PRO.
+  The browser hands the page four axes (`live` has four entries), the guessed
+  order puts yaw on the fourth, and it never left 0 in 33 s while roll, pitch
+  and throttle did. The report's own check says yaw is dead and `stray` is
+  empty. It is the shape of bug-338cd29b on 27 September (an OpenTX radio on
+  Android showing four axes to the page, the fourth dead), closed then with
+  advice to check the radio's USB joystick setup and to try a computer.
+  Nothing in the report points at the sim.
+
+- bug-52a66f69, "pitch is not reaching sim": Firefox on Linux, a Pocket,
+  calibrated (yaw axis 0, throttle 1, roll 2, pitch 3), 43 s flown. Pitch
+  travel [0, 0] and `stray` empty, so the pitch stick moved no axis at all
+  that the page could see, while eight are listed. A radio not sending an
+  elevator on an axis (an EdgeTX channel or joystick setup) reads exactly like
+  this. Not replicable, and the data has no sim side suspect. Left open, not
+  closed, because the map is calibrated and a calibrated map pointing at an
+  axis that never moves is worth a second report before it is called the
+  radio's.
+
+- bug-a18b2ed9, the French phone report: nothing new. Investigated on the
+  first pass of this session and the cause was not found; a Mali-G72 on
+  Android 10 is the only one on the board, and it cannot be reproduced here.
+
+### Decisions made here, for the owner to overrule
+
+1. The set down margin is a policy change, not a defect fix, and it moves the
+   owner's "as near as possible to where the accident happened" of 24
+   September by a median 25 cm. REST_MARGIN (0.347 m) and REST_MARGIN_DRAG
+   (1.0 m) are the two numbers, both in collide.js. Setting REST_MARGIN to 0
+   restores the old behaviour exactly.
+2. A keyboard pilot on a touch device gets the keyboard the desktop has: the
+   spring to hover, angle mode in a race. The alternative was the radio's
+   overlay, where the throttle key nudges a latch that stays put. It would
+   have been less code and a worse keyboard.
+3. The sound self heal tries three times with no gesture. Chrome usually
+   allows it after one gesture, Safari does not, and the gesture path is there
+   for Safari.
+
+### What went wrong
+
+- The first edit of audio.js did not apply: a comment block sits between
+  start() and attach() and my old text spanned both. Split in two.
+
+- A scratch probe of mine spliced a file at the first `} catch (e) {`, which
+  was inside a seed string, and duplicated half of itself. Rewritten. Another
+  broke on `await` in a non async wrapper.
+
+- My first browser check of the touch laptop held each key for a fixed 400 ms
+  and asserted a stick above 0.2. It read 0.179 in one run: the keyboard's
+  hold clock advances at most 40 ms a poll, so on a busy machine a fixed wall
+  time is less hold, and I was running other work beside it. It now waits for
+  the channel, which is the question. The same run also failed a builder
+  chooser check I had not touched; a quiet run passed all 220, so that was
+  load.
+
+- My first measurement of the wall crashes skipped every point as "already
+  inside something", because a crash is a hull overlapping the wall by
+  definition, at 12 cm off a face with a 14 cm reach. Removed. My first alley
+  check passed no last open air and was set down across a thin wall, which the
+  shell would never offer; it now gives the alley's own. And the four
+  direction mutant of restRoomAt survived until a check at a pillar's corner
+  was added, because on a flat face the axes are enough.
+
+- The first mutation helper counted `FAIL` at the start of a line, and the
+  music self test prints it differently; the counts were wrong until fixed.
+  One mutant did not apply for a shell quoting slip and was rerun.
+
+- check:crash reports one failed guard, the 3 m/s wall tap never coming within
+  0.25 m of a solid. It fails the same way, 2 of 2, on a fresh worktree of the
+  commit before today's changes, so it is not from them. Not touched, and no
+  threshold moved.
+
+### Not done
+
+- The verification scale asked after each code turn (none, cheap, shots,
+  verify, fly it) has still not been chosen, and nobody has flown any of this:
+  not a touchscreen laptop with a keyboard, not a Mac whose output device
+  changed, not a crash at a wall to see where it sets down. npm run verify was
+  not run: no physics, plant, ABI or build change, and CLAUDE.md makes it the
+  owner's call. lint:devices was not run: it presses Enter only, and the hand
+  over needs a stick key.
+
+- The one time thumb rates hand off ("Rates eased for thumb flying") still
+  fires at a keyboard pilot's first flight on a touch device, because the
+  plates are up when it looks. It only fires when the rates are the stock
+  ones. Left, and it is the next thing to look at on this ticket.
+
+- No ticket was replied to or closed. The fixes are not on main, and the
+  practice since 21 September is to close a ticket only once its fix is live.
+
+### For the owner
+
+Fly it, if you take the offer. On a touchscreen laptop or a Chromebook: start
+a flight, press W. The plates should go away and the ghost gimbals come, and
+the quad should climb; touch the glass and the plates should come back with
+the throttle where it was. What would count as wrong: a jump in the throttle
+at either change, the plates still up while the keys fly, or a phone that
+behaves any differently. For a set down: crash at the foot of a wall on Hibari
+Yard and look at where you are put: about half a metre off it, and not a
+centimetre. For the sound there is nothing to fly: in the console,
+`__audio.ctx.suspend()` and the sound should come back on its own within a
+beat.
+
+### RUN LOG
+
+    input-selftest.js   all 356 passed (338 before, 18 new); eleven mutants of
+                        input.js, each caught
+    music-selftest.js   52 ok, 0 FAIL (13 new); nine mutants of audio.js, each
+                        caught
+    check:clip          998 passed, 0 failed (990 before, 8 new); six mutants
+                        of collide.js, each caught, the diagonal one only
+                        after the pillar check
+    lint:input          all 220 passed, 287 s, in a quiet window (205 before:
+                        9 for the touch laptop, 6 for the sound). With three
+                        breakages in main.js (the click wake, the tab wake,
+                        the plates kept up) the three matching checks fail.
+                        One noisy run had a fixed hold read 0.179 and a
+                        builder check fail; both were load and did not recur
+    check:crash         67 guards pass, 1 fails, 17 targets met, none missed.
+                        The failing guard is the same on the untouched commit
+                        before these changes
+    lint:preload        up to date: boot 123, city 75, built 35, 232 served
+    check:fresh         18 passed
+    git diff --check    clean, exit 0
+    dash scan (Node)    no en or em dash in any added line
+    npm run verify      not run: no physics, plant, ABI or build change
+    lint:devices, shell not run: the first presses no stick key, the second
+                        has a known red on main from before
+
 ## 2026-09-29 | plan, builder | The whoop builder plan: build it in 3D, keep the brain (the owner's ask)
 
 The owner compared our whoop builder with FPV Track Designer (designer.fpv-events.com,

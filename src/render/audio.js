@@ -171,6 +171,10 @@ const FOCUS_BEAT_HZ = 6;
  */
 const FLIGHT_STEM = 0.3;
 
+/* How many times in a row the context may be asked back on its own, with no
+ * gesture behind it, before it is left for the next one. See stateChanged. */
+const SELF_WAKES = 3;
+
 /*
  * Duck a bus, starting from where it actually IS.
  *
@@ -217,6 +221,9 @@ export class MotorAudio {
      * the count is kept where the nodes are made rather than derived by
      * reading the file later. */
     this.nodes = [];
+    /* How many times the context has been asked back without a gesture since
+     * it last ran: see stateChanged. */
+    this.selfWakes = 0;
   }
 
   /* P12: steady state AudioNode count. */
@@ -316,9 +323,7 @@ export class MotorAudio {
   /* Browsers require a user gesture before audio starts. */
   start() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') {
-        this.ctx.resume();
-      }
+      this.wake();
       this.enabled = true;
       return;
     }
@@ -331,13 +336,80 @@ export class MotorAudio {
   }
 
   /*
+   * BRING A CONTEXT THE BROWSER TOOK AWAY BACK. bug-453fb074, "SOUND JUST
+   * STOPPED WORKING", on a Mac, from a pilot flying a radio. A browser
+   * suspends a context for its own reasons (an output device changing, a
+   * sleep, a tab put away, and 'interrupted' on Safari), and nothing here ever
+   * asked for it back: start() had a resume for it, but the shell only calls
+   * start() while there is no context yet, so that line could not run after
+   * the first gesture. Measured in the real shell, suspending the context and
+   * then pressing a key and clicking left it suspended with its clock stopped,
+   * for good, while the settings said sound was on.
+   *
+   * resume() is a promise that rejects when the browser will not have it yet,
+   * for want of a gesture: that is not an error here, the next gesture asks
+   * again. `automatic` is the statechange path below, which is limited in how
+   * often it may ask, and a gesture starts that allowance over.
+   */
+  wake(automatic = false) {
+    const c = this.ctx;
+    if (!c || typeof c.resume !== 'function' || (c.state !== 'suspended' && c.state !== 'interrupted')) {
+      return;
+    }
+    if (!automatic) {
+      this.selfWakes = 0;
+    }
+    const p = c.resume();
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {});
+    }
+  }
+
+  /*
+   * The context changed state on its own. A radio pilot makes no keypress and
+   * no click for the whole flight, so waiting for a gesture would leave them
+   * in silence until they reached for the keyboard; a page that has had one
+   * gesture may resume in Chrome without another. A few tries and then stop,
+   * so a browser that suspends again at once is not argued with in a loop.
+   */
+  stateChanged() {
+    const c = this.ctx;
+    if (!c) {
+      return;
+    }
+    if (c.state === 'running') {
+      this.selfWakes = 0;
+      return;
+    }
+    if (!this.enabled || this.selfWakes >= SELF_WAKES) {
+      return;
+    }
+    this.selfWakes += 1;
+    this.wake(true);
+  }
+
+  /* What the browser is doing with the context, for a bug report: without it
+   * "the sound stopped" cannot be told from a setting or a mute. */
+  report() {
+    return { state: this.ctx ? this.ctx.state : 'none', on: this.enabled };
+  }
+
+  /*
    * Build the graph on any BaseAudioContext. Called by start() with a live
    * AudioContext and by the probe with an OfflineAudioContext. Does not
    * set enabled: the caller decides, because the probe wants the mix up
    * from sample zero and the shell wants it to follow a setting.
    */
+  /* A context that changes state on its own is asked back: see stateChanged. */
+  watchState(ctx) {
+    if (ctx && typeof ctx.addEventListener === 'function') {
+      ctx.addEventListener('statechange', () => this.stateChanged());
+    }
+  }
+
   attach(ctx, destination) {
     this.ctx = ctx;
+    this.watchState(ctx);
     const out = destination || ctx.destination;
     /* One place where nodes come into existence, so the P12 count cannot
      * drift from the graph. */

@@ -1230,6 +1230,21 @@ export class InputManager {
      * active(), sample(dtMs) and reset(), from src/input/touchsticks.js.
      * Sits under a radio and over the keyboard in poll()'s ladder. */
     this.touchSource = null;
+    /*
+     * WHICH HAND HAS THE STICKS on a device that has thumbs and keys both: a
+     * touchscreen laptop, a Chromebook, a tablet with a keyboard. 'thumbs'
+     * until a stick key goes down, 'keys' until a finger lands. Nothing to
+     * decide on a phone, which has no keys, or on a desktop, which has no
+     * thumb sticks, so this only ever matters where touchSource is set.
+     *
+     * bug-d1d3f4fb: a Chromebook pilot, "when I press the keyboard it doesn't
+     * move anything". The thumb sticks mount wherever navigator reports touch
+     * points and poll() took their branch and never read a key, while the
+     * header of touchsticks.js said a touchscreen laptop keeps its keyboard.
+     * It did not: every channel read 0 for W, the arrows and D, with the
+     * overlay up, and read 0.34 on the same page with touch off.
+     */
+    this.hand = 'thumbs';
     this.keys = new Set();
     this.kb = { roll: 0, pitch: 0, yaw: 0, throttle: 0 };
     /* Keyboard collective, used only when no radio is the stick source.
@@ -1462,6 +1477,12 @@ export class InputManager {
       }
       if (!e.repeat) {
         this.keys.add(e.code);
+        /* A stick key is the keyboard asking for the sticks. Edge triggered
+         * on purpose: a key held down while a finger lands must not win the
+         * hand back every poll. */
+        if (this.isStickKey(e.code)) {
+          this.takeKeys();
+        }
       }
       if (this.onKey) {
         this.onKey(e.code, e.repeat);
@@ -1475,6 +1496,15 @@ export class InputManager {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
+    /* A finger on the glass, anywhere, gives the sticks back to the thumbs.
+     * Captured, so it runs before the plates read the throttle it seeds. The
+     * plates are hidden while the keys have the hand, so nothing else can
+     * hear this touch. */
+    window.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        this.takeThumbs();
+      }
+    }, true);
     this.seedPadRoster();
   }
 
@@ -3708,6 +3738,60 @@ export class InputManager {
     }
   }
 
+  /* Whether a key flies the quad in the pilot's stick mode: a roll, pitch or
+   * yaw key or a throttle key. Escape, R, M and the rest are not the sticks,
+   * and pressing one of them does not hand the sticks to the keyboard. */
+  isStickKey(code) {
+    return code === this.throttleKeys.up || code === this.throttleKeys.down
+      || this.keyAxes.some(([, neg, pos]) => code === neg || code === pos);
+  }
+
+  /*
+   * A stick key went down on a device with thumb sticks: the keyboard takes
+   * the sticks. From here poll() reads the keys exactly as it does on a
+   * desktop, and isTouchPrimary() is false, so everything the shell decides
+   * from it (the flight mode a key pilot is given, the ghost gimbals, the
+   * turtle cue, the rate profile) is what a keyboard pilot gets anywhere. The
+   * shell hides the plates on its next frame.
+   *
+   * THE COLLECTIVE IS CARRIED ACROSS. The thumbs' throttle is sticky, so a
+   * pilot hovering on glass who reaches for a key must not find the keys'
+   * own throttle, 0, under them: the level stays where it was until a
+   * throttle key is pressed, and from then on it is the keyboard's, with the
+   * airborne latch set if the quad is up, so W climbs from hover as it does
+   * for any keyboard pilot in the air. The thumbs' springs are dropped by the
+   * shell hiding the plates, and the keys' own roll, pitch and yaw start
+   * from rest.
+   */
+  takeKeys() {
+    if (!this.touchSource || this.hand === 'keys') {
+      return;
+    }
+    this.hand = 'keys';
+    this.kb.roll = 0;
+    this.kb.pitch = 0;
+    this.kb.yaw = 0;
+    this.kb.throttle = this.channels.throttle;
+    this.kbThrFromKeys = false;
+    this.kbAir = !this.kbLanded && this.kb.throttle >= KEY_LIFTOFF;
+  }
+
+  /*
+   * A finger landed: the thumbs take the sticks back. The plates come up on
+   * the shell's next frame and the sticky throttle starts where the keys left
+   * the collective, so the change of hand is not a punch. This finger is not
+   * a grip, because the plates were not there to receive it; it wakes them.
+   */
+  takeThumbs() {
+    if (!this.touchSource || this.hand === 'thumbs') {
+      return;
+    }
+    this.hand = 'thumbs';
+    if (typeof this.touchSource.setThrottle === 'function') {
+      this.touchSource.setThrottle(this.channels.throttle);
+    }
+  }
+
   /*
    * THE PILOT'S STICK MODE, which reaches the keyboard, the thumb sticks and
    * an uncalibrated standard gamepad. A radio has already applied its own
@@ -3762,6 +3846,7 @@ export class InputManager {
    */
   isTouchPrimary() {
     return this.firstGamepad() === null
+      && this.hand !== 'keys'
       && Boolean(this.touchSource && this.touchSource.active());
   }
 
@@ -3863,10 +3948,11 @@ export class InputManager {
       } else {
         this.kb.throttle = next.throttle;
       }
-    } else if (this.touchSource && this.touchSource.active()) {
+    } else if (this.hand !== 'keys' && this.touchSource && this.touchSource.active()) {
       /* The thumbs. Sample every poll, not only on events, because the
        * spring back to centre is time, not touches, and the sticky
-       * throttle has to keep feeding while no finger is down at all. */
+       * throttle has to keep feeding while no finger is down at all. Not
+       * while the keys have the hand: see takeKeys. */
       next = this.touchSource.sample(dtMs);
       this.source = 'the touch sticks';
     } else {

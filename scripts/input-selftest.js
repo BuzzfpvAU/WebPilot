@@ -92,7 +92,20 @@ function memoryStorage({ throwOn = null } = {}) {
 
 function installEnv(pad, storage) {
   globalThis.localStorage = storage || memoryStorage();
-  globalThis.window = { addEventListener() {}, removeEventListener() {} };
+  /* Listeners are kept, so a section can fire the events a page would: fire()
+   * is the stub's own, not the browser's. */
+  const listeners = {};
+  globalThis.window = {
+    addEventListener(type, fn) {
+      (listeners[type] = listeners[type] || []).push(fn);
+    },
+    removeEventListener() {},
+    fire(type, ev) {
+      for (const fn of listeners[type] || []) {
+        fn(ev);
+      }
+    },
+  };
   /* Node 22 has a navigator with no getGamepads on it; the property is
    * assignable. Older Nodes have none, so build one. */
   const gp = () => (pad ? [pad] : []);
@@ -2083,6 +2096,167 @@ section('a menu opened from flight waits for the sticks and asks a roll to be he
   check('the gate reads no clock and no random: the time is handed in, so the same polls give the same answer',
     !/performance|Date\b|setTimeout|Math\.random/.test(text.replace(/\/\*[\s\S]*?\*\//g, '')));
   check('no em or en dash in it', !/[\u2013\u2014]/.test(text));
+}
+
+/*
+ * bug-d1d3f4fb, a Chromebook: "keyboard doesn't work it when I press the
+ * keboard it doesn't move anything". The thumb sticks mount wherever the
+ * browser reports touch points, and poll() took their branch and never read a
+ * key. Reproduced in the real shell with touch emulation on: W, the arrows and
+ * D left every channel at 0 with the plates up, and moved them to 0.34 on the
+ * same page with touch off. The comment in touchsticks.js said a touchscreen
+ * laptop keeps its keyboard.
+ *
+ * The rule under test is InputManager.hand: a stick key takes the sticks from
+ * the thumbs, a finger takes them back, and the collective is carried across
+ * in both directions. The keys are put through the listeners the constructor
+ * registered, so the text field bail out and the repeat guard are the real
+ * ones. The browser half, with real key and touch events, is
+ * scripts/input-check.js.
+ */
+section('a device with thumbs and keys: a stick key takes the sticks, a finger takes them back: bug-d1d3f4fb');
+{
+  /* One InputManager on its own window stub, a clock stepped by hand, and, when
+   * asked, thumb sticks that read what they are told: a sticky throttle, and a
+   * log of every level the input manager set on them. */
+  const rigWith = (withThumbs) => {
+    installEnv(null);
+    const win = globalThis.window;
+    const im = new InputManager();
+    let t = performance.now();
+    const run = (ms) => {
+      for (let e = 0; e < ms; e += 16) {
+        t += 16;
+        im.poll(t);
+      }
+    };
+    const thumbs = {
+      on: true,
+      ch: {
+        roll: 0, pitch: 0, yaw: 0, throttle: 0,
+      },
+      thrSet: [],
+      active() { return this.on; },
+      sample() { return { ...this.ch }; },
+      reset() { this.ch = { roll: 0, pitch: 0, yaw: 0, throttle: 0 }; },
+      setThrottle(v) { this.thrSet.push(v); this.ch.throttle = v; },
+      setStickMode() {},
+    };
+    if (withThumbs) {
+      im.attachTouch(thumbs);
+    }
+    return {
+      im,
+      thumbs,
+      run,
+      down: (code, extra = {}) => win.fire('keydown', {
+        code, repeat: false, target: {}, preventDefault() {}, ...extra,
+      }),
+      up: (code) => win.fire('keyup', { code }),
+      touch: (pointerType = 'touch') => win.fire('pointerdown', { pointerType }),
+    };
+  };
+
+  let r = rigWith(true);
+  r.thumbs.ch.throttle = 0.6;
+  r.thumbs.ch.roll = 0.3;
+  r.run(64);
+  check('a phone, where no key is ever pressed: the thumbs have the sticks, and it is the touch primary',
+    r.im.hand === 'thumbs' && r.im.isTouchPrimary() && r.im.source === 'the touch sticks'
+    && r.im.channels.throttle === 0.6 && r.im.channels.roll === 0.3, JSON.stringify(r.im.channels));
+
+  for (const code of ['Escape', 'KeyR', 'KeyM', 'Space', 'Enter', 'KeyQ']) {
+    r.down(code);
+    r.up(code);
+  }
+  r.run(32);
+  check('a key that is not a stick key (Escape, R, M, Space, Enter, Q) does not take the sticks',
+    r.im.hand === 'thumbs' && r.im.isTouchPrimary(), r.im.hand);
+  r.down('KeyD', { target: { tagName: 'INPUT' } });
+  r.down('KeyD', { target: { isContentEditable: true } });
+  r.run(32);
+  check('a stick key typed into a text field does not, and is not recorded as held',
+    r.im.hand === 'thumbs' && !r.im.keys.has('KeyD'), `${r.im.hand} ${[...r.im.keys]}`);
+  r.down('KeyD', { repeat: true });
+  r.run(32);
+  check('an auto repeat with no first press behind it does not either',
+    r.im.hand === 'thumbs' && !r.im.keys.has('KeyD'), r.im.hand);
+
+  r.down('KeyD');
+  r.run(400);
+  check('a stick key takes the sticks: the keyboard reads, yaw moves, the thumbs are no longer the source',
+    r.im.hand === 'keys' && r.im.source === 'the keyboard' && r.im.channels.yaw > 0.2
+    && !r.im.isTouchPrimary() && r.im.isKeyboardPrimary(), `${r.im.hand} ${r.im.source} ${JSON.stringify(r.im.channels)}`);
+  check('and nothing of the thumbs leaks through: their roll of 0.3 is not flown',
+    r.im.channels.roll === 0 && r.im.channels.pitch === 0, JSON.stringify(r.im.channels));
+  check('the collective is carried across: a yaw key does not drop the throttle the thumbs left at 0.6',
+    r.im.channels.throttle === 0.6, String(r.im.channels.throttle));
+  check('with the airborne latch set, so the keys are in the air as the thumbs were',
+    r.im.kbAir === true, String(r.im.kbAir));
+
+  r.up('KeyD');
+  r.down('KeyW');
+  r.run(200);
+  check('and W then climbs from hover, as it does for any keyboard pilot in the air, and not up from nothing',
+    r.im.channels.throttle >= r.im.kbHover - 1e-9, `${r.im.channels.throttle} vs hover ${r.im.kbHover}`);
+  r.up('KeyW');
+  r.run(1500);
+  check('and letting go rests at the measured hover, the spring the keyboard always had',
+    r.im.channels.throttle === r.im.kbHover, String(r.im.channels.throttle));
+
+  const level = r.im.channels.throttle;
+  r.touch();
+  check('a finger takes the sticks back: the thumbs are the primary and were told the level the keys left',
+    r.im.hand === 'thumbs' && r.im.isTouchPrimary() && r.thumbs.thrSet.length === 1 && r.thumbs.thrSet[0] === level,
+    `${r.im.hand} ${JSON.stringify(r.thumbs.thrSet)} vs ${level}`);
+  r.run(64);
+  check('and they fly at that level, with no punch to the throttle at the change of hand',
+    r.im.source === 'the touch sticks' && r.im.channels.throttle === level, `${r.im.source} ${r.im.channels.throttle}`);
+
+  r.down('KeyD');
+  r.touch();
+  r.run(200);
+  check('a key still held when a finger lands does not win the hand back on every poll',
+    r.im.hand === 'thumbs' && r.im.source === 'the touch sticks', `${r.im.hand} ${r.im.source}`);
+  r.up('KeyD');
+  r.down('KeyA');
+  r.run(400);
+  check('and a fresh press after that takes the sticks again, the other way',
+    r.im.hand === 'keys' && r.im.channels.yaw < -0.2, `${r.im.hand} ${r.im.channels.yaw}`);
+  r.up('KeyA');
+  r.touch('mouse');
+  r.touch('pen');
+  r.run(32);
+  check('a mouse or a pen is not a finger: the keys keep the sticks',
+    r.im.hand === 'keys' && r.im.source === 'the keyboard', r.im.hand);
+
+  /* On the ground the level is idle, and the keys must not start in the air. */
+  r = rigWith(true);
+  r.im.noteLanded(true);
+  r.thumbs.ch.throttle = 0.1;
+  r.run(32);
+  r.down('KeyD');
+  r.run(64);
+  check('a quad on the pad with the thumbs at 0.1: the keys take it as it is and are not marked airborne',
+    r.im.kbAir === false && r.im.channels.throttle === 0.1, `${r.im.kbAir} ${r.im.channels.throttle}`);
+
+  /* The stick mode moves the keys, and so what counts as a stick key. */
+  r = rigWith(true);
+  r.im.setStickMode(1);
+  const modeOk = r.im.isStickKey(r.im.throttleKeys.up) && r.im.isStickKey(r.im.throttleKeys.down)
+    && r.im.keyAxes.every(([, neg, pos]) => r.im.isStickKey(neg) && r.im.isStickKey(pos)) && !r.im.isStickKey('KeyQ');
+  r.down(r.im.throttleKeys.up);
+  check('what counts as a stick key follows the stick mode: in Mode 1 the throttle key is one, and takes the sticks',
+    modeOk && r.im.hand === 'keys', `${r.im.throttleKeys.up} ${r.im.hand}`);
+
+  /* A desktop has no thumb sticks, and nothing here may change for it. */
+  r = rigWith(false);
+  r.down('KeyW');
+  r.touch();
+  r.run(400);
+  check('with no thumb sticks mounted, a desktop: a key flies the keyboard as ever and a touch event is harmless',
+    r.im.hand === 'thumbs' && !r.im.isTouchPrimary() && r.im.source === 'the keyboard' && r.im.channels.throttle > 0.2,
+    `${r.im.hand} ${r.im.source} ${r.im.channels.throttle}`);
 }
 
 console.log(failed ?`\n${failed} failed, ${passed} passed` : `\nall ${passed} passed`);

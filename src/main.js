@@ -6653,6 +6653,13 @@ export async function boot({ loading, bootStart, mapId }) {
     if (ui.settings.sound && !audio.ctx) {
       audio.start();
       audio.setLevel(ui.settings.volume / 10);
+    } else if (ui.settings.sound) {
+      /* There is a context, and the browser may have taken it: an output
+       * device that changed, a sleep, a tab put away. Every gesture asks it
+       * back, which is what the comment on flyIfLinked has always said this
+       * function does. bug-453fb074: without this the sound stayed gone for
+       * the rest of the visit. See MotorAudio.wake. */
+      audio.wake();
     }
     audio.setEnabled(ui.settings.sound);
     applyMix(ui.settings);
@@ -9191,7 +9198,11 @@ export async function boot({ loading, bootStart, mapId }) {
       ui.paintFcAttitude();
     }
     if (touch) {
-      const touchOn = mode === 'flight' && ui.screen === 'flight' && !input.firstGamepad();
+      /* Nor while a stick key has taken the sticks from the thumbs: the
+       * plates go away and the ghost gimbals come, exactly as on a desktop,
+       * until a finger lands. See InputManager.takeKeys. */
+      const touchOn = mode === 'flight' && ui.screen === 'flight' && !input.firstGamepad()
+        && input.hand !== 'keys';
       /*
        * The one-time thumb-rates hand-off, at the first moment touch is
        * actually about to fly. A fresh touch profile was already seeded
@@ -9572,6 +9583,11 @@ export async function boot({ loading, bootStart, mapId }) {
    */
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
+      /* A browser may have suspended the sound while the tab was away. See
+       * MotorAudio.wake: a no-op when it is running or was never made. */
+      if (ui.settings.sound) {
+        audio.wake();
+      }
       /* The experimental timer loop was stopped below when the page hid;
        * back on screen it resumes, and its first frame reads the same
        * capped dt an rAF return does, because prevWall was left alone. */
@@ -10849,6 +10865,10 @@ export async function boot({ loading, bootStart, mapId }) {
      * flight: see predictView before the draw. */
     predict: ui.settings.predictView !== false ? Math.round(predictLastMs * 10) / 10 : 0,
     cores: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 0,
+    /* What the browser is doing with the sound: bug-453fb074, "SOUND JUST
+     * STOPPED WORKING", arrived with nothing to say whether the context was
+     * running, suspended or never made, or whether the pilot had it off. */
+    audio: { ...audio.report(), sound: ui.settings.sound, volume: ui.settings.volume },
   }));
   ui.setLatencyProbe(() => ({
     supported: latency.supported,

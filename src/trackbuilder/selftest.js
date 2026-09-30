@@ -117,7 +117,7 @@ import {
   STUCK_UNRESOLVED_MS, STUCK_TRAVEL_MAX, BURIED_DEPTH, BURIED_CONFIRM_MS,
   CLIP_CRASH_HOLD_MS, BOUNCE_SEPARATION, CLIP_SPAWN_GRACE_MS,
   setCraftAirframe, dirtClearance, craftVerticalOffset, craftVerticalHalf,
-  findRestSpot, restSpotAt, CRAFT_WORLD_R, CRASH_UNDERSIDE_NZ, CRASH_BELLY_UP,
+  findRestSpot, restSpotAt, restRoomAt, CRAFT_WORLD_R, CRASH_UNDERSIDE_NZ, CRASH_BELLY_UP,
   bodyUpDotWorld, solidContactCrash, CrashJudge, emptyWorldReport, foldWorldReport,
   BOUNCE_COOLDOWN_MS,
 } from '../game/collide.js';
@@ -5850,6 +5850,97 @@ function suiteRecoverSpot() {
   }
   check('Hibari Yard\'s crane: nothing stands on the ground inside its drawn foot, under the frame bar included',
     Boolean(crane) && !clearOnFoot, clearOnFoot || `${footSamples} spots on the pad, every one in a solid`);
+
+  /*
+   * ROOM BESIDE A WALL. bug-fe9215c0, on a built map (measured here on Hibari
+   * Yard): "partially clipping on to walls when crashing on them and stutters
+   * until it can finally get away from the wall", expecting "respawn further
+   * from objects and walls after a crash". The set down took the nearest spot
+   * whose parked hull was clear and "touching is not overlap", so it could be
+   * a centimetre off the brick.
+   * Measured on the crashes below before the change: 70 of 1434 left with
+   * under 5 cm of room, the median 15 cm. The swept diameter is restated
+   * here, 2 * CRAFT_WORLD_R, and not read out of collide.js, because a
+   * constant a check reads out of the file it checks cannot fail.
+   */
+  const wantRoom = 2 * CRAFT_WORLD_R;
+  const wallBox = new Colliders();
+  wallBox.addBox('wall', 0, 0, -6, 1, 6, 6);
+  wallBox.build();
+  const roomOf = (c, p, m) => restRoomAt(c, p.x, p.y, p.z, m);
+  check('restRoomAt: none beside a wall, plenty in the open, and with no colliders there is nothing to be near',
+    !restRoomAt(wallBox, -0.2, fiveR, 0, 0.1) && restRoomAt(wallBox, -3, fiveR, 0, wantRoom) && restRoomAt(null, 0, fiveR, 0, 5));
+  /* A pillar's corner is nearer along a diagonal than along either axis, so a spot off it has room
+   * to every side that a straight step reaches and none toward the corner. */
+  const pillar = new Colliders();
+  pillar.addBox('wall', 0, 0, 0, 1, 6, 1);
+  pillar.build();
+  check('restRoomAt looks along the diagonals too: off a pillar\'s corner the four straight steps are clear and the step at it is not',
+    clearAt(pillar, -0.3 + wantRoom, fiveR, -0.3) && clearAt(pillar, -0.3, fiveR, -0.3 + wantRoom)
+    && !restRoomAt(pillar, -0.3, fiveR, -0.3, wantRoom) && restRoomAt(pillar, -1.2, fiveR, -1.2, wantRoom));
+  const wallFrom = { x: -2.6, y: 1.5, z: 0 };
+  check('a crash 0.12 m off a wall face is set down with the swept diameter of room, not against the brick',
+    findRestSpot(wallBox, flat, fiveR, -0.12, 0.1, 0, wallFrom, out) && clearAt(wallBox, out.x, out.y, out.z)
+    && roomOf(wallBox, out, wantRoom), spot());
+  check('and not dragged for it: within a metre of where it crashed',
+    Math.hypot(out.x + 0.12, out.z) <= 1.0, spot());
+  const alley = new Colliders();
+  alley.addBox('wall', 0, 0, -3, 0.2, 5, 3);
+  alley.addBox('wall', 0.7, 0, -3, 0.9, 5, 3);
+  alley.build();
+  /* From the last open air, as the shell gives it, which is inside the alley: a spot across a wall is not offered. */
+  const alleyFrom = { x: 0.45, y: 1.5, z: -2.6 };
+  check('in an alley too narrow for the room, the nearest clear spot is taken where it crashed, and not the open end six metres off',
+    findRestSpot(alley, flat, fiveR, 0.45, 0.1, 0, alleyFrom, out) && clearAt(alley, out.x, out.y, out.z)
+    && !roomOf(alley, out, wantRoom) && Math.hypot(out.x - 0.45, out.z) < 0.3, spot());
+
+  let wallAsked = 0;
+  let wallSet = 0;
+  let wallTight = 0;
+  let wallRoomy = 0;
+  const yardWalls = yardPlaced.solids.filter((sd) => sd.kind === 'wall' && sd.box && sd.box[4] - sd.box[1] >= 1.0 && sd.box[3] - sd.box[0] >= 0.3);
+  for (const sd of yardWalls) {
+    const [x0, y0, z0, x1, y1, z1] = sd.box;
+    const faces = [
+      { nx: -1, nz: 0, x: x0, lo: z0, hi: z1, alongZ: true },
+      { nx: 1, nz: 0, x: x1, lo: z0, hi: z1, alongZ: true },
+      { nx: 0, nz: -1, x: z0, lo: x0, hi: x1, alongZ: false },
+      { nx: 0, nz: 1, x: z1, lo: x0, hi: x1, alongZ: false },
+    ];
+    for (const f of faces) {
+      const along = f.hi - f.lo;
+      const n = Math.max(1, Math.min(6, Math.floor(along / 1.5)));
+      for (let i = 0; i < n; i += 1) {
+        const t = f.lo + ((i + 0.5) / n) * along;
+        const cx = f.alongZ ? f.x + f.nx * 0.12 : t;
+        const cz = f.alongZ ? t : f.x + f.nz * 0.12;
+        for (const cy of [0.15, 0.7, 1.4]) {
+          if (cy > y1 - 0.1 || cy < y0 - 0.05) {
+            continue;
+          }
+          wallAsked += 1;
+          const from = { x: cx + f.nx * 2.5, y: 1.5, z: cz + f.nz * 2.5 };
+          if (!findRestSpot(yardSolids, yardAt, fiveR, cx, cy, cz, from, out)
+            && !findRestSpot(yardSolids, yardAt, fiveR, from.x, from.y, from.z, from, out)) {
+            continue;
+          }
+          wallSet += 1;
+          if (!roomOf(yardSolids, out, 0.05)) {
+            wallTight += 1;
+          }
+          if (roomOf(yardSolids, out, wantRoom)) {
+            wallRoomy += 1;
+          }
+        }
+      }
+    }
+  }
+  check('Hibari Yard: a crash at the foot of any of its walls is still set down',
+    wallAsked > 1000 && wallSet === wallAsked, `${wallSet} of ${wallAsked}`);
+  check('and none is left with under 5 cm of room between the parked hull and a solid',
+    wallSet === wallAsked && wallTight === 0, `${wallTight} of ${wallSet} tight`);
+  check('and all but a few have the swept diameter of room: at least 98 percent',
+    wallSet > 0 && wallRoomy / wallSet >= 0.98, `${wallRoomy} of ${wallSet}`);
 
   /*
    * A CRASH ON A ROAD IS SET DOWN ON THE VERGE, the owner's decision of
