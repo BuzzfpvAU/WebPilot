@@ -647,12 +647,12 @@ document (identical), the eight GIFs (byte identical), and the 5 inch and freest
 canvases (pixel identical). Exit: green, and the owner clicks a lap out on Track 8's
 pieces.
 
-**Stage 4. The club profile and the parts (L),** with approvals in it (section 7).
-The order is the `spec` field, free gate size and room size (S); table, chair and
-banner (S each); hoop and hex (M); the cube spike; the cube (L). Every part lands
-as one vertical slice: element definition, plan and room drawing, `trackdoc.js`,
-the mesh and colliders in `scene.js`, the pass test in `race.js`, the board's
-`validate.js`, `schema.md` and the checks. The board goes first.
+**Stage 4. The parts (L),** the club profile dropped (decision 3, 2026-09-30). The order is
+table, chair and banner (S each); hoop and hex (M); the cube spike; the cube (L). Every part
+lands as one vertical slice: element definition, plan and room drawing, `trackdoc.js`, the
+mesh and colliders in `scene.js`, the pass test in `race.js`, `schema.md` and the checks. The
+board's `validate.js` is the one piece left out until decision 6 is answered, and the
+simulator refuses to publish a part the board does not know.
 Checks: `micro:check` already places every element the micro palette offers,
 writes it, reads it, warns, builds a course and draws a plan, so a part added to
 the palette is exercised end to end by it. It gains a flown lap through each new
@@ -724,21 +724,38 @@ Risks:
    follow once the whoop result has been flown.
 3. **Add the club profile (`spec`), default RaceGOW** (recommended). Or stay
    RaceGOW only, and drop Stage 4 and the import of their parts.
+   **Answered 2026-09-30, "no profiles":** RaceGOW only. There is no `spec` field, no free
+   gate size and no room size as data, and Stage 4 is trimmed to the parts (decision 4).
 4. **Which parts, and how a cube is stored.** Table, chair, banner, hoop, hex,
    cube in that order, the cube as a group of face gates after a spike
    (recommended). Or per opening frames, about 60 call sites.
+   **Answered 2026-09-30, "add these elements":** the six parts, in that order, the cube as a
+   group of face gates after a spike. With no profile they follow RaceGOW's own rules where a
+   rule applies to them (a gate of a new shape is a gate of RaceGOW's sizes), and the furniture
+   is held to the general checks only.
 5. **No plant, ABI or build change.** Parts from axis aligned boxes and capsules,
    tables and banners at quarter turns (recommended). Or a turned box, which is P1
    of FREESTYLE-MAPS-PLAN section 10 and a physics decision.
+   **The owner asked on 2026-09-30, "what changes do you want to make?"** None to the plant,
+   the module ABI or the build, and the evidence is in the entry of that date in PROGRESS.md:
+   every part is a list of boxes and capsules (`src/props/parts.js`), placed by
+   `placeSolids` and uploaded through the `sim_world_box` and `sim_world_capsule` a barrier
+   already uses. What would bring the question back is in 4.4, and is not needed.
 6. **The board.** Approve the LeaderBoard change, deploy it first, and add the
    types without a schema bump (recommended). Or bump to 4, which makes an old
    board refuse instead of miscount, at the cost of touching every reader of the
    version.
+   **Not answered as of 2026-09-30.** The board repository is not touched, and the simulator
+   refuses to publish a track that holds one of the new parts until it is.
 7. **Keep the palette letters, and put RaceGOW's diagram colours on the openings**
    (recommended). The pictograms carry the meaning and existing habits keep
    working. Or re-key by number, or keep the current cream for everything.
 8. **Ways out.** glb and USDZ in Stage 5 (recommended), VR later, Liftoff and
    Velocidrone not now (recommended). Or all of them.
+   **Answered 2026-09-30, "7 no need for that other stuff for now".** Read as: no exports and
+   no other work beyond the parts. Stage 5 is not started, and the palette keeps the letters
+   and the colours it has. If the owner meant the board (6) and not the exports (8), only the
+   board line above changes.
 9. **Sharing.** The fragment link in Stage 3 (recommended). Private drafts on the
    board need accounts or a key scheme, and the board's own rules say nothing is
    ambiently authenticated, so they are not proposed.
