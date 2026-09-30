@@ -85,6 +85,7 @@ import {
   aperturesOf, createElement, elementById, kindOf, apertureCenter, logosOf, logoForDecal, dressOrder, topOf,
 } from './model.js';
 import { sequenceNumbers } from './sequence.js';
+import { aroundPass, spreadTags, stretchOf, tagsOf } from './passes.js';
 import { RoomEditor } from './edit3d.js';
 import { frameRectFor } from './snap.js';
 import { levelName } from './figures.js';
@@ -680,7 +681,9 @@ export class View3D {
     this.rulerNode = null;
     this.overlay = null;
     this.bubbles = [];
-    this.bubblePitch = 26;
+    /* What the tags were last built from, so a rebuild for a hover or a
+     * selection does not take a tag out from under the pointer. */
+    this.tagSig = '';
     this.badges = [];
     this.badgeSource = null;
     this.badgeTip = null;
@@ -1781,6 +1784,10 @@ export class View3D {
     this.bubbleSpecs = [];
     const whoop = this.host.isWhoopRace();
     this.startGateId = whoop ? this.startGateOf(doc) : null;
+    /* The one pass in focus (passes.js), which is what the arrows, the
+     * squares round a pole, the racing line and the tags are quiet about. */
+    this.focusSeq = whoop ? (this.host.focusedPass?.() ?? null) : null;
+    this.drawnSquares = new Set();
 
     g.add(this.fieldGround(doc));
     g.add(this.gridLines(doc));
@@ -1799,6 +1806,9 @@ export class View3D {
         g.add(node);
         this.groups.set(el.id, node);
       }
+    }
+    if (whoop) {
+      this.buildTagSpecs(doc);
     }
     if (whoop && this.host.selection.size === 1) {
       const only = elementById(doc, [...this.host.selection][0]);
@@ -2000,30 +2010,10 @@ export class View3D {
       if (n.number == null) {
         continue;
       }
-      /*
-       * ON A WHOOP CANVAS THE NUMBER IS A BUBBLE OF HTML over the canvas, not a
-       * sprite in the scene: one size on the screen at any distance, crisp, a
-       * button that can be clicked to give the gate another place in the
-       * order, and no canvas texture painted and uploaded for it on every
-       * rebuild. It hangs above the opening it belongs to, and a structure
-       * flown twice has one per pass.
-       */
+      /* On a whoop canvas the numbers are HTML over the canvas, one tag for each
+       * opening that is flown and not one for each pass: see buildTagSpecs. A
+       * ghost, which has no numbers, and every other canvas keep the sprite. */
       if (whoop && el.id !== '__ghost') {
-        let dz = def.kind === KIND.MARKER ? el.dims.height + 0.12 : 1.0;
-        if (def.kind === KIND.APERTURE) {
-          const levels = aperturesOf(el);
-          const ap = levels[Math.min(n.apertureIndex ?? 0, levels.length - 1)];
-          dz = ap.centerH + ap.clearH / 2 + 0.1;
-        }
-        const same = numbers.filter((x) => (x.apertureIndex ?? 0) === (n.apertureIndex ?? 0));
-        this.bubbleSpecs.push({
-          id: el.id,
-          seqId: n.seq.id,
-          number: n.number,
-          dz,
-          slot: Math.max(0, same.findIndex((x) => x.seq === n.seq)),
-          selected,
-        });
         continue;
       }
       let label = String(n.number);
@@ -2264,38 +2254,22 @@ export class View3D {
      * Entry face green, exit face red. One translucent pane a hand's breadth
      * either side of the opening, so which way the gate is flown is legible
      * from any angle without reading a number.
+     *
+     * ON A WHOOP CANVAS a piece flown more than once is drawn once for each way
+     * it is flown, not once for each pass (buildLanes), and the panes belong to
+     * the one pass in focus. Every other canvas draws the panes of every pass,
+     * exactly as it always did.
      */
-    const whoopRoom = this.host.isWhoopRace();
-    for (const n of numbers) {
-      const ap = levels[Math.min(n.apertureIndex ?? 0, levels.length - 1)];
-      const seq = n.seq;
-      if (!seq || seq.entry === 0) {
-        continue;
-      }
-      /* On a whoop canvas every pass carries an arrow through its opening, and
-       * the green entry and red exit panes are kept for the selected gate, so
-       * a room of them is not a room of green and red glass. */
-      if (whoopRoom) {
-        const along = { x: f.normal.x * seq.entry, y: f.normal.y * seq.entry, z: f.normal.z * seq.entry };
-        const arrow = arrowMesh(along, Math.max(0.3, ap.clearW * 0.85), selected ? COL.frameSel : COL.arrow);
-        arrow.position.set(0, 0, ap.centerH);
-        group.add(arrow);
-        if (!selected) {
+    if (this.host.isWhoopRace()) {
+      this.buildLanes(group, el, levels, numbers, f, quat, selected);
+    } else {
+      for (const n of numbers) {
+        const ap = levels[Math.min(n.apertureIndex ?? 0, levels.length - 1)];
+        const seq = n.seq;
+        if (!seq || seq.entry === 0) {
           continue;
         }
-      }
-      for (const [side, colour] of [[-seq.entry, COL.entry], [seq.entry, COL.exit]]) {
-        const pane = new THREE.Mesh(
-          new THREE.PlaneGeometry(ap.clearW, ap.clearH),
-          new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
-        );
-        pane.quaternion.copy(quat);
-        pane.position.set(
-          f.normal.x * side * 0.12,
-          f.normal.y * side * 0.12,
-          ap.centerH + f.normal.z * side * 0.12,
-        );
-        group.add(pane);
+        this.panePair(group, ap, seq, f, quat);
       }
     }
 
@@ -2323,6 +2297,71 @@ export class View3D {
     }
 
     this.buildHeaderFlags(group, el, selected);
+  }
+
+  /* The green entry pane and the red exit pane of one pass, a hand's breadth
+   * either side of its opening. */
+  panePair(group, ap, seq, f, quat) {
+    for (const [side, colour] of [[-seq.entry, COL.entry], [seq.entry, COL.exit]]) {
+      const pane = new THREE.Mesh(
+        new THREE.PlaneGeometry(ap.clearW, ap.clearH),
+        new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
+      );
+      pane.quaternion.copy(quat);
+      pane.position.set(
+        f.normal.x * side * 0.12,
+        f.normal.y * side * 0.12,
+        ap.centerH + f.normal.z * side * 0.12,
+      );
+      group.add(pane);
+    }
+  }
+
+  /*
+   * ONE ARROW FOR EACH WAY AN OPENING IS FLOWN, and no more. Every pass used to
+   * draw its own, 0.85 of the opening wide and all on the same spot, so a gate
+   * flown three times was three arrows over one another and the gate under them.
+   * Now an opening flown one way has one arrow at half its width, an opening flown
+   * both ways has two side by side (a lane each), and where a pass is in focus its
+   * lane is bright and a little longer, its panes are drawn, and every other lane is
+   * drawn back to a third.
+   */
+  buildLanes(group, el, levels, numbers, f, quat, selected) {
+    const focus = this.focusSeq;
+    const byOpening = new Map();
+    for (const n of numbers) {
+      const seq = n.seq;
+      if (!seq || seq.entry === 0) {
+        continue;
+      }
+      const at = Math.min(n.apertureIndex ?? 0, levels.length - 1);
+      const lanes = byOpening.get(at) ?? new Map();
+      const lane = lanes.get(seq.entry) ?? { entry: seq.entry, seqs: [] };
+      lane.seqs.push(seq.id);
+      lanes.set(seq.entry, lane);
+      byOpening.set(at, lanes);
+    }
+    for (const [at, lanes] of byOpening) {
+      const ap = levels[at];
+      const list = [...lanes.values()].sort((a, b) => a.entry - b.entry);
+      list.forEach((lane, i) => {
+        const inFocus = focus != null && lane.seqs.includes(focus);
+        const quiet = focus != null && !inFocus;
+        const across = list.length === 1 ? 0 : (i === 0 ? -1 : 1) * ap.clearW * 0.22;
+        const length = Math.max(0.22, ap.clearW * (inFocus ? 0.6 : 0.46));
+        const along = { x: f.normal.x * lane.entry, y: f.normal.y * lane.entry, z: f.normal.z * lane.entry };
+        const arrow = arrowMesh(along, length, inFocus || (selected && focus == null) ? COL.frameSel : COL.arrow, quiet ? 0.3 : (inFocus ? 1 : 0.85));
+        arrow.position.set(f.widthAxis.x * across, f.widthAxis.y * across, ap.centerH + f.widthAxis.z * across);
+        group.add(arrow);
+      });
+    }
+    /* The panes are the focused pass's, when it is one of this piece's. */
+    if (focus != null) {
+      const n = numbers.find((x) => x.seq && x.seq.id === focus);
+      if (n && n.seq.entry !== 0) {
+        this.panePair(group, levels[Math.min(n.apertureIndex ?? 0, levels.length - 1)], n.seq, f, quat);
+      }
+    }
   }
 
   /*
@@ -2583,23 +2622,44 @@ export class View3D {
         -dims.clearW / 2, -dims.clearH / 2, 0, dims.clearW / 2, -dims.clearH / 2, 0,
         dims.clearW / 2, dims.clearH / 2, 0, -dims.clearW / 2, dims.clearH / 2, 0,
       ];
+      /*
+       * ON A WHOOP CANVAS a pole flown six times was six squares of coloured glass
+       * round one pipe. A square is an outline, drawn once where two passes share
+       * one, and the glass (green in, red out) belongs to the pass in focus. Every
+       * other canvas draws the glass of every pass, as it always did.
+       */
+      const whoop = this.host.isWhoopRace();
+      const inFocus = whoop && this.focusSeq === seq.id;
+      if (whoop) {
+        const at = `${Math.round((el.position.x + cx) * 100)},${Math.round((el.position.y + cy) * 100)},${Math.round(f.normal.x * 10)},${Math.round(f.normal.y * 10)}`;
+        this.drawnSquares ??= new Set();
+        if (!inFocus && this.drawnSquares.has(`${el.id}|${at}`)) {
+          continue;
+        }
+        this.drawnSquares.add(`${el.id}|${at}`);
+      }
       const holder = new THREE.Group();
       holder.position.set(cx, cy, cz);
       holder.quaternion.copy(quat);
       const loopGeo = new THREE.BufferGeometry();
       loopGeo.setAttribute('position', new THREE.Float32BufferAttribute(loop, 3));
+      const quiet = whoop && this.focusSeq != null && !inFocus;
       holder.add(new THREE.LineLoop(loopGeo, new THREE.LineBasicMaterial({
-        color: selected ? COL.frameSel : COL.entry,
+        color: inFocus || (selected && !whoop) ? COL.frameSel : COL.entry,
+        transparent: quiet,
+        opacity: quiet ? 0.3 : 1,
       })));
-      for (const [side, colour] of [[-1, COL.entry], [1, COL.exit]]) {
-        const pane = new THREE.Mesh(
-          new THREE.PlaneGeometry(dims.clearW, dims.clearH),
-          new THREE.MeshBasicMaterial({
-            color: colour, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false,
-          }),
-        );
-        pane.position.z = side * 0.12;
-        holder.add(pane);
+      if (!whoop || inFocus) {
+        for (const [side, colour] of [[-1, COL.entry], [1, COL.exit]]) {
+          const pane = new THREE.Mesh(
+            new THREE.PlaneGeometry(dims.clearW, dims.clearH),
+            new THREE.MeshBasicMaterial({
+              color: colour, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false,
+            }),
+          );
+          pane.position.z = side * 0.12;
+          holder.add(pane);
+        }
       }
       group.add(holder);
     }
@@ -2647,7 +2707,47 @@ export class View3D {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    return new THREE.Line(geo, new THREE.LineBasicMaterial({ color: COL.path }));
+    /*
+     * WHILE A PASS IS IN FOCUS (whoop canvas) the line is drawn back to a quarter
+     * and the stretch that belongs to that pass, from the pass before it to the
+     * pass after, is drawn over it as a tube. A hairline is one pixel wide at any
+     * distance and six turns round one pole are six hairlines on the same spot;
+     * a thick bright stretch is the one that is being looked at.
+     */
+    const stretch = this.focusSeq != null && this.host.isWhoopRace() ? stretchOf(path, this.focusSeq) : null;
+    if (!stretch) {
+      return new THREE.Line(geo, new THREE.LineBasicMaterial({ color: COL.path }));
+    }
+    const group = new THREE.Group();
+    group.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: COL.path, transparent: true, opacity: 0.25 })));
+    const bright = this.brightStretch(path, stretch);
+    if (bright) {
+      group.add(bright);
+    }
+    return group;
+  }
+
+  /* The samples of a stretch as a tube a centimetre and a half across, or null
+   * where fewer than two of them are apart. */
+  brightStretch(path, stretch) {
+    const points = [];
+    for (let i = stretch.from; i <= stretch.to; i += 1) {
+      const p = path.samples[i].pos;
+      const v = new THREE.Vector3(p.x, p.y, p.z);
+      if (!points.length || v.distanceTo(points[points.length - 1]) > 1e-4) {
+        points.push(v);
+      }
+    }
+    if (points.length < 2) {
+      return null;
+    }
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const tube = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, Math.max(12, points.length * 2), 0.015, 6, false),
+      new THREE.MeshBasicMaterial({ color: 0xfff1b8 }),
+    );
+    tube.renderOrder = 10;
+    return tube;
   }
 
   buildGuideMarks(path) {
@@ -2826,9 +2926,7 @@ export class View3D {
   /* The racing line alone, from the path as it stands. */
   redrawLine() {
     if (this.pathLine) {
-      this.pathLine.removeFromParent();
-      this.pathLine.geometry.dispose();
-      this.pathLine.material.dispose();
+      this.freeGroup(this.pathLine);
       this.pathLine = null;
     }
     const path = this.host.path;
@@ -3120,29 +3218,150 @@ export class View3D {
   }
 
   /*
-   * THE NUMBERS ON THE GATES, one button for each pass in the flying order,
-   * rebuilt with the scene. Clicking one turns it into a box to type the place
-   * that pass should have; Enter moves it there (renumber in app.js), Escape
-   * leaves it.
+   * ONE TAG FOR EACH OPENING THAT IS FLOWN, not one for each pass (passes.js):
+   * its first number and, when it is flown more than once, a count ("2 x6").
+   * Pointed at, or selected, or holding the pass in focus, it opens into a chip
+   * for every pass, each a button: a click looks at that pass (pins it and selects
+   * the piece), a double click turns it into a box to type the place that pass
+   * should have. Enter moves it there (renumber in app.js), Escape leaves it.
+   *
+   * The tags are rebuilt only when what they say changes. A hover is a reason to
+   * redraw the scene and to dim what is not in focus, and rebuilding a button the
+   * pointer is on would lose the click it was about to make.
    */
+  buildTagSpecs(doc) {
+    this.bubbleSpecs = [];
+    if (this.host.labelsVisible === false) {
+      return;
+    }
+    for (const tag of tagsOf(doc)) {
+      const el = elementById(doc, tag.elementId);
+      if (!el) {
+        continue;
+      }
+      const def = ELEMENTS[el.type];
+      let dz = def.kind === KIND.MARKER ? el.dims.height + 0.12 : 1.0;
+      if (def.kind === KIND.APERTURE) {
+        const levels = aperturesOf(el);
+        const ap = levels[Math.min(tag.apertureIndex, levels.length - 1)];
+        dz = ap.centerH + ap.clearH / 2 + 0.1;
+      }
+      this.bubbleSpecs.push({
+        id: el.id,
+        key: tag.key,
+        apertureIndex: tag.apertureIndex,
+        dz,
+        passes: tag.passes.map((p) => ({ seqId: p.seq.id, number: p.number })),
+      });
+    }
+  }
+
   syncBubbles() {
-    for (const b of this.bubbles) {
-      b.node.remove();
+    const sig = this.bubbleSpecs
+      .map((sp) => `${sp.key}@${sp.dz.toFixed(3)}:${sp.passes.map((p) => `${p.seqId}=${p.number}`).join(',')}`)
+      .join('|');
+    if (sig !== this.tagSig || this.bubbles.length !== this.bubbleSpecs.length) {
+      this.tagSig = sig;
+      for (const b of this.bubbles) {
+        b.node.remove();
+      }
+      this.bubbles = this.bubbleSpecs.map((spec) => this.makeTag(spec));
     }
-    this.bubbles = [];
-    for (const spec of this.bubbleSpecs) {
-      const node = document.createElement('button');
-      node.type = 'button';
-      node.className = spec.selected ? 'tb-bubble on' : 'tb-bubble';
-      node.textContent = String(spec.number);
-      node.title = `Number ${spec.number} in the flying order. Click to give it another place.`;
-      node.addEventListener('click', () => this.renumberInline(node, spec));
-      this.overlay.append(node);
-      this.bubbles.push({ node, spec });
+    this.applyTagFocus();
+  }
+
+  makeTag(spec) {
+    const node = document.createElement('div');
+    node.className = 'tb-numtag';
+    node.dataset.key = spec.key;
+    const count = spec.passes.length;
+    const chipFor = (pass) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'tb-bubble';
+      chip.dataset.seq = pass.seqId;
+      chip.textContent = String(pass.number);
+      chip.title = count > 1
+        ? `Number ${pass.number}, one of ${count} passes through this piece. Click to look at it, double click to give it another place.`
+        : `Number ${pass.number} in the flying order. Click to look at it, double click to give it another place.`;
+      chip.addEventListener('click', () => this.host.setPassPinned(pass.seqId));
+      chip.addEventListener('dblclick', () => this.renumberInline(chip, pass));
+      chip.addEventListener('pointerenter', () => this.host.setPassHover(pass.seqId));
+      return chip;
+    };
+    const main = chipFor(spec.passes[0]);
+    if (count > 1) {
+      main.classList.add('multi');
+      const more = document.createElement('span');
+      more.className = 'tb-bubble-more';
+      more.textContent = `\u00d7${count}`;
+      main.append(more);
     }
-    /* How far apart the numbers of a stack sit: a button's own width and a gap,
-     * which is more on a screen that is touched. */
-    this.bubblePitch = (this.bubbles[0]?.node.offsetWidth ?? 22) + 4;
+    node.append(main);
+    const tag = { node, spec, main, chips: [main], open: false, hovered: false, chipFor };
+    node.addEventListener('pointerenter', () => {
+      tag.hovered = true;
+      this.applyTagFocus();
+    });
+    node.addEventListener('pointerleave', () => {
+      tag.hovered = false;
+      this.host.setPassHover(null);
+      this.applyTagFocus();
+    });
+    this.overlay.append(node);
+    return tag;
+  }
+
+  /* Open a tag into a chip for every pass, or close it back to its first. */
+  setTagOpen(tag, open) {
+    if (open === tag.open) {
+      return;
+    }
+    tag.open = open;
+    tag.w = null;
+    tag.node.classList.toggle('open', open);
+    if (open) {
+      for (const pass of tag.spec.passes.slice(1)) {
+        const chip = tag.chipFor(pass);
+        tag.node.append(chip);
+        tag.chips.push(chip);
+      }
+    } else {
+      for (const chip of tag.chips.slice(1)) {
+        chip.remove();
+      }
+      tag.chips = [tag.main];
+    }
+  }
+
+  /*
+   * What the tags say about the pass in focus: the tag that holds it is open with
+   * its chip lit, the tags of the pieces before and after it keep their place in
+   * the picture, the selected piece is marked, and every other tag is drawn back.
+   */
+  applyTagFocus() {
+    const focus = this.focusSeq ?? null;
+    const near = new Set();
+    if (focus != null) {
+      const around = aroundPass(this.host.doc, focus);
+      for (const q of [around?.prev, around?.next]) {
+        if (q) {
+          near.add(q.elementId);
+        }
+      }
+    }
+    const picked = this.host.selection;
+    for (const tag of this.bubbles) {
+      const holds = focus != null && tag.spec.passes.some((p) => p.seqId === focus);
+      const selected = picked.has(tag.spec.id);
+      tag.priority = (tag.hovered ? 4 : 0) + (holds ? 2 : 0) + (selected ? 1 : 0);
+      this.setTagOpen(tag, tag.hovered || holds || (selected && tag.spec.passes.length > 1));
+      tag.node.classList.toggle('sel', selected);
+      tag.node.classList.toggle('dim', focus != null && !holds && !near.has(tag.spec.id) && !selected);
+      for (const chip of tag.chips) {
+        chip.classList.toggle('on', chip.dataset.seq === focus || (focus == null && selected && chip === tag.main));
+      }
+    }
   }
 
   /*
@@ -3189,7 +3408,9 @@ export class View3D {
       this.overlay.append(node);
       /* A numbered piece has its number over the top of it, so the mark goes
        * beside the number; a pole has nothing there. */
-      const beside = -((this.bubbles[0]?.node.offsetWidth ?? 22) / 2 + node.offsetWidth / 2 + 4);
+      /* A tag grows to the right of its anchor, so the mark beside it is the same
+       * distance to the left whatever the tag says. */
+      const beside = -(11 + node.offsetWidth / 2 + 4);
       this.badges.push({ node, id, dx: numbered.has(id) ? beside : 0 });
     }
   }
@@ -3224,11 +3445,12 @@ export class View3D {
     }
   }
 
-  renumberInline(node, spec) {
+  renumberInline(node, pass) {
+    const saved = [...node.childNodes];
     const input = document.createElement('input');
     input.type = 'number';
     input.min = '1';
-    input.value = String(spec.number);
+    input.value = String(pass.number);
     input.className = 'tb-bubble-input';
     input.setAttribute('aria-label', 'Place in the flying order');
     node.classList.add('editing');
@@ -3241,11 +3463,11 @@ export class View3D {
         return;
       }
       done = true;
-      if (commit && input.value !== '' && Number(input.value) !== spec.number) {
-        this.host.renumber(spec.seqId, input.value);
+      if (commit && input.value !== '' && Number(input.value) !== pass.number) {
+        this.host.renumber(pass.seqId, input.value);
       } else {
         node.classList.remove('editing');
-        node.textContent = String(spec.number);
+        node.replaceChildren(...saved);
       }
     };
     input.addEventListener('keydown', (e) => {
@@ -3283,20 +3505,46 @@ export class View3D {
     if (this.badgeSource !== this.host.warnings) {
       this.syncBadges();
     }
+    /*
+     * The tags first, spread apart where two would lie on one another (spreadTags in
+     * passes.js), and then the marks beside them, which go with the tag of their
+     * piece. Every width is read before anything is written, so the frame costs one
+     * layout and not one for each tag.
+     */
+    for (const b of this.bubbles) {
+      if (b.w == null) {
+        b.w = b.node.offsetWidth || 22;
+        b.h = b.node.offsetHeight || 22;
+        b.half = (b.main.offsetHeight || 22) / 2;
+      }
+    }
+    const boxes = [];
+    for (const b of this.bubbles) {
+      const el = elementById(doc, b.spec.id);
+      b.at = el ? project({ x: el.position.x, y: el.position.y, z: el.position.z + b.spec.dz }) : null;
+      if (b.at) {
+        boxes.push({ key: b.spec.key, x: b.at.x - b.half, y: b.at.y - b.half, w: b.w, h: b.h, priority: b.priority ?? 0, prev: b.off });
+      }
+    }
+    const spread = spreadTags(boxes, 3);
+    const moved = new Map();
+    for (const b of this.bubbles) {
+      b.node.style.display = b.at ? '' : 'none';
+      if (b.at) {
+        b.off = spread.get(b.spec.key) ?? { dx: 0, dy: 0 };
+        b.node.style.transform = `translate(${(b.at.x + b.off.dx).toFixed(1)}px, ${(b.at.y + b.off.dy).toFixed(1)}px)`;
+        if (!moved.has(b.spec.id)) {
+          moved.set(b.spec.id, b.off);
+        }
+      }
+    }
     for (const b of this.badges) {
       const el = elementById(doc, b.id);
       const at = el ? project({ x: el.position.x, y: el.position.y, z: topOf(el) + 0.1 }) : null;
       b.node.style.display = at ? '' : 'none';
       if (at) {
-        b.node.style.transform = `translate(${(at.x + b.dx).toFixed(1)}px, ${(at.y - 2).toFixed(1)}px)`;
-      }
-    }
-    for (const b of this.bubbles) {
-      const el = elementById(doc, b.spec.id);
-      const at = el ? project({ x: el.position.x, y: el.position.y, z: el.position.z + b.spec.dz }) : null;
-      b.node.style.display = at ? '' : 'none';
-      if (at) {
-        b.node.style.transform = `translate(${(at.x + b.spec.slot * this.bubblePitch).toFixed(1)}px, ${at.y.toFixed(1)}px)`;
+        const off = moved.get(b.id) ?? { dx: 0, dy: 0 };
+        b.node.style.transform = `translate(${(at.x + b.dx + off.dx).toFixed(1)}px, ${(at.y - 2 + off.dy).toFixed(1)}px)`;
       }
     }
     this.host.placeCard?.(project, rect);

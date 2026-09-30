@@ -733,6 +733,32 @@
       .tb-bubble:hover { background: #ffffff; }
       .tb-bubble.on { background: var(--amber); }
       .tb-bubble.editing { width: 48px; margin-left: -24px; border-radius: var(--r-ctl); }
+      /*
+       * A TAG is one opening's numbers: its first number, and a count when it is
+       * flown more than once, opening into a chip for every pass when it is pointed
+       * at, selected, or holds the pass in focus. The tag is what is placed; the
+       * chips sit in it side by side. It takes no pointer itself, so the room under
+       * the gap between two chips is still the room.
+       */
+      .tb-numtag {
+        position: absolute;
+        left: 0;
+        top: 0;
+        margin: -11px 0 0 -11px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        pointer-events: none;
+      }
+      .tb-numtag .tb-bubble { position: static; margin: 0; flex: none; }
+      .tb-numtag .tb-bubble.editing { margin: 0; }
+      .tb-numtag.open { z-index: 3; }
+      .tb-numtag.dim { opacity: 0.45; }
+      .tb-numtag.dim:hover, .tb-numtag.dim.open { opacity: 1; }
+      .tb-bubble { touch-action: none; }
+      .tb-bubble.multi { width: auto; min-width: 22px; padding: 0 7px; border-radius: 11px; }
+      .tb-bubble-more { margin-left: 3px; font-size: 10px; font-weight: 500; opacity: 0.7; }
+      .tb-numtag.open .tb-bubble-more { display: none; }
       .tb-bubble-input {
         width: 100%;
         height: 100%;
@@ -1836,6 +1862,15 @@
           line-height: 30px;
         }
         .tb-bubble.editing { width: 56px; margin-left: -28px; }
+        .tb-numtag { margin: -16px 0 0 -16px; }
+        .tb-numtag .tb-bubble.editing { margin: 0; }
+        .tb-bubble.multi { width: auto; min-width: 32px; padding: 0 9px; border-radius: 16px; }
+        /* On a screen that is touched a tag is a label until its piece is selected: a
+         * chip is 32 px, and on a track whose pieces stand close it would sit on the
+         * body of the next gate along and take the finger that meant to pull that gate.
+         * Tap the piece, and its tag opens and can be tapped; the strip is the
+         * other way to a pass. */
+        .tb-numtag:not(.sel):not(.open) .tb-bubble { pointer-events: none; }
         #tb-palette .tb-tool { min-height: 44px; }
         .tb-card-actions .tb-btn, #tb-lapbar .tb-btn { min-height: 44px; }
         .tb-card-x { min-width: 44px; min-height: 44px; }

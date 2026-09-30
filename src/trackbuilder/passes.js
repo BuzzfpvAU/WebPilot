@@ -260,3 +260,60 @@ export function removeLastPass(doc) {
   removeFromSequence(doc, last.id);
   return last;
 }
+
+/*
+ * TAGS THAT DO NOT LIE ON ONE ANOTHER. Every tag sits over the opening it names,
+ * and on a track whose pieces stand close together (Track 8's towers are three
+ * gates on one spot) their anchors are a few pixels apart on the screen, so tags
+ * piled up and the number under another could not be read. This is the one
+ * arithmetic that moves them: boxes are laid in the order of `priority` (the tag
+ * the pointer is on first, then the pass in focus, then the selected piece), each
+ * at the nearest of a few steps to its own anchor that is clear of the boxes
+ * already laid, and one that had a place last frame tries it first so a tag does
+ * not hop between two places as the camera turns.
+ *
+ *   boxes  [{ key, x, y, w, h, priority, prev }]  x, y the top left of the box at
+ *          its anchor, prev the { dx, dy } it was given last time, if any
+ *   gap    the space kept between two boxes
+ *
+ * Returns Map<key, { dx, dy }>, dy never positive. A box that finds no free step
+ * stays where it is anchored, which is the honest answer where the screen is
+ * simply full.
+ */
+export function spreadTags(boxes, gap = 3) {
+  /* Up and to the sides, never down: a tag hangs above the opening it names, and
+   * one pushed down lands on the gate, which is what a press on the gate must hit. */
+  const steps = [];
+  for (let iy = -3; iy <= 0; iy += 1) {
+    for (let ix = -2; ix <= 2; ix += 1) {
+      steps.push({ ix, iy });
+    }
+  }
+  steps.sort((a, b) => (Math.abs(a.ix) + Math.abs(a.iy)) - (Math.abs(b.ix) + Math.abs(b.iy)) || Math.abs(a.iy) - Math.abs(b.iy) || a.ix - b.ix);
+  const order = boxes.map((b, i) => ({ b, i })).sort((p, q) => (q.b.priority - p.b.priority) || (p.i - q.i));
+  const laid = [];
+  const out = new Map();
+  const clear = (r) => laid.every((o) => r.x + r.w + gap <= o.x || r.x >= o.x + o.w + gap
+    || r.y + r.h + gap <= o.y || r.y >= o.y + o.h + gap);
+  for (const { b } of order) {
+    const at = (dx, dy) => ({ x: b.x + dx, y: b.y + dy, w: b.w, h: b.h });
+    let pick = { dx: 0, dy: 0 };
+    let found = false;
+    if (b.prev && clear(at(b.prev.dx, b.prev.dy))) {
+      pick = { dx: b.prev.dx, dy: b.prev.dy };
+      found = true;
+    }
+    for (const st of found ? [] : steps) {
+      const dx = st.ix * (b.w + gap);
+      const dy = st.iy * (b.h + gap);
+      if (clear(at(dx, dy))) {
+        pick = { dx, dy };
+        found = true;
+        break;
+      }
+    }
+    laid.push(at(pick.dx, pick.dy));
+    out.set(b.key, pick);
+  }
+  return out;
+}

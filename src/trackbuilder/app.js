@@ -43,6 +43,7 @@ import {
   neighboursOf, pinFacesAt, removeElement, removeFromSequence, setApertureIndex,
 } from './sequence.js';
 import { applyFigure, upgradeStackedFigures } from './figures.js';
+import { apertureAt, flyAgain, focusFor, removeLastPass } from './passes.js';
 import {
   QUARTER, copyElements, magnetFor, moveToPlace, nearestQuarter, placeOnTrack, placeRow as layRow, replaceWith,
   rowPlan, turnStepFor,
@@ -408,6 +409,12 @@ export class App {
     this.nodes = nodes;
     this.doc = createTrack(undefined, newTrackClass());
     this.selection = new Set();
+    /* WHOOP CANVAS ONLY. The pass in focus is one pass of the lap, not a piece:
+     * the one a pilot pinned (a chip on the strip, a number on a tag, a chip on
+     * the card) and the one under the pointer for the moment. Views of the
+     * builder, never stored, and cleared when a track opens. See passes.js. */
+    this.passPinned = null;
+    this.passHover = null;
     /* One side of the selected gate, picked in the 3D view to be taken away
      * with Delete: { id, side } or null. See FRAME_SIDES in elements.js. */
     this.pickedSide = null;
@@ -874,6 +881,7 @@ export class App {
     }
     this.pruneActiveNode();
     this.keepPickedSide();
+    this.keepPassPin();
     this.panels.renderAll();
     /* What is selected is drawn differently in the room (its colour, its ring),
      * so a selection is a reason to redraw the scene, not only the frame. */
@@ -889,6 +897,7 @@ export class App {
     }
     this.pruneActiveNode();
     this.keepPickedSide();
+    this.keepPassPin();
     this.panels.renderAll();
     this.view3d.markDirty();
     this.requestDraw();
@@ -904,6 +913,65 @@ export class App {
     if (this.selection.size !== 1 || !this.selection.has(a.id) || !road || !(a.index < (road.nodes?.length ?? 0))) {
       this.activeNode = null;
     }
+  }
+
+  /* ---------------- the pass in focus ---------------- */
+
+  /*
+   * The one pass of the lap that is in focus, or null: the pass under the
+   * pointer, else the pinned one while it belongs to what is selected, else
+   * the first pass of the piece that is selected. Everything about a pass that
+   * is not in focus is drawn quiet (3.8 of WHOOP-BUILDER-PLAN.md).
+   */
+  focusedPass() {
+    if (!this.isWhoopRace()) {
+      return null;
+    }
+    return focusFor(this.doc, { selection: this.selection, pinned: this.passPinned, hover: this.passHover });
+  }
+
+  /* The pin belongs to the piece it is a pass of: a selection that is not that
+   * piece lets it go, so it does not come back the next time the piece is picked. */
+  keepPassPin() {
+    if (this.passPinned == null) {
+      return;
+    }
+    const q = this.doc.sequence.find((s) => s.id === this.passPinned);
+    if (!q || this.selection.size !== 1 || !this.selection.has(q.elementId)) {
+      this.passPinned = null;
+    }
+  }
+
+  /* What the pointer is over: a chip on the strip, a number on a tag. Nothing
+   * is selected and nothing is rebuilt but the picture. */
+  setPassHover(seqId) {
+    const id = seqId ?? null;
+    if (id === this.passHover) {
+      return;
+    }
+    this.passHover = id;
+    this.passFocusChanged();
+  }
+
+  /* Pin a pass: select its piece and hold the focus on that pass. */
+  setPassPinned(seqId) {
+    const q = this.doc.sequence.find((s) => s.id === seqId);
+    if (!q) {
+      return;
+    }
+    this.passPinned = seqId;
+    /* keepPassPin lets the pin go for a selection that is not its piece, and
+     * this one is. */
+    this.setSelection([q.elementId]);
+  }
+
+  /* The focus moved: the room is drawn again, and the strip and the card catch
+   * up without being rebuilt, because a pointer that is over one of their
+   * buttons must not have it taken away from under it. */
+  passFocusChanged() {
+    this.panels.renderPassFocus?.();
+    this.view3d.markDirty();
+    this.requestDraw();
   }
 
   /* ---------------- one side of a gate ---------------- */
@@ -2201,6 +2269,8 @@ export class App {
     const seated = this.seat();
     applyAutoFaces(this.doc);
     this.selection.clear();
+    this.passPinned = null;
+    this.passHover = null;
     this.activeNode = null;
     this.roadDraft = null;
     this.pickedSide = null;

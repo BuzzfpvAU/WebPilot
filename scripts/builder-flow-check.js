@@ -105,6 +105,19 @@ async function click(page, x, y) {
   await page.sleep(80);
 }
 
+/* Two clicks a hand's distance in time apart: the second carries a click count of
+ * two, which is what makes the page hear a double click. */
+async function doubleClick(page, x, y) {
+  await mouse(page, 'mouseMoved', x, y, 0);
+  for (const n of [1, 2]) {
+    await page.cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: n }, page.sessionId);
+    await page.sleep(40);
+    await page.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: n }, page.sessionId);
+    await page.sleep(60);
+  }
+  await page.sleep(80);
+}
+
 /* Press here, pull through `steps` intermediate points to there, and let go,
  * or stop short of letting go (`hold`) so the page can be looked at mid gesture.
  * `mods` is the modifier mask the protocol wants: Alt 1, Ctrl 2, Meta 4, Shift 8. */
@@ -835,9 +848,10 @@ kase('keys', async () => {
 });
 
 /*
- * THE NUMBER ON A GATE IS A BUTTON. Click it, type where that gate should come
- * in the order, press Enter: it goes there, and the numbers close up. That is
- * one undo step, and Escape leaves it alone.
+ * THE NUMBER ON A GATE IS A BUTTON. Click it and that pass is in focus; double
+ * click it, type where that gate should come in the order, press Enter: it goes
+ * there, and the numbers close up. That is one undo step, and Escape leaves it
+ * alone.
  */
 kase('numbers', async () => {
   const page = await openBuilder();
@@ -851,7 +865,13 @@ kase('numbers', async () => {
     const first = await order();
     const steps = await undoCount(page);
 
+    /* One click looks at the pass: it selects the piece and puts the pass in focus,
+     * and it is not an edit. */
     await click(page, b[2].x, b[2].y);
+    check('a click on a number selects its piece and puts that pass in focus, and is no edit',
+      await page.evaluate(`window.trackBuilder.selection.has('${first[2]}') && window.trackBuilder.focusedPass() === window.trackBuilder.doc.sequence[2].id`)
+      && (await undoCount(page)) === steps && !(await page.evaluate("!!document.querySelector('.tb-bubble-input')")));
+    await doubleClick(page, b[2].x, b[2].y);
     await page.until("!!document.querySelector('.tb-bubble-input')", 5000);
     await page.evaluate("(() => { const i = document.querySelector('.tb-bubble-input'); i.value = '1'; return 1; })()");
     await key(page, 'Enter');
@@ -862,7 +882,7 @@ kase('numbers', async () => {
     b = await bubbles();
     check('and the numbers close up, one of each', b.map((x) => x.text).sort().join() === '1,2,3', b.map((x) => x.text).join());
 
-    await click(page, b[0].x, b[0].y);
+    await doubleClick(page, b[0].x, b[0].y);
     await page.until("!!document.querySelector('.tb-bubble-input')", 5000);
     await page.evaluate("(() => { const i = document.querySelector('.tb-bubble-input'); i.value = '3'; return 1; })()");
     await key(page, 'Escape');

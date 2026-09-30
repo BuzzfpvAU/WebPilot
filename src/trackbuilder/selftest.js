@@ -52,7 +52,7 @@ import { buildSheet, sheetHtml, sheetSvg, membersOf, mergeMembers, nodesOf, fitt
 import { importFpvEvents, looksLikeFpvEvents, reportLines } from './importfpv.js';
 import {
   passList, tagsOf, reuseOf, lanesOf, focusFor, aroundPass, stretchOf, flyAgain, apertureAt,
-  removeLastPass, MAX_PASSES,
+  removeLastPass, MAX_PASSES, spreadTags,
 } from './passes.js';
 import {
   frameRectFor, nearestQuarter, placementFor, placeOnTrack, spacingTone, snapTurn, copyElements,
@@ -7702,6 +7702,42 @@ function suiteWhoopPasses() {
       threw = e.message;
     }
     check('nothing here throws on a document with entries that point at nothing', threw === '', threw);
+  }
+
+  /* TAGS THAT DO NOT LIE ON ONE ANOTHER: the arithmetic that spreads them. */
+  {
+    const box = (key, x, y, priority = 0, prev = undefined) => ({ key, x, y, w: 22, h: 22, priority, prev });
+    const laid = (boxes, out) => boxes.map((b) => ({ x: b.x + out.get(b.key).dx, y: b.y + out.get(b.key).dy, w: b.w, h: b.h }));
+    const overlap = (a, b) => !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
+    const anyOverlap = (rs) => rs.some((r, i) => rs.some((o, j) => j > i && overlap(r, o)));
+
+    const two = [box('a', 100, 100), box('b', 100, 100)];
+    const o2 = spreadTags(two);
+    check('two tags on one spot are moved apart', !anyOverlap(laid(two, o2)));
+    check('and the first stays where it is anchored', o2.get('a').dx === 0 && o2.get('a').dy === 0);
+    const swap = spreadTags([box('a', 100, 100, 0), box('b', 100, 100, 5)]);
+    check('the tag with the higher priority is the one that stays, whatever the order',
+      swap.get('b').dx === 0 && swap.get('b').dy === 0 && (swap.get('a').dx !== 0 || swap.get('a').dy !== 0));
+
+    const ten = Array.from({ length: 10 }, (_, i) => box(`t${i}`, 200, 200));
+    check('ten tags on one spot are all clear of each other', !anyOverlap(laid(ten, spreadTags(ten))));
+    const far = [box('a', 0, 0), box('b', 300, 0), box('c', 0, 300)];
+    check('tags that are apart are not moved at all', [...spreadTags(far).values()].every((v) => v.dx === 0 && v.dy === 0));
+
+    const again = spreadTags(ten);
+    check('the same tags give the same answer', JSON.stringify([...again]) === JSON.stringify([...spreadTags(ten)]));
+
+    const held = spreadTags([box('a', 100, 100, 1), box('b', 100, 100, 0, { dx: 25, dy: 0 })]);
+    check('a tag that had a place last time keeps it while it is still free', held.get('b').dx === 25 && held.get('b').dy === 0);
+    const taken = spreadTags([box('a', 100, 100, 1), box('b', 100, 100, 0, { dx: 0, dy: 0 })]);
+    check('and gives it up when it is not', taken.get('b').dx !== 0 || taken.get('b').dy !== 0);
+
+    const crowd = Array.from({ length: 40 }, (_, i) => box(`c${i}`, 50, 50));
+    const oc = spreadTags(crowd);
+    check('a crowd bigger than the places there are is answered, never thrown at, and no tag goes further than three steps up or two aside',
+      oc.size === 40 && [...oc.values()].every((v) => Math.abs(v.dx) <= 2 * 25 && v.dy >= -3 * 25));
+    check('and no tag is ever moved down, onto the gate it hangs over', [...oc.values(), ...spreadTags(ten).values()].every((v) => v.dy <= 0));
+    check('nothing is nothing', spreadTags([]).size === 0);
   }
 
   /* EVERY SHIPPED TRACK: the tags add up to the passes, and the reuse figures agree with a count made another way. */
