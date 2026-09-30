@@ -57,6 +57,9 @@
  * Collision already owns a clip of the tube.
  */
 import { fastestLap, fastestThreeConsecutive, MICRO_SCALE } from './track.js';
+/* What an opening is when it is not a rectangle: pure arithmetic, no Three.js, shared with the
+ * scene that draws the frame and the builder that draws the ring. */
+import { clipToShape, insideShape } from '../props/aperture.js';
 
 /*
  * How far the scoring volume sticks out either side of the opening, metres.
@@ -543,8 +546,14 @@ export class Race {
    * waiting for LEG_MIN_DEPTHS of flying: the contact is then the first
    * point of the box at or after it, so a travel that is already inside the
    * box when the wait runs out is credited there and not refused.
+   *
+   * `shape` is what is left of the rectangle: a hoop's hole is the ellipse inscribed in it and a
+   * hex gate's is the hexagon (src/props/aperture.js). The travel is clipped against the
+   * rectangle as always and then, exactly, against the shape, so a line through the corner of the
+   * box that holds a hoop goes past the ring and does not score. A square, which is every gate
+   * there ever was, never reaches that second clip.
    */
-  openingHits(a, b, halfW, halfH, tMin = 0) {
+  openingHits(a, b, halfW, halfH, tMin = 0, shape = 'square') {
     if (!(halfW > 0) || !(halfH > 0)) {
       return -1;
     }
@@ -584,6 +593,14 @@ export class Race {
     if (!clip(a.z, dz, -this.passDepth, this.passDepth)) {
       return -1;
     }
+    if (shape !== 'square') {
+      const inside = clipToShape(shape, halfW, halfH, a.x, a.y, dx, dy, t0, t1);
+      if (!inside) {
+        return -1;
+      }
+      t0 = inside[0];
+      t1 = inside[1];
+    }
     /* Prefer the midplane if the clipped segment actually crosses it, so a
      * square-on pass times the hole the pilot can see. An angled line that
      * only clips the thick volume, never z = 0 inside the rectangle, still
@@ -600,9 +617,12 @@ export class Race {
   insideOpening(g, k, p) {
     const ap = g.apertures[k];
     const q = this.local(g, ap.centreY, p.x, p.y, p.z);
-    return Math.abs(q.x) <= ap.clearW * 0.5 - this.passMargin
-      && Math.abs(q.y) <= ap.clearH * 0.5 - this.passMargin
-      && Math.abs(q.z) <= this.passDepth;
+    const halfW = ap.clearW * 0.5 - this.passMargin;
+    const halfH = ap.clearH * 0.5 - this.passMargin;
+    if (ap.shape === 'circle' || ap.shape === 'hex') {
+      return insideShape(ap.shape, halfW, halfH, q.x, q.y) && Math.abs(q.z) <= this.passDepth;
+    }
+    return Math.abs(q.x) <= halfW && Math.abs(q.y) <= halfH && Math.abs(q.z) <= this.passDepth;
   }
 
   /* Let go of every held opening the craft is no longer inside. */
@@ -658,7 +678,7 @@ export class Race {
       const b = this.local(g, ap.centreY, curr.x, curr.y, curr.z);
       const halfW = ap.clearW * 0.5 - this.passMargin;
       const halfH = ap.clearH * 0.5 - this.passMargin;
-      const tk = this.openingHits(a, b, halfW, halfH, tMin);
+      const tk = this.openingHits(a, b, halfW, halfH, tMin, ap.shape === 'circle' || ap.shape === 'hex' ? ap.shape : 'square');
       if (tk < 0) {
         continue;
       }

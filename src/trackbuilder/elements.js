@@ -49,6 +49,9 @@ import {
 /* What a table, a chair and a banner are worth by default, in the one place their
  * shape is written down: src/props/room.js. */
 import { ROOM_SIZES } from '../props/room.js';
+/* What an opening is when it is not a square, and the height a regular hexagon has over its
+ * width, again in the one place the shape is written down. */
+import { shapeOf, HEX_HEIGHT_RATIO } from '../props/aperture.js';
 
 /* Re-exported because this module's consumers already read it from here. */
 export { FRAME_TUBE_OD };
@@ -361,6 +364,11 @@ export function unbuiltSidesOf(el) {
   if (isUnbuilt(el)) {
     return [...FRAME_SIDES];
   }
+  /* A ring and a hexagon have no four sides to take away one at a time, so a list left on a
+   * piece that was a gate before it was replaced is inert, and is there if it goes back. */
+  if (apertureShapeOf(el) !== 'square') {
+    return [];
+  }
   return normalizeUnbuiltSides(el.unbuiltSides);
 }
 
@@ -647,6 +655,48 @@ export const ELEMENTS = {
     microDims: {
       levels: 1, sillH: 0.900,
       clearW: GATE_OPENING_DEFAULT, clearH: GATE_OPENING_DEFAULT,
+      levelPitch: GATE_SPACING_NOMINAL,
+    },
+  },
+  hoop: {
+    id: 'hoop',
+    label: 'Hoop',
+    group: 'track',
+    kind: KIND.APERTURE,
+    shape: 'circle',
+    note: 'A round gate. The opening is the circle inside the box a square gate would have, so the corners of the box do not score.',
+    /* Not a MultiGP element and not on the five inch palette: it is here for a whoop room, where
+     * people do stand a ring on a stand. The five inch default only has to exist, so that a
+     * document that names a hoop on a field is drawn and not thrown away. */
+    pitch: 0,
+    dims: { levels: 1, sillH: 0, clearW: 5 * FT, clearH: 5 * FT, levelPitch: 5 * FT + FRAME_TUBE_OD },
+    /* The same opening as the RaceGOW gate it stands in for, so the series' rules about how big
+     * an opening may be, and how far apart two are, read a hoop exactly as they read a gate. A
+     * ring the width of the opening is a ring the pilot flies through at the gate's own size. */
+    microDims: {
+      levels: 1, sillH: 0,
+      clearW: GATE_OPENING_DEFAULT, clearH: GATE_OPENING_DEFAULT,
+      levelPitch: GATE_SPACING_NOMINAL,
+    },
+  },
+  hexGate: {
+    id: 'hexGate',
+    label: 'Hex gate',
+    group: 'track',
+    kind: KIND.APERTURE,
+    shape: 'hex',
+    note: 'A six sided gate, a point at each end of its width and a flat above and below. The opening is the hexagon inside its box.',
+    pitch: 0,
+    dims: {
+      levels: 1, sillH: 0, clearW: 5 * FT, clearH: 5 * FT * HEX_HEIGHT_RATIO,
+      levelPitch: 5 * FT * HEX_HEIGHT_RATIO + FRAME_TUBE_OD,
+    },
+    /* Six pipes of one length make a regular hexagon: across the points it is twice a pipe and
+     * flat to flat it is a pipe times the square root of three, so the width is the gate's own
+     * opening and the height is that times 0.866. */
+    microDims: {
+      levels: 1, sillH: 0,
+      clearW: GATE_OPENING_DEFAULT, clearH: GATE_OPENING_DEFAULT * HEX_HEIGHT_RATIO,
       levelPitch: GATE_SPACING_NOMINAL,
     },
   },
@@ -1153,16 +1203,26 @@ const PRESET_TOL = 0.001;
 /* Which preset a set of dimensions IS, or null for a size somebody typed.
  * The inspector shows the answer, so "custom" is a state an author can see
  * rather than a silent one. */
-export function matchingGatePreset(dims) {
+export function matchingGatePreset(dims, shape = 'square') {
   if (!dims) {
     return null;
   }
   /* Both lists, because the answer to "which preset IS this" cannot depend
    * on which class is open: a 19 inch whoop gate on a full sized track is
-   * still the Whoop preset. */
+   * still the Whoop preset. A hoop is a preset's width and as high as it is wide; a hex gate is a
+   * preset's width and as high as a hexagon that wide is. */
   return [...GATE_PRESETS, ...MICRO_GATE_PRESETS]
     .find((p) => Math.abs(dims.clearW - p.clearW) < PRESET_TOL
-      && Math.abs(dims.clearH - p.clearH) < PRESET_TOL) || null;
+      && Math.abs(dims.clearH - presetHeight(p, shape)) < PRESET_TOL) || null;
+}
+
+/* The height a preset's opening has in a shape: the preset's own for a square, its width for a hoop, and
+ * a regular hexagon's for a hex gate. */
+export function presetHeight(preset, shape = 'square') {
+  if (shape === 'hex') {
+    return preset.clearW * HEX_HEIGHT_RATIO;
+  }
+  return shape === 'circle' ? preset.clearW : preset.clearH;
 }
 
 /*
@@ -1172,12 +1232,12 @@ export function matchingGatePreset(dims) {
  * ALONE: a preset is an opening size, not a new element. A three level
  * ladder resized to championship is still a three level ladder.
  */
-export function applyGatePreset(dims, preset) {
+export function applyGatePreset(dims, preset, shape = 'square') {
   if (!dims || !preset) {
     return dims;
   }
   dims.clearW = preset.clearW;
-  dims.clearH = preset.clearH;
+  dims.clearH = presetHeight(preset, shape);
   /*
    * A RACEGOW STACK'S PITCH IS A RULE, NOT A CONSEQUENCE.
    *
@@ -1216,10 +1276,11 @@ export const PALETTE_ORDER = [
  *
  * Barrier is on it because a living room has furniture in it, which is a
  * real and constant feature of these tracks, and so are a table, a chair and a
- * banner, which follow it.
+ * banner, which follow it. A hoop and a hex gate are openings, so they stand
+ * with the gates, after the horizontal one and before the poles.
  */
 export const MICRO_PALETTE_ORDER = [
-  'gate', 'doubleStack', 'ladder', 'tower', 'diveGate',
+  'gate', 'doubleStack', 'ladder', 'tower', 'diveGate', 'hoop', 'hexGate',
   'pole', 'horizontalPole', 'cone', 'barrier', 'table', 'chair', 'banner', 'waypoint',
 ];
 
@@ -1548,6 +1609,17 @@ export function elementByKey(letter, cls = TRACK_CLASS_DEFAULT, mode = 'race') {
 export function gateFlagHeight(dims) {
   const h = dims?.flagH;
   return Number.isFinite(h) && h > 0 ? h : GATE_FLAG_H;
+}
+
+/*
+ * The SHAPE of an element's openings, for a type or for a piece of that type: 'square' for every
+ * gate there ever was, 'circle' for a hoop and 'hex' for a hex gate. It is a property of the
+ * type, not stored on the piece, so no document has a word to get wrong and a piece cannot be
+ * a hoop with a hex's name.
+ */
+export function apertureShapeOf(what) {
+  const type = typeof what === 'string' ? what : what?.type;
+  return shapeOf(ELEMENTS[type]?.shape);
 }
 
 export function apertureLevels(dims) {

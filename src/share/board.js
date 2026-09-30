@@ -511,7 +511,7 @@ export function usableTags(list) {
 }
 
 /*
- * WHAT THE BOARD DOES NOT KNOW YET: a living room's table, chair and banner.
+ * WHAT THE BOARD DOES NOT KNOW YET: a living room's table, chair and banner, and a hoop and a hex gate.
  *
  * The board keeps its own list of what a track is made of (WebFPVSimulator-
  * LeaderBoard/src/validate.js), for the gate count and the length that decide
@@ -526,7 +526,10 @@ export function usableTags(list) {
  * did not understand would say less. Nothing is lost by it: the track still
  * flies, and it still shares as a link.
  */
-export const BOARD_UNKNOWN_TYPES = ['table', 'chair', 'banner'];
+export const BOARD_UNKNOWN_TYPES = ['table', 'chair', 'banner', 'hoop', 'hexGate'];
+
+/* What each is called in a sentence. A hex gate is two words, and its plural is on the second. */
+const PART_WORD = { table: 'table', chair: 'chair', banner: 'banner', hoop: 'hoop', hexGate: 'hex gate' };
 
 /* What in a track the board does not know, as [{ type, count }] in the order of
  * BOARD_UNKNOWN_TYPES. A document that is not one holds nothing. */
@@ -544,9 +547,9 @@ export function partsTheBoardDoesNotKnow(doc) {
 /* The refusal, in words: what the board does not know, what this track has, and what
  * to do about it. */
 export function unknownPartsSentence(list) {
-  const have = (list || []).map((p) => `${p.count} ${p.type}${p.count === 1 ? '' : 's'}`);
+  const have = (list || []).map((p) => `${p.count} ${PART_WORD[p.type] ?? p.type}${p.count === 1 ? '' : 's'}`);
   const joined = have.length > 1 ? `${have.slice(0, -1).join(', ')} and ${have[have.length - 1]}` : have.join('');
-  return `The board does not know a table, a chair or a banner yet, so a track that has one cannot go on it. This one has ${joined}. Take them out to publish it. It still flies, and it still shares as a link.`;
+  return `The board does not know a table, a chair, a banner, a hoop or a hex gate yet, so a track that has one cannot go on it. This one has ${joined}. Take them out to publish it. It still flies, and it still shares as a link.`;
 }
 
 export async function publishTrack({

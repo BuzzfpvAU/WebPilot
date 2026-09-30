@@ -35,7 +35,7 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ELEMENTS, KIND, TUNING, trackClassOf, tuningFor, docModeOf } from './elements.js';
+import { ELEMENTS, KIND, TUNING, trackClassOf, tuningFor, docModeOf, apertureShapeOf } from './elements.js';
 /* A map is checked against the world it builds, not against a racing line:
  * the same placed solids the simulator hands the physics. All pure, no
  * Three.js, so the checks run in Node too. */
@@ -544,7 +544,9 @@ function collectRaceGowWarnings(doc, out, legs) {
   /* Rule 1 and the season doc's minimum: 24 to 28 inches of clear opening. */
   for (const el of gates) {
     const w = el.dims.clearW;
-    const h = el.dims.clearH;
+    /* A hoop and a hex gate are measured by their width, the one number that is the size of the gate: a
+     * hex gate that is 28 in across the points is 24 in across the flats, and is still a 28 in gate. */
+    const h = apertureShapeOf(el) === 'square' ? el.dims.clearH : w;
     const big = Math.max(w, h);
     const small = Math.min(w, h);
     if (big > GATE_OPENING_MAX + 1e-6) {
@@ -566,8 +568,11 @@ function collectRaceGowWarnings(doc, out, legs) {
    */
   if (gates.length > 1) {
     const ref = gates[0];
+    /* The height is compared only between two square gates: a hoop and a hex gate are a width and their
+     * own shape's proportion of it, so the width is what says whether they are the gate's size. */
     const odd = gates.filter((el) => Math.abs(el.dims.clearW - ref.dims.clearW) > 0.002
-      || Math.abs(el.dims.clearH - ref.dims.clearH) > 0.002);
+      || (apertureShapeOf(el) === 'square' && apertureShapeOf(ref) === 'square'
+        && Math.abs(el.dims.clearH - ref.dims.clearH) > 0.002));
     if (odd.length) {
       out.push(warn('rg-opening-mixed',
         `${odd.length === 1 ? label(odd[0]) : `${odd.length} gates`} ${odd.length === 1 ? 'is' : 'are'} a different size from ${label(ref)}. Every gate on a RaceGOW track is the same size.`,

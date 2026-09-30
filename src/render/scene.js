@@ -114,6 +114,8 @@ import { Colliders } from '../game/collide.js';
 /* A living room's furniture: a table, a chair and a banner, made of boxes. */
 import { isRoomType, roomSolids, ROOM_COLOURS } from '../props/room.js';
 import { addSolids } from '../props/solids.js';
+/* A hoop and a hex gate: the outline of the hole, and of the run of tubes round it. */
+import { frameParts, outlineOf, barsAlong, paneFan } from '../props/aperture.js';
 
 /*
  * Static scenery merger. A forest of individual Groups costs a draw call
@@ -1791,6 +1793,29 @@ const NEXT_COLOUR = 0x39ff8b;
 const WRONG_COLOUR = 0xff5a5a;
 
 /*
+ * THE LIT OUTLINE OF A ROUND OR SIX SIDED OPENING, as bars: one for each side of the shape, each
+ * the thickness of the square's, laid along the outline pulled in by half a bar so the bar's outer
+ * face is on the hole's edge, as it is for a square. The bars are src/props/aperture.js's, which
+ * lengthens each end so a corner is filled and not notched.
+ */
+function outlineBars(shape, halfW, halfH, bar) {
+  return barsAlong(outlineOf(shape, halfW - bar * 0.5, halfH - bar * 0.5), bar);
+}
+
+/*
+ * THE TARGET PANE OF A ROUND OR SIX SIDED OPENING: src/props/aperture.js's fan of triangles, with the
+ * uv the square's pane has, so the wrong way bar on it is drawn by the same shader.
+ */
+function shapedPaneGeometry(shape, w, h) {
+  const fan = paneFan(shape, w, h);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(fan.position, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(fan.uv, 2));
+  geo.setIndex(fan.index);
+  return geo;
+}
+
+/*
  * The lit markers on an obstacle's openings: the outline the pilot aims at,
  * its halo, and the additive glow that says which gate the race wants next.
  *
@@ -1803,7 +1828,7 @@ const WRONG_COLOUR = 0xff5a5a;
  * the obstacle's own local frame and returns them, along with which
  * opening ended up carrying the glow.
  */
-function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWanted, micro = false) {
+function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWanted, micro = false, shape = 'square') {
   /*
    * The aperture markers. Square now, because the opening is square, and
    * built as one merged geometry per obstacle so a stacked obstacle still
@@ -1882,12 +1907,12 @@ function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWa
     const halfH = clearH * 0.5;
     /* Four thin bars just inside the frame, so the lit line the pilot aims
      * at is the clear opening itself and not the tube around it. */
-    const parts = [
+    const parts = shape === 'square' ? [
       [0, cy + halfH - bar * 0.5, clearW, bar],
       [0, cy - halfH + bar * 0.5, clearW, bar],
       [-halfW + bar * 0.5, cy, bar, clearH],
       [halfW - bar * 0.5, cy, bar, clearH],
-    ];
+    ] : [];
     for (const [px, py, sw, sh] of parts) {
       const geo = new THREE.BoxGeometry(sw, sh, bar);
       geo.translate(px, py, 0);
@@ -1898,6 +1923,20 @@ function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWa
       const hg = new THREE.BoxGeometry(sw * 1.06 + grow, sh * 1.06 + grow, bar * 0.7);
       hg.translate(px, py, 0);
       haloGeos.push(hg);
+    }
+    /* A hoop's and a hex gate's outline is the same bar, in one length for each side of the shape. */
+    if (shape !== 'square') {
+      for (const seg of outlineBars(shape, halfW, halfH, bar)) {
+        const geo = new THREE.BoxGeometry(seg.len, bar, bar);
+        geo.rotateZ(seg.angle);
+        geo.translate(seg.x, cy + seg.y, 0);
+        outlineGeos.push(geo);
+        const grow = micro ? 0.009 * MICRO_SCALE : 0.05;
+        const hg = new THREE.BoxGeometry(seg.len * 1.06 + grow, bar * 1.06 + grow, bar * 0.7);
+        hg.rotateZ(seg.angle);
+        hg.translate(seg.x, cy + seg.y, 0);
+        haloGeos.push(hg);
+      }
     }
     const lvlRing = new THREE.Mesh(mergeGeometries(outlineGeos, false), ringMat);
     /* No ink on the emissive outline: the depth edge pass draws a ghost line
@@ -1963,6 +2002,10 @@ function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWa
          * the next three gates.
          */
         uFill: { value: micro ? 0.0 : 0.16 },
+        /* What a hoop and a hex gate need to find their own edge: half the opening as a fraction
+         * of the plane along each axis, and whether it is a hexagon. Unused by a square's. */
+        uHalf: { value: new THREE.Vector2((clearW * 0.5) / glowSize, (clearH * 0.5) / glowSize) },
+        uHex: { value: shape === 'hex' ? 1.0 : 0.0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -1971,7 +2014,28 @@ function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWa
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
-      fragmentShader: /* glsl */ `
+      fragmentShader: shape !== 'square' ? /* glsl */ `
+        varying vec2 vUv;
+        uniform vec3 uFront;
+        uniform vec3 uBack;
+        uniform float uGain;
+        uniform float uEdge;
+        uniform float uFill;
+        uniform vec2 uHalf;
+        uniform float uHex;
+        void main() {
+          /* The band follows the hole's own edge. u is 1 on it along each axis, the ellipse's
+           * radius is its length and the hexagon's is the larger of its flat and its slant, and
+           * either is put back into the square's units, where the band sits at uEdge. */
+          vec2 u = abs(vUv - 0.5) / uHalf;
+          float rho = mix(length(u), max(u.y, u.x + 0.5 * u.y), uHex);
+          float r = rho * uEdge;
+          float band = exp(-pow((r - uEdge) / 0.055, 2.0));
+          float fill = smoothstep(uEdge, 0.0, r) * uFill;
+          vec3 col = gl_FrontFacing ? uFront : uBack;
+          gl_FragColor = vec4(col * (band + fill) * uGain, 1.0);
+        }
+      ` : /* glsl */ `
         varying vec2 vUv;
         uniform vec3 uFront;
         uniform vec3 uBack;
@@ -2001,7 +2065,7 @@ function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWa
   /* The pane the pilot actually aims at: green from the entry face, red
    * from the other. Hidden until the race names this gate as next, then
    * it jumps with the target. */
-  const cue = gateCue(clearW, clearH);
+  const cue = gateCue(clearW, clearH, shape);
   cue.position.y = sills[primary] + clearH * 0.5;
   group.add(cue);
   return {
@@ -2027,7 +2091,7 @@ function apertureMarkers(group, sills, clearW, clearH, stack, isStart, primaryWa
  * value of it: a gate that scores differently from how it looks is a gate the
  * pilot cannot learn.
  */
-function gateCue(clearW, clearH) {
+function gateCue(clearW, clearH, shape = 'square') {
   const cue = new THREE.Group();
   cue.visible = false;
   const mat = new THREE.ShaderMaterial({
@@ -2082,7 +2146,9 @@ function gateCue(clearW, clearH) {
     `,
   });
   const fill = new THREE.Mesh(
-    new THREE.PlaneGeometry(clearW * 0.94, clearH * 0.94),
+    shape === 'square'
+      ? new THREE.PlaneGeometry(clearW * 0.94, clearH * 0.94)
+      : shapedPaneGeometry(shape, clearW * 0.94, clearH * 0.94),
     mat,
   );
   cue.add(fill);
@@ -3057,6 +3123,8 @@ function coursePlacements(course) {
            * lights, and no pipe is built for it. See isUnbuilt in
            * src/trackbuilder/elements.js. */
           unbuilt: structure.unbuilt === true,
+          /* 'circle' for a hoop and 'hex' for a hex gate; not there for a gate. */
+          ...(structure.shape ? { shape: structure.shape } : {}),
           /* Sides taken away one at a time, already in THIS mesh's frame:
            * xNeg and xPos uprights, top and bottom members. Undefined on
            * every gate that has all four, which is every gate that has
@@ -3379,6 +3447,105 @@ function tiltedGate(spec, index, isStart, pitch, opts = {}) {
     primary: 0,
     aperture: { shape: 'square', index: 0, sillH: spec.sillH, centreY, clearW, clearH },
     colliders: caps,
+  };
+}
+
+/*
+ * A HOOP OR A HEX GATE: an opening that is not a rectangle, in a frame that is not four sides.
+ *
+ * The frame is the closed run of straight tubes round the hole that frameOutline gives
+ * (src/props/aperture.js): twenty four for a hoop, six for a hex gate, each tube's inner surface on
+ * the hole's edge, so the shape that scores is the shape that is drawn and the shape that is solid.
+ * Each tube is a cylinder and a capsule made from the same two points. A joint is a sphere, plain
+ * on a hoop and a darker fitting on a hex gate, which is where a real one is assembled.
+ *
+ * WHAT STANDS IT UP. At a sill of zero the floor is the sill, as it is under an upright gate that
+ * builds no bottom member: a tube that lies below the floor is not built, so a hoop on the floor is
+ * a ring set into it and a hex gate is an open bottomed frame, and nothing is buried that the
+ * floor does not already hide. A frame that hangs in the air stands on a post under each of its
+ * lowest corners, one for a hoop and two for a hex gate, on the stub every micro gate stands on.
+ *
+ * It is built in a pivot, as a tilted gate is, so a hoop that is leant over pivots about the
+ * middle of its hole and the hole stays where the document put it. Local frame, and colliders,
+ * match obstacle(): x across the opening, y up from the base, z through the opening. Only what is
+ * lit lives in the pivot, so the frame bakes with everything else that stands still.
+ */
+function shapedGate(spec, index, isStart, pitch, opts = {}) {
+  const micro = Boolean(opts.micro);
+  const shape = spec.shape;
+  const g = new THREE.Group();
+  const mats = sharedObstacleMats();
+  const tubeR = (micro ? RACEGOW_PIPE_OD : BUILT_FRAME_TUBE_OD) * 0.5;
+  const clearW = spec.clearW;
+  const clearH = spec.clearH;
+  const halfW = clearW * 0.5;
+  const halfH = clearH * 0.5;
+  /* Where every tube, joint, post and solid is, from src/props/aperture.js: the same numbers a flight
+   * check flies against. What is built here is a mesh for each. */
+  const parts = frameParts(shape, halfW, halfH, tubeR, spec.sillH, pitch, spec.unbuilt === true);
+  const centreY = parts.centreY;
+
+  const pivot = new THREE.Group();
+  pivot.position.set(0, centreY, 0);
+  pivot.rotation.x = pitch;
+  g.add(pivot);
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const along = new THREE.Vector3();
+  for (const [a, b] of parts.tubes) {
+    along.set(b.x - a.x, b.y - a.y, b.z - a.z);
+    const len = along.length();
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, len, 8), mats.frame);
+    tube.position.set((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.z + b.z) * 0.5);
+    tube.quaternion.setFromUnitVectors(up, along.divideScalar(len));
+    tube.castShadow = true;
+    outlineHull(tube, 1.06);
+    g.add(tube);
+  }
+  /* The joints. Fittings are not solid, as an upright gate's corners are not: they are a little wider
+   * than the tube, and the tube's own capsule is the wall. */
+  const hex = shape === 'hex';
+  for (const p of parts.joints) {
+    const joint = new THREE.Mesh(new THREE.SphereGeometry(hex ? tubeR * 1.5 : tubeR, 8, 6), hex ? mats.fitting : mats.frame);
+    joint.position.set(p.x, p.y, p.z);
+    joint.castShadow = true;
+    g.add(joint);
+  }
+  for (const p of parts.posts) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(tubeR, tubeR, p.y, 8), mats.frame);
+    post.position.set(p.x, p.y * 0.5, p.z);
+    post.castShadow = true;
+    outlineHull(post, 1.06);
+    g.add(post);
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(parts.foot.w, parts.foot.h, parts.foot.d), mats.frame);
+    pad.position.set(p.x, parts.foot.h * 0.5, p.z);
+    pad.castShadow = true;
+    g.add(pad);
+  }
+
+  /* The lit target: the same outline, halo, glow and pane as a gate's, on this shape, in the pivot
+   * so it leans with the frame. Built at a sill of zero because the pivot is at the hole's centre. */
+  const marks = apertureMarkers(pivot, [-clearH * 0.5], clearW, clearH, 1, isStart, 0, micro, shape);
+  const aperture = { shape, index: 0, sillH: spec.sillH, centreY, clearW, clearH };
+
+  return {
+    group: g,
+    kindName: spec.kindName ?? (shape === 'circle' ? 'hoop' : 'hexGate'),
+    top: parts.top,
+    animate: [pivot],
+    ringMat: marks.ring.material,
+    haloMat: marks.halo.material,
+    ringMeshes: marks.rings,
+    haloMeshes: marks.halos,
+    glowMat: marks.glow.material,
+    glowMesh: marks.glow,
+    cueGroup: marks.cue,
+    fillMat: marks.fillMat,
+    ringColor: marks.ringColor,
+    apertures: [aperture],
+    primary: 0,
+    aperture,
+    colliders: parts.caps,
   };
 }
 
@@ -5047,17 +5214,19 @@ export async function buildFieldScene(shell, onProgress, course = null, quality 
     const dress = st.virtual ? null : kit.forGate(st.dress ?? i);
     const made = st.virtual
       ? virtualGate(st.spec.clearW, st.spec.clearH, st.marker)
-      : (Math.abs(st.pitch) > 1e-6
-        ? tiltedGate(st.spec, flyOrder, st.isStart, st.pitch, { kit: dress, micro })
-        : obstacle(st.spec, flyOrder, st.isStart, {
-          micro,
-          primary: st.primary,
-          kit: dress,
-          flagSigns: st.flagSigns,
-          flagLeans: st.flagLeans,
-          flagH: st.flagH,
-          flagPoleR: st.flagPoleR,
-        }));
+      : (st.spec.shape
+        ? shapedGate(st.spec, flyOrder, st.isStart, st.pitch, { micro })
+        : (Math.abs(st.pitch) > 1e-6
+          ? tiltedGate(st.spec, flyOrder, st.isStart, st.pitch, { kit: dress, micro })
+          : obstacle(st.spec, flyOrder, st.isStart, {
+            micro,
+            primary: st.primary,
+            kit: dress,
+            flagSigns: st.flagSigns,
+            flagLeans: st.flagLeans,
+            flagH: st.flagH,
+            flagPoleR: st.flagPoleR,
+          })));
     const g = made.group;
     const y = height(st.x, st.z) + st.baseY;
     const yaw = st.yaw;

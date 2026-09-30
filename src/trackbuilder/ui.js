@@ -33,7 +33,7 @@
 import {
   ELEMENTS, KIND, PATH_TOGGLE, paletteItems, FLAG_SIDES, FRAME_SIDES, flagSideOf, frameSidesOf, countElementsByType,
   GATE_PRESETS, MICRO_GATE_PRESETS, gatePresetsFor,
-  applyGatePreset, matchingGatePreset, levelPitchFor, apertureLevels,
+  applyGatePreset, matchingGatePreset, presetHeight, levelPitchFor, apertureLevels, apertureShapeOf,
   elementHeight, TRACK_CLASS_DEFAULT, trackClassOf, docModeOf, paletteGroupOf, clampByLimits,
 } from './elements.js';
 import {
@@ -63,7 +63,7 @@ import { DRIFT } from '../maps/built/traffic.js';
 /* The small mark a chip on the lap strip wears for the piece it is a pass of. */
 const CHIP_KINDS = {
   gate: 'gate', doubleStack: 'tall', ladder: 'tall', tower: 'tall', diveGate: 'flat',
-  pole: 'pole', horizontalPole: 'pole', cone: 'cone', flag: 'pole',
+  pole: 'pole', horizontalPole: 'pole', cone: 'cone', flag: 'pole', hoop: 'ring', hexGate: 'hex',
 };
 
 /* Metres a second in kilometres an hour. A vehicle's speed is m/s in the
@@ -719,7 +719,16 @@ export class Panels {
 
     /* Dimensions, all of them, named the way elements.js names them. */
     const dims = el('div', 'tb-grid2');
+    const shape = def.kind === KIND.APERTURE ? apertureShapeOf(element) : 'square';
     for (const key of Object.keys(def.dims)) {
+      /*
+       * A HOOP AND A HEX GATE HAVE ONE OPENING AND ONE SIZE. There is no stack of hoops, so no count of
+       * levels and no spacing; and a hoop is as high as it is wide and a hex gate as high as a hexagon
+       * that wide is, so the height is not a field of its own: the width is, and the height follows.
+       */
+      if (shape !== 'square' && (key === 'levels' || key === 'clearH')) {
+        continue;
+      }
       /*
        * LEVEL SPACING ON A ONE LEVEL ELEMENT IS A FIELD THAT DOES NOTHING,
        * and a field that does nothing is the reason somebody has to ask
@@ -731,12 +740,15 @@ export class Panels {
         continue;
       }
       const isCount = key === 'levels' || key === 'pads';
-      dims.append(this.field(`dim-${element.id}-${key}`, DIM_LABELS[key] ?? key, element.dims[key], (val) => {
+      dims.append(this.field(`dim-${element.id}-${key}`, shape !== 'square' && key === 'clearW' ? (shape === 'circle' ? 'Diameter' : 'Across the points') : (DIM_LABELS[key] ?? key), element.dims[key], (val) => {
         this.host.edit('resize', (d) => {
           const e2 = elementById(d, element.id);
           /* Furniture is held to what a room can have; everything else may be
            * any length, as it always has been. */
           e2.dims[key] = isCount ? Math.max(1, Math.round(val)) : (isRoomType(e2.type) ? clampRoomSize(val) : Math.max(0, val));
+          if (shape !== 'square' && key === 'clearW') {
+            e2.dims.clearH = presetHeight({ clearW: e2.dims.clearW }, shape);
+          }
           /*
            * Changing the opening height of a stack whose spacing is still
            * the one the OLD height implied leaves the frames overlapping
@@ -761,7 +773,7 @@ export class Panels {
       this.renderApertureReadout(host, def, element);
       /* Which sides have pipe. A map's gates are furniture with no opening
        * that scores, so taking a side off one would only be a broken gate. */
-      if (!freestyle) {
+      if (!freestyle && shape === 'square') {
         this.renderFrameSides(host, element);
       }
     }
@@ -1298,6 +1310,19 @@ export class Panels {
       : 'The logo this footprint named is no longer on the track. Pick one, or the grass stays plain.'));
   }
 
+  /* What a preset says its size is for the shape it would be given: "28 x 28 in" for a gate, "28 in across"
+   * for a hoop, "28 in across, 24 in high" for a hex gate. */
+  presetSize(preset, shape) {
+    if (shape === 'square') {
+      return preset.size;
+    }
+    const across = Math.round((preset.clearW / 0.0254) * 10) / 10;
+    if (shape === 'circle') {
+      return `${across} in across`;
+    }
+    return `${across} in across, ${Math.round((presetHeight(preset, 'hex') / 0.0254) * 10) / 10} in high`;
+  }
+
   /*
    * The named opening sizes. One click sets width, height and level
    * spacing together, on one element or on every aperture in the
@@ -1310,12 +1335,16 @@ export class Panels {
    */
   renderGatePresets(host, elements) {
     const first = elements[0];
+    /* A hoop and a hex gate are a preset's width and their own shape's proportion of it, so each is
+     * read in its own shape; and the size a button names is the one it would give the piece. */
+    const shapeOf = (e2) => apertureShapeOf(e2);
     const all = elements.every((e2) => {
-      const m = matchingGatePreset(e2.dims);
-      const f = matchingGatePreset(first.dims);
+      const m = matchingGatePreset(e2.dims, shapeOf(e2));
+      const f = matchingGatePreset(first.dims, shapeOf(first));
       return m && f && m.id === f.id;
     });
-    const current = all ? matchingGatePreset(first.dims) : null;
+    const current = all ? matchingGatePreset(first.dims, shapeOf(first)) : null;
+    const shapeAll = elements.every((e2) => shapeOf(e2) === shapeOf(first)) ? shapeOf(first) : 'square';
     host.append(el('h3', null, elements.length > 1 ? `${this.say('Opening size')}, ${elements.length} gates` : this.say('Opening size')));
     const grid = el('div', 'tb-fig-grid');
     /* The class's own presets: MultiGP's four on a field, RaceGOW's two
@@ -1325,14 +1354,14 @@ export class Panels {
       b.type = 'button';
       b.title = preset.hint;
       b.append(el('strong', null, preset.label));
-      b.append(el('span', null, preset.size));
+      b.append(el('span', null, this.presetSize(preset, shapeAll)));
       grid.append(b);
       b.addEventListener('click', () => {
         this.host.edit(elements.length > 1 ? `size ${elements.length} gates` : 'gate size', (d) => {
           for (const e2 of elements) {
             const live = elementById(d, e2.id);
             if (live) {
-              applyGatePreset(live.dims, preset);
+              applyGatePreset(live.dims, preset, apertureShapeOf(live));
             }
           }
         });
@@ -1340,7 +1369,7 @@ export class Panels {
     }
     host.append(grid);
     host.append(el('p', 'tb-help', current
-      ? `${current.label}, ${current.size}. ${current.hint}`
+      ? `${current.label}, ${this.presetSize(current, shapeAll)}. ${current.hint}`
       : (elements.length > 1
         ? 'These gates are not all the same size. Pick one to set them all.'
         : 'A size of your own. Pick a preset to go back to a standard one, or type the opening below.')));
@@ -1364,9 +1393,15 @@ export class Panels {
     const sills = levels
       .map((ap, i) => `${i + 1}: sill ${show(base + ap.sillH, 2)} m, centre ${show(base + ap.centerH, 2)} m`)
       .join('. ');
+    const shape = apertureShapeOf(element);
+    const one = shape === 'circle'
+      ? `One round opening ${show(element.dims.clearW, 2)} m across`
+      : (shape === 'hex'
+        ? `One six sided opening ${show(element.dims.clearW, 2)} m across the points and ${show(element.dims.clearH, 2)} m across the flats`
+        : `One opening ${show(element.dims.clearW, 2)} by ${show(element.dims.clearH, 2)} m`);
     const what = levels.length > 1
       ? `${levels.length} openings of ${show(element.dims.clearW, 2)} by ${show(element.dims.clearH, 2)} m. ${sills}.`
-      : `One opening ${show(element.dims.clearW, 2)} by ${show(element.dims.clearH, 2)} m, centre ${show(base + levels[0].centerH, 2)} m above the ground.`;
+      : `${one}, centre ${show(base + levels[0].centerH, 2)} m above the ground.`;
     host.append(el('p', 'tb-fig-blurb', `${what} Top of the structure ${show(top, 2)} m.`));
   }
 

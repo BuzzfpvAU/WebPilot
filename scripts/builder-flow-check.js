@@ -1433,7 +1433,7 @@ kase('replace with', async () => {
     await click(page, at.x, at.y);
     await page.until(`window.trackBuilder.selection.has('${middle.id}')`, 5000);
     const offered = () => json(page, `[...document.querySelectorAll('#tb-card [data-tbkey="card-replace"] option')].map((o) => o.value).filter(Boolean)`);
-    check('a selected gate offers the other four openings, and not a pole', (await offered()).join() === 'doubleStack,ladder,tower,diveGate', (await offered()).join());
+    check('a selected gate offers the other six openings, the hoop and the hex gate last, and not a pole', (await offered()).join() === 'doubleStack,ladder,tower,diveGate,hoop,hexGate', (await offered()).join());
     const steps = await undoCount(page);
     const drawn = () => page.evaluate(`window.trackBuilder.view3d.pickables.filter((m) => m.userData.elementId === '${middle.id}').length`);
     const pieces = await drawn();
@@ -2703,7 +2703,7 @@ kase('furniture', async () => {
       return { open: !m.hidden, title: m.querySelector('h2')?.textContent ?? '', text: m.textContent, inputs: m.querySelectorAll('input').length };
     })()`);
     check('Publish on a track with a table in it says the board does not know them yet, in a dialog, and asks for nothing',
-      said.open && said.title === 'Not on the board yet' && /does not know a table, a chair or a banner/.test(said.text) && /This one has 1 table, 1 chair and 1 banner/.test(said.text) && said.inputs === 0,
+      said.open && said.title === 'Not on the board yet' && /does not know a table, a chair, a banner, a hoop or a hex gate/.test(said.text) && /This one has 1 table, 1 chair and 1 banner/.test(said.text) && said.inputs === 0,
       JSON.stringify(said));
     await page.evaluate("document.querySelector('#tb-modal .tb-btn').click(), 1");
     await page.sleep(150);
@@ -2723,6 +2723,175 @@ kase('furniture', async () => {
     await key(page, 'KeyZ', 2);
     await page.until('!window.trackBuilder.view3d.dirty', 10000);
     check('and Control Z puts it back, drawn again', (await elements(page)).length === count && (await boxCount(table.id)) === 5);
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A HOOP AND A HEX GATE are gates whose hole is not a rectangle. They are armed from the palette and
+ * placed with a click like any gate, and they are flown in order, so each is a step; the room draws a
+ * ring and a hexagon of tubes and a pane in their shape; the inspector offers one size, because the
+ * height follows the shape, and no count of levels and no four sides to take away; the card can turn
+ * a gate into either and back; and a track that has one cannot be published to a board that does not
+ * know it.
+ */
+kase('a hoop and a hex gate', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    const palette = await json(page, `[...document.querySelectorAll('#tb-palette .tb-tool')].map((b) => ({
+      label: b.querySelector('.tb-tool-label').textContent,
+      key: b.querySelector('.tb-tool-key').textContent,
+      none: b.querySelector('.tb-tool-key').classList.contains('none'),
+    }))`);
+    const labels = palette.map((p) => p.label);
+    const at = labels.indexOf('Horizontal gate');
+    check('the palette lists a hoop and a hex gate after the horizontal gate and before the pole, with no key chip',
+      labels.slice(at + 1, at + 4).join() === 'Hoop,Hex gate,Pole' && palette.slice(at + 1, at + 3).every((p) => p.key === '' && p.none), labels.join());
+
+    const parts = (id) => page.evaluate(`window.trackBuilder.view3d.pickables.filter((m) => m.userData.elementId === '${id}').length`);
+    const floor = await screenOf(page, 'view3d', 5, 6, 0);
+    await tool(page, 'Hoop');
+    check('pressing Hoop arms it', (await page.evaluate('window.trackBuilder.armed')) === 'hoop');
+    const steps = await undoCount(page);
+    await click(page, floor.x, floor.y);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const hoop = (await elements(page)).find((e) => e.type === 'hoop');
+    check('a click puts a hoop down where it was clicked, as one undo step, and it is the first step in the flying order',
+      Boolean(hoop) && Math.abs(hoop.x - 5) < 0.06 && Math.abs(hoop.y - 6) < 0.06 && (await undoCount(page)) === steps + 1
+      && (await page.evaluate('window.trackBuilder.doc.sequence.length')) === 1, JSON.stringify(hoop));
+    await key(page, 'Escape');
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('hexGate');
+      app.placeAt({ x: 6.6, y: 6, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const hex = (await elements(page)).find((e) => e.type === 'hexGate');
+    check('a hex gate is the second step, and both are gates for the rules: no warning that a piece is out of the order',
+      Boolean(hex) && (await page.evaluate('window.trackBuilder.doc.sequence.length')) === 2);
+
+    /* What the room draws: a tube for each side of the shape that is above the floor, one lit pane, the ring's corners. */
+    check('the room draws a hoop as twenty two tubes (the two under the floor are not drawn), and a hex gate as its six',
+      (await page.evaluate(`window.trackBuilder.view3d.pickables.filter((m) => m.userData.elementId === '${hoop.id}' && m.geometry.type === 'BoxGeometry' && !m.userData.weak && m.visible).length`)) === 22
+      && (await page.evaluate(`window.trackBuilder.view3d.pickables.filter((m) => m.userData.elementId === '${hex.id}' && m.geometry.type === 'BoxGeometry' && !m.userData.weak && m.visible).length`)) === 5,
+      `${await parts(hoop.id)} and ${await parts(hex.id)} pickable parts`);
+    const paneCorners = (id) => page.evaluate(`(() => {
+      const m = window.trackBuilder.view3d.pickables.find((x) => x.userData.elementId === '${id}' && x.userData.weak);
+      return m ? m.geometry.getAttribute('position').count : 0;
+    })()`);
+    check('and each is given a pane in its own shape: the hoop\'s is a fan of twenty five points, the hex gate\'s of seven, not a square\'s four',
+      (await paneCorners(hoop.id)) === 25 && (await paneCorners(hex.id)) === 7, `${await paneCorners(hoop.id)} and ${await paneCorners(hex.id)}`);
+
+    /* Picking: a click in the middle of the hole picks the piece, as it does a gate. */
+    const middle = await screenOf(page, 'view3d', hoop.x, hoop.y, 0.5 * 0.711);
+    await click(page, middle.x, middle.y);
+    check('a click in the hole of a hoop picks it', await page.evaluate(`window.trackBuilder.selection.has('${hoop.id}')`));
+    const fields = await json(page, `[...document.querySelectorAll('#tb-inspector [data-tbkey^="dim-"]')].map((i) => i.dataset.tbkey.split('-').pop())`);
+    check('the inspector offers one size and the sill, and no count of levels and no opening height: the height follows the shape',
+      fields.join() === 'sillH,clearW', fields.join());
+    const label = await page.evaluate(`(() => {
+      const i = document.querySelector('#tb-inspector [data-tbkey="dim-${hoop.id}-clearW"]');
+      return i ? i.closest('label, div')?.textContent ?? '' : '';
+    })()`);
+    check('and the width is called a diameter', /Diameter/.test(label), label);
+    check('there is no Frame section to take a side away from: a ring has none', !(await page.evaluate("!!document.querySelector('#tb-inspector .tb-frame-grid')")));
+    check('the size row says the preset it is: 28 in across', await page.evaluate("/28 in across/.test(document.getElementById('tb-inspector').textContent)"),
+      await page.evaluate("document.getElementById('tb-inspector').textContent.slice(0, 200)"));
+
+    /* Typing a diameter keeps it round. */
+    const sized = await undoCount(page);
+    await page.evaluate(`(() => {
+      const i = document.querySelector('#tb-inspector [data-tbkey="dim-${hoop.id}-clearW"]');
+      i.value = '0.6';
+      i.dispatchEvent(new Event('change', { bubbles: true }));
+      return 1;
+    })()`);
+    await page.sleep(250);
+    const dimsOf = (id) => json(page, `window.trackBuilder.doc.elements.find((e) => e.id === '${id}').dims`);
+    const now = await dimsOf(hoop.id);
+    check('typing a diameter of 0.6 sets the width and the height to it, as one undo step', Math.abs(now.clearW - 0.6) < 1e-9 && Math.abs(now.clearH - 0.6) < 1e-9 && (await undoCount(page)) === sized + 1, JSON.stringify(now));
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+
+    /* The control: a gate beside them still has its four sides, and its levels. */
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('gate');
+      app.placeAt({ x: 8.2, y: 6, z: 0 });
+      app.disarm();
+      const g = app.doc.elements.find((e) => e.type === 'gate');
+      app.setSelection([g.id]);
+      return 1;
+    })()`);
+    await page.sleep(250);
+    check('and a gate has one, and a count of levels and an opening height, as it always did',
+      (await page.evaluate("!!document.querySelector('#tb-inspector .tb-frame-grid')"))
+      && (await json(page, `[...document.querySelectorAll('#tb-inspector [data-tbkey^="dim-"]')].map((i) => i.dataset.tbkey.split('-').pop())`)).join() === 'levels,sillH,clearW,clearH');
+    await page.evaluate('window.trackBuilder.undo(), 1');
+    await page.sleep(250);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    await click(page, middle.x, middle.y);
+
+    /* The lap strip's chip is the shape it is a pass of. */
+    const kinds = await json(page, `[...document.querySelectorAll('#tb-lapbar .tb-chip[data-kind]')].map((c) => c.dataset.kind)`);
+    check('the lap strip marks the two passes as a ring and a hexagon', kinds.join() === 'ring,hex', kinds.join());
+
+    /* Replace with, from the card, both ways. */
+    await click(page, middle.x, middle.y);
+    const offered = () => json(page, `[...document.querySelectorAll('#tb-card [data-tbkey="card-replace"] option')].map((o) => o.value).filter(Boolean)`);
+    check('a hoop can be turned into any other opening, the hex gate among them', (await offered()).join() === 'gate,doubleStack,ladder,tower,diveGate,hexGate', (await offered()).join());
+    await page.evaluate(`(() => {
+      const s = document.querySelector('#tb-card [data-tbkey="card-replace"]');
+      s.value = 'hexGate';
+      s.dispatchEvent(new Event('change', { bubbles: true }));
+      return 1;
+    })()`);
+    await page.sleep(250);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const swapped = await dimsOf(hoop.id);
+    check('turned into a hex gate in place, 0.6 across the points and as high as a hexagon that wide is',
+      (await elements(page)).find((e) => e.id === hoop.id).type === 'hexGate' && Math.abs(swapped.clearW - 0.6) < 1e-9 && Math.abs(swapped.clearH - 0.6 * Math.sqrt(3) / 2) < 1e-6, JSON.stringify(swapped));
+    await page.evaluate('window.trackBuilder.undo(), 1');
+    await page.sleep(250);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    check('and undo puts the hoop back', (await elements(page)).find((e) => e.id === hoop.id).type === 'hoop');
+
+    /* The plan draws them, and picks them. */
+    await page.evaluate("window.trackBuilder.setMode('2d'), 1");
+    await page.sleep(300);
+    const planAt = await screenOf(page, 'view2d', hex.x, hex.y);
+    await page.evaluate("window.trackBuilder.setSelection([]), 1");
+    await click(page, planAt.x, planAt.y);
+    check('on the plan, a click on the hex gate picks it', await page.evaluate(`window.trackBuilder.selection.has('${hex.id}')`));
+    await page.evaluate("window.trackBuilder.setMode('3d'), 1");
+    await page.sleep(300);
+
+    /* The board does not know them yet, so Publish says so and opens no form. */
+    await page.evaluate('window.trackBuilder.publishBtn.click(), 1');
+    await page.sleep(250);
+    const said = await json(page, `(() => {
+      const m = document.getElementById('tb-modal');
+      return { open: !m.hidden, text: m.textContent, inputs: m.querySelectorAll('input').length };
+    })()`);
+    check('Publish on a track with a hoop and a hex gate says the board does not know them yet, and asks for nothing',
+      said.open && /This one has 1 hoop and 1 hex gate/.test(said.text) && said.inputs === 0, JSON.stringify(said));
+    await page.evaluate("document.querySelector('#tb-modal .tb-btn').click(), 1");
+    await page.sleep(150);
+
+    /* The build sheet counts the six pipes of the hex gate and lists the hoop as a thing to bring. */
+    const sheet = JSON.parse(await page.evaluate(`(async () => {
+      const { buildSheet } = await import('/src/trackbuilder/buildsheet.js');
+      const s = buildSheet(window.trackBuilder.doc);
+      return JSON.stringify({ members: s.members, other: s.parts.other, pieces: s.pieces.map((p) => p.label) });
+    })()`));
+    check('the build sheet has the hex gate\'s six pipes and lists the hoop as one thing to bring', sheet.members === 6 && sheet.other.some((o) => o.label === 'Hoop' && o.count === 1) && sheet.pieces.join() === 'Hoop,Hex gate', JSON.stringify(sheet));
+
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
     check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
   } finally {
     await page.close();

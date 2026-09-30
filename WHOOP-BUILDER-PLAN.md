@@ -664,8 +664,10 @@ Exit: green, and the owner flies a cube, a hoop and a table.
 *Progress, 2026-09-30.* Table, chair and banner are in (PROGRESS.md, "Stage 4 begins"): one
 list of boxes for each, in `src/props/room.js`, drawn and solid and warned about from that list; the
 physics needed nothing, and `npm run check:room` flies the real module through each to say so. The
-board's refusal is in `publishTrack`. Left: hoop and hex (an opening's shape inscribed in its
-rectangle), the cube spike, the cube.
+board's refusal is in `publishTrack`. Hoop and hex are in too (PROGRESS.md, "a hoop and a hex gate"): an
+opening's shape inscribed in its rectangle, `src/props/aperture.js` for the arithmetic, the pass test clipped
+exactly against the shape, the frame a run of capsules from one function that the game, the room and a
+flight check all read; `check:room` flies them. Left: the cube spike, the cube.
 
 **Stage 5. Ways out (optional),** in the order of 5.4.
 

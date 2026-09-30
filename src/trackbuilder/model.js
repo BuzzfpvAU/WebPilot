@@ -39,7 +39,7 @@
  */
 
 import {
-  ELEMENTS, KIND, TUNING, TRACK_CLASSES, TRACK_CLASS_DEFAULT, FRAME_SIDES, apertureLevels,
+  ELEMENTS, KIND, TUNING, TRACK_CLASSES, TRACK_CLASS_DEFAULT, FRAME_SIDES, apertureLevels, apertureShapeOf,
   defaultDims, defaultPitch, defaultZ, elementHeight, normalizeFlagSide, normalizeUnbuiltSides,
   trackClassOf, tuningFor, docModeOf, isTrafficType, clampByLimits,
   ROAD_NODES_MAX, ROAD_NODE_REACH,
@@ -660,12 +660,18 @@ export function startPadsOf(doc) {
 }
 
 /* The openings of one element, bottom to top. Empty for anything that is not
- * an aperture element. */
+ * an aperture element.
+ *
+ * An opening says what SHAPE it is only when it is not a square (a hoop's is
+ * 'circle', a hex gate's is 'hex'), so a gate's opening has the keys it has
+ * always had and nothing that reads one is handed a word it does not know. */
 export function aperturesOf(el) {
   if (kindOf(el) !== KIND.APERTURE) {
     return [];
   }
-  return apertureLevels(el.dims);
+  const levels = apertureLevels(el.dims);
+  const shape = apertureShapeOf(el);
+  return shape === 'square' ? levels : levels.map((ap) => ({ ...ap, shape }));
 }
 
 /*
@@ -939,6 +945,16 @@ export function normalize(raw) {
         repairs.push(`${id}: ${key} was ${wanted}, which is not a size a ${def.label.toLowerCase()} can have, so it is ${fallback} m.`);
         dims[key] = fallback;
       }
+    }
+
+    /*
+     * A HOOP AND A HEX GATE HAVE ONE OPENING. There is no such thing as a stack of hoops, and
+     * the builder and the game draw one frame each, so a document that says otherwise is read
+     * as the one it can draw, and says so.
+     */
+    if (def.kind === KIND.APERTURE && apertureShapeOf(type) !== 'square' && dims.levels !== 1) {
+      repairs.push(`${id}: a ${def.label.toLowerCase()} has one opening, so its levels was ${dims.levels} and is 1.`);
+      dims.levels = 1;
     }
 
     const el = {

@@ -56,7 +56,7 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ELEMENTS, KIND, GATE_FLAG_POLE_R, docModeOf, flagLeanSign, flagSideOf, flagSideSigns, frameSidesOf, gateFlagHeight, hasMissingSides, isUnbuilt, trackClassOf, virtualApertureDims } from '../trackbuilder/elements.js';
+import { ELEMENTS, KIND, GATE_FLAG_POLE_R, apertureShapeOf, docModeOf, flagLeanSign, flagSideOf, flagSideSigns, frameSidesOf, gateFlagHeight, hasMissingSides, isUnbuilt, trackClassOf, virtualApertureDims } from '../trackbuilder/elements.js';
 import {
   normalize, elementById, aperturesOf, startPadsOf, logosOf, logoForDecal, dressOrder,
 } from '../trackbuilder/model.js';
@@ -395,6 +395,11 @@ function buildCourse(raw) {
       pitch: kind === KIND.APERTURE ? el.pitch : 0,
       dims: kind === KIND.APERTURE ? builtDims(el.dims, gateScale) : scaledDims(el.dims, SCALE),
     };
+    /* What the opening is when it is not a square: 'circle' for a hoop, 'hex' for a hex gate.
+     * Nothing is written for a gate, so a course that has none is the bytes it always was. */
+    if (kind === KIND.APERTURE && apertureShapeOf(el) !== 'square') {
+      s.shape = apertureShapeOf(el);
+    }
     /* The openings that are a gap in the lattice and not a gate: no pipe
      * is built for them anywhere. See isUnbuilt in elements.js. */
     if (kind === KIND.APERTURE && isUnbuilt(el)) {
@@ -594,6 +599,7 @@ function buildCourse(raw) {
       centreY: ap.centerH * gateScale,
       clearW: ap.clearW * gateScale,
       clearH: ap.clearH * gateScale,
+      ...(ap.shape ? { shape: ap.shape } : {}),
       yaw,
       pitch: tilt,
       name: structure.name,

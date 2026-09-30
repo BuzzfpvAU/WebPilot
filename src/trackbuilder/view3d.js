@@ -79,7 +79,7 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ELEMENTS, KIND, FRAME_TUBE_OD, GATE_FLAG_POLE_R, docModeOf, flagLeanSign, flagSideOf, flagSideSigns, frameSidesOf, gateFlagHeight, isUnbuilt, trackClassOf, virtualApertureDims } from './elements.js';
+import { ELEMENTS, KIND, FRAME_TUBE_OD, GATE_FLAG_POLE_R, apertureShapeOf, docModeOf, flagLeanSign, flagSideOf, flagSideSigns, frameSidesOf, gateFlagHeight, isUnbuilt, trackClassOf, virtualApertureDims } from './elements.js';
 import { PIPE_OD as RACEGOW_PIPE_OD, GATE_OPENING_DEFAULT, envelopeFor } from './racegow.js';
 import {
   aperturesOf, createElement, elementById, kindOf, apertureCenter, logosOf, logoForDecal, dressOrder, topOf,
@@ -94,6 +94,8 @@ import { knotForSeq, markerSquare } from './path.js';
 import { apertureFrame, clamp, gateSupportFeet, leftOf, normalize, scale } from './geometry.js';
 import { guideFromKnots, knotsFromPath, tessellateGuide } from '../game/guide.js';
 import { isRoomType, roomBoxes, ROOM_COLOURS } from '../props/room.js';
+/* What a hoop and a hex gate are: the outline of the hole and of the tubes round it, as bars and as a pane. */
+import { barsAlong, frameOutline, outlineOf, paneFan } from '../props/aperture.js';
 import { placedYaw } from '../props/solids.js';
 /* A map's traffic, as the physics is handed it, and where each car starts:
  * already on the 2D view's graph, so importing them here loads nothing. The
@@ -163,9 +165,12 @@ const COL = {
  */
 const RACEGOW_HEX = {
   green: 0x35c47c, yellow: 0xf5c542, purple: 0x9b6bff, orange: 0xff8a3d, blue: 0x4aa8ff, red: 0xe5484d,
+  /* Not RaceGOW's: a hoop and a hex gate are not in its diagrams, so they are two colours it does not
+   * use, and a RaceGOW pilot does not read them as a kind of gate they know. */
+  teal: 0x2ec4c4, pink: 0xf06292,
 };
 const RACEGOW_TYPE_COLOUR = {
-  gate: 'yellow', doubleStack: 'purple', ladder: 'purple', tower: 'orange', diveGate: 'blue',
+  gate: 'yellow', doubleStack: 'purple', ladder: 'purple', tower: 'orange', diveGate: 'blue', hoop: 'teal', hexGate: 'pink',
 };
 
 /* Filled in by loadThree() on the first press of the 3D button. Until then
@@ -2102,6 +2107,9 @@ export class View3D {
       ? this.host.pickedSide.side : null;
     const pickedMat = picked ? new THREE.MeshLambertMaterial({ color: COL.sidePicked }) : null;
     const last = levels.length - 1;
+    /* A hoop or a hex gate: one opening, in a run of tubes that is not four sides. */
+    const shape = apertureShapeOf(el);
+    const shaped = shape !== 'square';
 
     for (const ap of levels) {
       const frame = new THREE.Group();
@@ -2109,20 +2117,23 @@ export class View3D {
       frame.quaternion.copy(quat);
       /* Four tubes around the opening, laid out in the aperture's own plane:
        * local x across the width, local y across the height. Each carries
-       * the side it is, so a click on it can say which one it hit. */
-      const bars = [
+       * the side it is, so a click on it can say which one it hit. A hoop or a hex gate has
+       * a tube for each side of its shape instead, and none of them is one of the four sides:
+       * a click on it picks the piece. */
+      const bars = shaped ? this.shapedBars(ap, shape, tube, f) : [
         [ap.clearW + tube * 2, tube, 0, (ap.clearH + tube) / 2, ap.index === last ? 'top' : null],
         [ap.clearW + tube * 2, tube, 0, -(ap.clearH + tube) / 2, ap.index === 0 ? 'bottom' : null],
         [tube, ap.clearH, -(ap.clearW + tube) / 2, 0, 'left'],
         [tube, ap.clearH, (ap.clearW + tube) / 2, 0, 'right'],
       ];
       let drawn = 0;
-      for (const [w, h, x, y, side] of (unbuilt ? [] : bars)) {
+      for (const [w, h, x, y, side, angle] of (unbuilt ? [] : bars)) {
         if (side && !sides[side]) {
           continue;
         }
         const bar = new THREE.Mesh(new THREE.BoxGeometry(w, h, tube), side && side === picked ? pickedMat : mat);
         bar.position.set(x, y, 0);
+        bar.rotation.z = angle ?? 0;
         bar.userData.side = side;
         this.register(bar, el);
         frame.add(bar);
@@ -2137,6 +2148,7 @@ export class View3D {
         if (this.host.isWhoopRace()) {
           const grab = new THREE.Mesh(new THREE.BoxGeometry(w + PICK_PIPE, h + PICK_PIPE, tube + PICK_PIPE), this.grabMaterial());
           grab.position.set(x, y, 0);
+          grab.rotation.z = angle ?? 0;
           grab.visible = false;
           grab.userData.side = side;
           this.register(grab, el);
@@ -2172,7 +2184,7 @@ export class View3D {
             color: this.paneColour(el), transparent: true, opacity: selected ? 0.42 : 0.28, side: THREE.DoubleSide, depthWrite: false,
           }
           : { transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
-        const pick = new THREE.Mesh(new THREE.PlaneGeometry(ap.clearW, ap.clearH), pane);
+        const pick = new THREE.Mesh(shaped ? this.paneGeometry(shape, ap.clearW, ap.clearH) : new THREE.PlaneGeometry(ap.clearW, ap.clearH), pane);
         pick.userData.weak = true;
         this.register(pick, el);
         frame.add(pick);
@@ -2194,10 +2206,12 @@ export class View3D {
        * so the preview stays readable without any dimension being fattened
        * to make it so.
        */
-      const c = [
-        -ap.clearW / 2, -ap.clearH / 2, 0, ap.clearW / 2, -ap.clearH / 2, 0,
-        ap.clearW / 2, ap.clearH / 2, 0, -ap.clearW / 2, ap.clearH / 2, 0,
-      ];
+      const c = shaped
+        ? outlineOf(shape, ap.clearW / 2, ap.clearH / 2).flatMap(([x, y]) => [x, y, 0])
+        : [
+          -ap.clearW / 2, -ap.clearH / 2, 0, ap.clearW / 2, -ap.clearH / 2, 0,
+          ap.clearW / 2, ap.clearH / 2, 0, -ap.clearW / 2, ap.clearH / 2, 0,
+        ];
       const loopGeo = new THREE.BufferGeometry();
       loopGeo.setAttribute('position', new THREE.Float32BufferAttribute(c, 3));
       frame.add(new THREE.LineLoop(loopGeo, new THREE.LineBasicMaterial({
@@ -2304,16 +2318,18 @@ export class View3D {
      * corners of the frame. A centre mast through the hole was what a
      * custom tilt used to grow. */
     const bottom = levels[0];
-    const feet = gateSupportFeet(
-      el.yaw, el.pitch, bottom.clearW, bottom.clearH, bottom.centerH, tube,
-    );
+    const feet = shaped
+      ? this.shapedFeet(bottom, shape, tube, f)
+      : gateSupportFeet(
+        el.yaw, el.pitch, bottom.clearW, bottom.clearH, bottom.centerH, tube,
+      );
     const legMat = new THREE.MeshLambertMaterial({ color: selected ? COL.frameSel : COL.frame });
     for (const [i, foot] of feet.entries()) {
       const h = foot.z;
       /* gateSupportFeet gives the -widthAxis leg first. A leg is the foot of
        * its upright, so it goes when the upright does, as it does in the
        * world. */
-      if (h < 0.02 || unbuilt || !sides[i === 0 ? 'left' : 'right']) {
+      if (h < 0.02 || unbuilt || (!shaped && !sides[i === 0 ? 'left' : 'right'])) {
         continue;
       }
       const leg = new THREE.Mesh(new THREE.BoxGeometry(tube * 1.4, tube * 1.4, h), legMat);
@@ -2325,12 +2341,64 @@ export class View3D {
     this.buildHeaderFlags(group, el, selected);
   }
 
+  /*
+   * THE TUBES OF A HOOP OR A HEX GATE, in the opening's own plane, in the same shape the four bars of
+   * a gate are given: one for each side of the shape's frame (src/props/aperture.js), lengthened
+   * so the corners are filled, and turned to the side. A tube wholly under the floor is not drawn,
+   * as the world does not build it: the floor is the sill.
+   */
+  shapedBars(ap, shape, tube, f) {
+    const run = frameOutline(shape, ap.clearW / 2, ap.clearH / 2, tube / 2);
+    const out = [];
+    for (const [i, bar] of barsAlong(run, tube).entries()) {
+      const a = run[i];
+      const b = run[(i + 1) % run.length];
+      const high = Math.max(ap.centerH + a[1] * f.heightAxis.z, ap.centerH + b[1] * f.heightAxis.z);
+      if (high <= 1e-6) {
+        continue;
+      }
+      out.push([bar.len, tube, bar.x, bar.y, null, bar.angle]);
+    }
+    return out;
+  }
+
+  /*
+   * THE POSTS OF A HOOP OR A HEX GATE THAT HANGS IN THE AIR: one under each of the lowest corners of
+   * the frame, the same rule the world builds by. Returned as gateSupportFeet returns a foot: where it
+   * stands on the ground and how tall it is.
+   */
+  shapedFeet(ap, shape, tube, f) {
+    const run = frameOutline(shape, ap.clearW / 2, ap.clearH / 2, tube / 2);
+    const heights = run.map(([, y]) => ap.centerH + y * f.heightAxis.z);
+    const lowest = Math.min(...heights);
+    if (lowest - tube / 2 <= 0.02) {
+      return [];
+    }
+    return run
+      .filter((_, i) => Math.abs(heights[i] - lowest) <= 1e-6)
+      .map(([x, y]) => ({
+        x: f.widthAxis.x * x + f.heightAxis.x * y,
+        y: f.widthAxis.y * x + f.heightAxis.y * y,
+        z: lowest,
+      }));
+  }
+
+  /* A pane in the shape of an opening: the fan of triangles src/props/aperture.js describes. */
+  paneGeometry(shape, w, h) {
+    const fan = paneFan(shape, w, h);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(fan.position, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(fan.uv, 2));
+    geo.setIndex(fan.index);
+    return geo;
+  }
+
   /* The green entry pane and the red exit pane of one pass, a hand's breadth
    * either side of its opening. */
   panePair(group, ap, seq, f, quat) {
     for (const [side, colour] of [[-seq.entry, COL.entry], [seq.entry, COL.exit]]) {
       const pane = new THREE.Mesh(
-        new THREE.PlaneGeometry(ap.clearW, ap.clearH),
+        ap.shape ? this.paneGeometry(ap.shape, ap.clearW, ap.clearH) : new THREE.PlaneGeometry(ap.clearW, ap.clearH),
         new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
       );
       pane.quaternion.copy(quat);

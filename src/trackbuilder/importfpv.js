@@ -26,10 +26,16 @@
  *
  * WHAT DOES NOT, said in the report and never silently: their cube gates have no
  * element in a whoop room yet, so each pass is a waypoint at the middle of the
- * cube; hoops and hexes become a square gate of the same width; a type this does
+ * cube; a type this does
  * not know is dropped by name, and so is their start marker; the tape
  * measurements are not kept (a layout fact belongs in the build sheet); a gate
  * outside our 10 by 12 m hall is dropped.
+ *
+ * HOOPS AND HEXES are ours now (src/props/aperture.js): a hoop and a hex gate, where they
+ * stood, at the width and the height they had, with the direction they were flown. A hoop is
+ * round. A hex gate is as high as a hexagon of that width is; their file gives one number and
+ * does not say whether it is measured across the points or across the flats, so it is read as
+ * across the points, and the report says so.
  *
  * TABLES, CHAIRS AND BANNERS are ours now (src/props/room.js), and are kept where
  * they stood, on the floor, at the quarter turn nearest their heading, and never in
@@ -68,6 +74,7 @@ import { applyAutoFaces } from './faces.js';
 import { GATE_OPENING_MAX, GATE_OPENING_MIN, inches } from './racegow.js';
 import { nearestQuarter } from './snap.js';
 import { ROOM_SIZES, clampRoomSize } from '../props/room.js';
+import { HEX_HEIGHT_RATIO } from '../props/aperture.js';
 
 /* Their gate types by id, from the public list their designer serves: the shape,
  * and the inside measurement in metres (a square's clear opening, a pole's
@@ -260,6 +267,7 @@ export function importFpvEvents(input) {
   }
 
   let keptGates = 0;
+  let keptHoops = 0;
   let keptPoles = 0;
   const tooBig = [];
   for (const e of live) {
@@ -271,17 +279,19 @@ export function importFpvEvents(input) {
     if (stackOf.has(e)) {
       target = stackOf.get(e);
     } else if (shape === 'square' || shape === 'hex' || shape === 'circle') {
-      const el = createElement(doc, 'gate', p, yaw);
+      const el = createElement(doc, shape === 'hex' ? 'hexGate' : (shape === 'circle' ? 'hoop' : 'gate'), p, yaw);
       el.dims.clearW = e.def.size;
-      el.dims.clearH = e.def.size;
+      el.dims.clearH = shape === 'hex' ? e.def.size * HEX_HEIGHT_RATIO : e.def.size;
       el.dims.sillH = g.height;
       el.yawOverridden = true;
       doc.elements.push(el);
       target = { el, level: 0 };
       if (shape === 'square') {
         keptGates += 1;
+      } else if (shape === 'circle') {
+        keptHoops += 1;
       } else {
-        report.approximated.push(`#${e.n} is a ${shape === 'hex' ? 'hexagon' : 'hoop'}, ${mm(e.def.size)} across: it became a square gate ${mm(e.def.size)} wide, which is the nearest a whoop room has.`);
+        report.approximated.push(`#${e.n} is a hexagon, ${mm(e.def.size)} across: it became a hex gate ${mm(e.def.size)} across the points and ${mm(el.dims.clearH)} across the flats. The file does not say which of the two its size is, so it was read as across the points: check it against the real one.`);
       }
     } else if (shape === 'pole') {
       const el = createElement(doc, 'pole', p, 0);
@@ -327,6 +337,9 @@ export function importFpvEvents(input) {
   }
   if (keptGates) {
     report.kept.push(`${keptGates} square gate${keptGates === 1 ? '' : 's'} placed with the position, heading, height, size and direction they had.`);
+  }
+  if (keptHoops) {
+    report.kept.push(`${keptHoops} hoop${keptHoops === 1 ? '' : 's'} placed with the position, heading, height, size and direction they had.`);
   }
   if (keptPoles) {
     report.kept.push(`${keptPoles} pole${keptPoles === 1 ? '' : 's'}, in the flying order where they stood.`);

@@ -67,8 +67,8 @@ import { FRAME_SIDES, frameSidesOf, hasMissingSides, unbuiltSidesOf } from './el
 import { PRESETS } from './presets.js';
 import { ELEMENTS, PALETTE_ORDER, GATE_FLAG_H, flagSideOf, flagSideSigns, elementByKey, elementHeight,
   virtualApertureDims, countElementsByType, formatElementCounts,
-  GATE_PRESETS, applyGatePreset, matchingGatePreset, levelPitchFor, FRAME_TUBE_OD,
-  KIND, FREESTYLE_PALETTE_ORDER, MICRO_PALETTE_ORDER, PALETTE_EXTRA, paletteItems, docModeOf, isTrafficType,
+  GATE_PRESETS, MICRO_GATE_PRESETS, applyGatePreset, matchingGatePreset, presetHeight, levelPitchFor, FRAME_TUBE_OD,
+  KIND, FREESTYLE_PALETTE_ORDER, MICRO_PALETTE_ORDER, PALETTE_EXTRA, paletteItems, docModeOf, isTrafficType, apertureShapeOf,
   TUNING, tuningFor, ROAD_NODES_MAX, defaultDims, defaultPitch,
 } from './elements.js';
 import {
@@ -120,6 +120,9 @@ import {
   BOUNCE_COOLDOWN_MS,
 } from '../game/collide.js';
 import { sincos } from '../props/trig.js';
+import {
+  APERTURE_SHAPES, CIRCLE_SEGMENTS, shapeOf, outlineOf, insideShape, clipToShape, frameOutline, frameParts, barsAlong, paneFan,
+} from '../props/aperture.js';
 import { AIRFRAMES, airframeById } from '../../configs/airframes.js';
 import {
   inspectCourse, layoutFingerprint, publishCurrentCourse, publishedTags, rememberPublish,
@@ -127,6 +130,7 @@ import {
 } from '../share/listing.js';
 import { readBind, readEditKey, writeBind } from '../share/session.js';
 import { publishTrack, partsTheBoardDoesNotKnow, unknownPartsSentence, BOARD_UNKNOWN_TYPES } from '../share/board.js';
+import { planFromDocument, PLAN_SHAPE, isoApertures, isoShapes } from '../share/plan.js';
 import { keepDisplaced, readAutosave } from './storage.js';
 import { FPV_FLOOR_CLEAR, FPV_NEAR_CLEAR, fpvLensClear } from '../render/lens.js';
 
@@ -6987,9 +6991,9 @@ function suiteWhoopReplace() {
     const b = placeOnTrack(d, 'gate', { x: 5, y: 6 });
     const t = placeOnTrack(d, 'tower', { x: 6, y: 6 });
     const p = placeOnTrack(d, 'pole', { x: 7, y: 6 });
-    check('a gate can become any of the other four openings, in the palette\'s order', replacementsFor(d, [a.id]).join() === 'doubleStack,ladder,tower,diveGate', replacementsFor(d, [a.id]).join());
-    check('two of the same kind offer the same', replacementsFor(d, [a.id, b.id]).join() === 'doubleStack,ladder,tower,diveGate');
-    check('a gate and a tower can each become anything, the gate included', replacementsFor(d, [a.id, t.id]).join() === 'gate,doubleStack,ladder,tower,diveGate', replacementsFor(d, [a.id, t.id]).join());
+    check('a gate can become any of the other six openings, in the palette\'s order, the hoop and the hex gate last', replacementsFor(d, [a.id]).join() === 'doubleStack,ladder,tower,diveGate,hoop,hexGate', replacementsFor(d, [a.id]).join());
+    check('two of the same kind offer the same', replacementsFor(d, [a.id, b.id]).join() === 'doubleStack,ladder,tower,diveGate,hoop,hexGate');
+    check('a gate and a tower can each become anything, the gate included', replacementsFor(d, [a.id, t.id]).join() === 'gate,doubleStack,ladder,tower,diveGate,hoop,hexGate', replacementsFor(d, [a.id, t.id]).join());
     check('a pole offers a cone, and only that', replacementsFor(d, [p.id]).join() === 'cone');
     check('a gate and a pole together offer nothing', replacementsFor(d, [a.id, p.id]).length === 0);
     check('and nothing selected, or something gone, offers nothing', replacementsFor(d, []).length === 0 && replacementsFor(d, ['el-999']).length === 0);
@@ -7417,12 +7421,13 @@ function suiteImportFpv() {
   check('a pole is a pole, its height the designer\'s 2 m, where it stood', pole && near(pole.dims.height, 2) && near(pole.position.x, 6) && near(pole.position.y, 5));
   const bend = doc.elements.find((e) => e.type === 'waypoint');
   check('a pass through a cube is a waypoint at the middle of the cube, 375 mm up', bend && near(bend.position.z, 0.375) && near(bend.position.x, 4) && near(bend.position.y, 4));
-  const hoop = gates.find((e) => near(e.dims.clearW, 0.5));
-  check('a hoop is a square gate of the same width, raised to the height it had', hoop && near(hoop.dims.sillH, 0.25) && near(hoop.position.x, 5) && near(hoop.position.y, 4));
+  const hoop = doc.elements.find((e) => e.type === 'hoop');
+  check('a hoop is a hoop of the same width, round, raised to the height it had, where it stood',
+    hoop && near(hoop.dims.clearW, 0.5) && near(hoop.dims.clearH, 0.5) && near(hoop.dims.sillH, 0.25) && near(hoop.position.x, 5) && near(hoop.position.y, 4));
 
   /* The flying order: theirs, in their order, with what could be flown left in it. */
   const order = doc.sequence.map((q) => elementById(doc, q.elementId).type);
-  check('the flying order is their order: gate, gate, pole, the stack twice, the cube, the hoop', order.join() === 'gate,gate,pole,doubleStack,doubleStack,waypoint,gate', order.join());
+  check('the flying order is their order: gate, gate, pole, the stack twice, the cube, the hoop', order.join() === 'gate,gate,pole,doubleStack,doubleStack,waypoint,hoop', order.join());
   check('a gate marked back is flown the other way through, and one marked forward is not', doc.sequence[0].entry === 1 && doc.sequence[1].entry === -1 && doc.sequence[0].overridden === true && doc.sequence[1].overridden === true);
   check('the two passes of the stack are its two openings, bottom then top', doc.sequence[3].apertureIndex === 0 && doc.sequence[4].apertureIndex === 1);
 
@@ -7430,7 +7435,7 @@ function suiteImportFpv() {
   const lines = reportLines(r.report).join(' | ');
   check('the stack is reported as kept', /became one double stack, 700 mm/.test(lines), lines);
   check('the cube is reported as changed, by its place in their list', /#6 is a pass through a cube/.test(lines));
-  check('the hoop is reported as changed', /#7 is a hoop, 500 mm across/.test(lines));
+  check('the hoop is reported as kept, and not as changed', /1 hoop placed with the position, heading, height, size and direction they had/.test(lines) && !/#7 is a hoop/.test(lines), lines);
   check('the banner is kept, as a banner in the room, and reported as changed by its place in their list',
     /Changed: #8 is a banner, 1500 mm wide: it became a banner 1500 mm wide/.test(lines) && doc.elements.some((e) => e.type === 'banner'), lines);
   check('a type it does not know is left out by name', /Left out: #9 is a "mystery-9000"/.test(lines));
@@ -7444,6 +7449,36 @@ function suiteImportFpv() {
   const warned = collectWarnings(doc, buildPath(doc));
   check('the rules run on it: the 750 mm gates are over the size RaceGOW allows, and that is a warning', warned.some((w) => w.code === 'rg-opening-max'), warned.map((w) => w.code).join());
   check('and the racing line through it is finite', buildPath(doc).samples.every((sm) => Number.isFinite(sm.pos.x) && Number.isFinite(sm.pos.y) && Number.isFinite(sm.pos.z)));
+
+  /* Their hoops and hexes are ours now: a hoop and a hex gate, where they stood, at the size and the height they had, and
+   * flown where they were in the order. The one thing the file does not say is which way a hexagon's size is measured. */
+  {
+    const f = importFpvEvents({
+      arena: { w: 6, d: 6 },
+      gates: [
+        gate('whoop-hex-50', 2, 3, 0.2, 0),
+        gate('whoop-hoop-50', 4, 3, 0, Q, 'back'),
+        gate('big-hoop-1m', 3, 5, 0, 0),
+      ],
+    });
+    const hex = f.doc.elements.find((e) => e.type === 'hexGate');
+    const rings = f.doc.elements.filter((e) => e.type === 'hoop');
+    const said = reportLines(f.report).join(' | ');
+    check('a hex is a hex gate and a hoop is a hoop, each of the width they had, at the height they had, in their order',
+      Boolean(hex) && rings.length === 2 && f.doc.sequence.map((q) => elementById(f.doc, q.elementId).type).join() === 'hexGate,hoop,hoop'
+      && near(hex.dims.clearW, 0.5) && near(hex.dims.sillH, 0.2) && near(rings[0].dims.clearW, 0.5) && near(rings[1].dims.clearW, 1), said);
+    check('the hex gate is as high as a hexagon that wide is, and a hoop is round',
+      near(hex.dims.clearH, 0.5 * Math.sqrt(3) / 2) && rings.every((r) => near(r.dims.clearH, r.dims.clearW)));
+    check('where they stood: the arena is centred in the hall and their z runs the other way',
+      near(hex.position.x, 2 + 2) && near(hex.position.y, 3 + (6 - 3)) && near(rings[0].position.x, 2 + 4) && near(rings[0].position.y, 3 + (6 - 3)));
+    check('a hoop marked back is flown the other way through', f.doc.sequence[1].entry === -1 && f.doc.sequence[1].overridden === true && f.doc.sequence[2].entry === 1);
+    check('the hoops are said to be kept, and the hex is said to be a reading: the file does not say which way its size is measured',
+      /2 hoops placed with the position, heading, height, size and direction they had/.test(said)
+      && /#1 is a hexagon, 500 mm across: it became a hex gate 500 mm across the points and 433 mm across the flats/.test(said) && /does not say which/.test(said), said);
+    check('and none of it is called a square gate', !/square gate/.test(said), said);
+    check('it round trips, needs no repair, and the rules and the racing line run on it',
+      roundTripsCleanly(f.doc) && deserialize(serialize(f.doc)).repairs.length === 0 && buildPath(f.doc).samples.every((sm) => Number.isFinite(sm.pos.x)));
+  }
 
   /* Their tables, chairs and banners are ours now: kept where they stood, at the nearest quarter turn, with
    * the depth and height their file does not carry taken from ours, and never in the flying order. */
@@ -8192,8 +8227,8 @@ async function suiteBoardParts() {
   const list = partsTheBoardDoesNotKnow(plain);
   check('a track that holds furniture names it, counted, in the palette\'s order',
     JSON.stringify(list) === '[{"type":"table","count":2},{"type":"chair","count":1}]', JSON.stringify(list));
-  check('the list is the three, and the working document is read as well as the plain one',
-    BOARD_UNKNOWN_TYPES.join() === 'table,chair,banner' && partsTheBoardDoesNotKnow(doc).length === 2);
+  check('the list is the five, and the working document is read as well as the plain one',
+    BOARD_UNKNOWN_TYPES.join() === 'table,chair,banner,hoop,hexGate' && partsTheBoardDoesNotKnow(doc).length === 2);
   const none = toPlain(createTrack('plain', 'micro'));
   placeOnTrack(none, 'gate', { x: 4, y: 5 });
   check('a track without any names nothing, and a document that is not one names nothing and does not throw',
@@ -8202,10 +8237,12 @@ async function suiteBoardParts() {
     && partsTheBoardDoesNotKnow({ elements: [null, 5, { type: 'table' }, { type: 'gate' }] }).length === 1);
   const say = unknownPartsSentence(list);
   check('the sentence says what the board does not know, what this track has, and what to do',
-    /does not know a table, a chair or a banner/.test(say) && /2 tables and 1 chair/.test(say) && /Take them out/.test(say) && /still flies/.test(say), say);
-  check('and reads for one kind, and for all three',
+    /does not know a table, a chair, a banner, a hoop or a hex gate/.test(say) && /2 tables and 1 chair/.test(say) && /Take them out/.test(say) && /still flies/.test(say), say);
+  check('and reads for one kind, and for all five, a hex gate in two words and its own plural',
     /This one has 1 banner\./.test(unknownPartsSentence([{ type: 'banner', count: 1 }]))
-    && /1 table, 2 chairs and 3 banners/.test(unknownPartsSentence([{ type: 'table', count: 1 }, { type: 'chair', count: 2 }, { type: 'banner', count: 3 }])));
+    && /1 table, 2 chairs and 3 banners/.test(unknownPartsSentence([{ type: 'table', count: 1 }, { type: 'chair', count: 2 }, { type: 'banner', count: 3 }]))
+    && /This one has 1 hoop and 2 hex gates\./.test(unknownPartsSentence([{ type: 'hoop', count: 1 }, { type: 'hexGate', count: 2 }]))
+    && /This one has 1 hex gate\./.test(unknownPartsSentence([{ type: 'hexGate', count: 1 }])));
 
   const hadFetch = globalThis.fetch;
   let calls = 0;
@@ -8226,6 +8263,19 @@ async function suiteBoardParts() {
       Boolean(refused) && JSON.stringify(refused.unknownParts) === JSON.stringify(list));
     await publishTrack({ author: 'Ada Rook', document: none, origin: 'http://board.test' });
     check('a track without furniture goes as it always did', calls === 1);
+    const shaped = createTrack('shaped', 'micro');
+    placeOnTrack(shaped, 'gate', { x: 4, y: 5 });
+    placeOnTrack(shaped, 'hoop', { x: 5.5, y: 5 });
+    placeOnTrack(shaped, 'hexGate', { x: 7, y: 5 });
+    let refusedShaped = null;
+    try {
+      await publishTrack({ author: 'Ada Rook', document: toPlain(shaped), origin: 'http://board.test' });
+    } catch (e) {
+      refusedShaped = e;
+    }
+    check('a track with a hoop or a hex gate is refused the same way, with the sentence, and nothing is sent',
+      Boolean(refusedShaped) && /1 hoop and 1 hex gate\./.test(refusedShaped.message) && calls === 1
+      && JSON.stringify(refusedShaped.unknownParts) === '[{"type":"hoop","count":1},{"type":"hexGate","count":1}]', String(refusedShaped && refusedShaped.message));
     const planTable = { ...none, elements: [...none.elements, { ...plain.elements.find((e) => e.type === 'table') }] };
     let again = null;
     try {
@@ -8239,6 +8289,677 @@ async function suiteBoardParts() {
     globalThis.fetch = hadFetch;
   }
 }
+
+/*
+ * THE SHAPE OF AN OPENING. A hoop is round and a hex gate has six sides, and the corner of the box that holds
+ * one is not in it. The shape is inscribed in the rectangle every piece already has, and what scores is what
+ * is left of the box: this is the arithmetic, held to a dense sampling of the very same shapes, because a pass
+ * test that is wrong by a corner is a gate that scores a line that missed it.
+ */
+function suiteApertureShapes() {
+  console.log('\nthe shape of an opening');
+  const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+  check('there are three shapes, and a word that is not one is a square', APERTURE_SHAPES.join() === 'square,circle,hex'
+    && shapeOf('circle') === 'circle' && shapeOf('hex') === 'hex' && shapeOf('square') === 'square'
+    && shapeOf('triangle') === 'square' && shapeOf(undefined) === 'square' && shapeOf(null) === 'square' && shapeOf(4) === 'square');
+
+  /* THE OUTLINES */
+  {
+    const sq = outlineOf('square', 2, 1);
+    check('a square is its four corners', sq.length === 4 && sq.every(([x, y]) => Math.abs(x) === 2 && Math.abs(y) === 1));
+    const c = outlineOf('circle', 2, 1);
+    check('a circle is twenty four points, the first at the right hand end of the width, all on the ellipse',
+      c.length === CIRCLE_SEGMENTS && CIRCLE_SEGMENTS === 24 && near(c[0][0], 2) && near(c[0][1], 0)
+      && c.every(([x, y]) => near((x / 2) ** 2 + y ** 2, 1, 1e-12)));
+    check('and n of them when asked, evenly round: the fourth of twelve is straight up',
+      outlineOf('circle', 1, 1, 12).length === 12 && near(outlineOf('circle', 1, 1, 12)[3][0], 0, 1e-12) && near(outlineOf('circle', 1, 1, 12)[3][1], 1));
+    const h = outlineOf('hex', 2, 1);
+    check('a hex has a point at each end of the width and a flat at the top and the bottom',
+      h.length === 6 && JSON.stringify(h) === JSON.stringify([[2, 0], [1, 1], [-1, 1], [-2, 0], [-1, -1], [1, -1]]), JSON.stringify(h));
+    check('and its corners are on its own boundary', h.every(([x, y]) => insideShape('hex', 2, 1, x, y) && !insideShape('hex', 2, 1, x * 1.001, y * 1.001)));
+    check('the outline is the same numbers every time', JSON.stringify(outlineOf('circle', 0.355, 0.355)) === JSON.stringify(outlineOf('circle', 0.355, 0.355)));
+    check('and is finite for any size a document can hold', [[0, 0], [1e-9, 1e-9], [1e6, 1e6]].every(([w, hh]) => ['square', 'circle', 'hex'].every((k) => outlineOf(k, w, hh).flat().every(Number.isFinite))));
+  }
+
+  /* WHAT IS INSIDE */
+  {
+    check('the middle is inside all three', APERTURE_SHAPES.every((k) => insideShape(k, 1, 1, 0, 0)));
+    check('the corner of the box is inside a square and outside a circle and a hex',
+      insideShape('square', 1, 1, 0.95, 0.95) && !insideShape('circle', 1, 1, 0.95, 0.95) && !insideShape('hex', 1, 1, 0.95, 0.95));
+    check('the edge is in: the point of a circle at the end of its width, the point of a hex, the middle of a flat',
+      insideShape('circle', 1, 1, 1, 0) && insideShape('hex', 1, 1, 1, 0) && insideShape('hex', 1, 1, 0, 1) && insideShape('circle', 1, 1, 0, -1));
+    check('a circle of 0.7 across is in at 0.7 of the way to a corner and not at 0.75: the radius is a half',
+      insideShape('circle', 1, 1, 0.7, 0.7) && !insideShape('circle', 1, 1, 0.71, 0.71));
+    check('a hex is narrower than the box towards the corners: (0.9, 0.5) is out of a hex and in a circle only as far as the ellipse goes',
+      !insideShape('hex', 1, 1, 0.9, 0.5) && insideShape('hex', 1, 1, 0.5, 0.9) && insideShape('hex', 1, 1, 0.75, 0.49) && !insideShape('hex', 1, 1, 0.76, 0.49));
+    check('an ellipse is an ellipse: 2 wide by 1 high holds (1.9, 0) and not (1.5, 0.8)',
+      insideShape('circle', 2, 1, 1.9, 0) && !insideShape('circle', 2, 1, 1.5, 0.8));
+    check('a size that is not a size holds nothing', !insideShape('circle', 0, 1, 0, 0) && !insideShape('square', 1, -1, 0, 0) && !insideShape('hex', Number.NaN, 1, 0, 0));
+  }
+
+  /* THE CLIP, held to sampling */
+  {
+    /* A small deterministic stream of numbers, in the file's own idiom. */
+    let seed = 0x9e3779b9;
+    const rnd = () => {
+      seed = (seed + 0x6d2b79f5) >>> 0;
+      let t = seed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const boxes = [[1, 1], [0.355, 0.355], [0.5, 0.4330127], [1, 0.5], [0.4, 0.9]];
+    let wrongIn = 0;
+    let wrongOut = 0;
+    let segments = 0;
+    let through = 0;
+    let missed = 0;
+    for (const [hw, hh] of boxes) {
+      for (const shape of ['circle', 'hex']) {
+        for (let n = 0; n < 700; n += 1) {
+          const ax = (rnd() * 4 - 2) * hw;
+          const ay = (rnd() * 4 - 2) * hh;
+          const bx = (rnd() * 4 - 2) * hw;
+          const by = (rnd() * 4 - 2) * hh;
+          const clip = clipToShape(shape, hw, hh, ax, ay, bx - ax, by - ay, 0, 1);
+          segments += 1;
+          if (clip) {
+            through += 1;
+          } else {
+            missed += 1;
+          }
+          for (let i = 0; i <= 400; i += 1) {
+            const t = i / 400;
+            const x = ax + (bx - ax) * t;
+            const y = ay + (by - ay) * t;
+            const inside = insideShape(shape, hw, hh, x, y);
+            const inRange = clip !== null && t >= clip[0] - 1e-9 && t <= clip[1] + 1e-9;
+            if (inside && !inRange) {
+              /* a sample on the very edge may round either way */
+              if (!insideShape(shape, hw * (1 - 1e-9), hh * (1 - 1e-9), x, y)) {
+                continue;
+              }
+              wrongIn += 1;
+            }
+            if (!inside && clip !== null && t > clip[0] + 1e-9 && t < clip[1] - 1e-9) {
+              wrongOut += 1;
+            }
+          }
+        }
+      }
+    }
+    check(`${segments} random segments through a circle and a hex of five shapes of box: not one sample inside the shape is left out of the clip`,
+      wrongIn === 0, `${wrongIn} samples`);
+    check('and not one sample the clip keeps is outside the shape', wrongOut === 0, `${wrongOut} samples`);
+    check('and the segments were a fair mix of through and missed, so the test looked at both', through > 800 && missed > 800, `${through} through, ${missed} missed`);
+
+    /* Exact chords, which sampling cannot give. */
+    const chord = clipToShape('circle', 1, 1, -2, 0, 4, 0, 0, 1);
+    check('a line through the middle of a circle is inside for exactly the diameter: t from 0.25 to 0.75', chord && near(chord[0], 0.25) && near(chord[1], 0.75));
+    const off = clipToShape('circle', 1, 1, -2, 0.6, 4, 0, 0, 1);
+    check('and 0.6 off the middle it is a chord of 1.6: 0.8 either side', off && near(off[0], 0.5 - 0.2) && near(off[1], 0.5 + 0.2));
+    check('a line that only touches the circle is a single point, and one beside it is nothing',
+      (() => { const t = clipToShape('circle', 1, 1, -2, 1, 4, 0, 0, 1); return t && near(t[0], 0.5) && near(t[1], 0.5); })()
+      && clipToShape('circle', 1, 1, -2, 1.0001, 4, 0, 0, 1) === null);
+    const flat = clipToShape('hex', 1, 1, -2, 0.9, 4, 0, 0, 1);
+    check('a line along the top of a hex, 0.9 up, is inside where 2 |u| + 0.9 is 2 or less: |u| up to 0.55', flat && near(flat[0], (2 - 0.55) / 4) && near(flat[1], (2 + 0.55) / 4), JSON.stringify(flat));
+    check('through the corner of the box, on the diagonal, a circle is crossed and a square is: the diagonal goes through the middle',
+      clipToShape('circle', 1, 1, -2, -2, 4, 4, 0, 1) !== null && clipToShape('hex', 1, 1, -2, -2, 4, 4, 0, 1) !== null);
+    check('but along the box\'s own edge, one corner to the next, a circle and a hex are each touched at one point, the middle, and 0.9 in from the middle a hex is a chord of 0.4',
+      (() => { const t = clipToShape('circle', 1, 1, 1, -2, 0, 4, 0, 1); return t && near(t[0], 0.5) && near(t[1], 0.5); })()
+      && (() => { const t = clipToShape('hex', 1, 1, 1, -2, 0, 4, 0, 1); return t && near(t[0], 0.5) && near(t[1], 0.5); })()
+      && (() => { const t = clipToShape('hex', 1, 1, 0.9, -2, 0, 4, 0, 1); return t && near(t[0], 0.45) && near(t[1], 0.55); })()
+      && clipToShape('hex', 1, 1, 1.0001, -2, 0, 4, 0, 1) === null);
+    check('the part of the range asked about is all that comes back: a chord of t 0.25 to 0.75 asked from 0.5 on is 0.5 to 0.75',
+      (() => { const t = clipToShape('circle', 1, 1, -2, 0, 4, 0, 0.5, 1); return t && near(t[0], 0.5) && near(t[1], 0.75); })()
+      && clipToShape('circle', 1, 1, -2, 0, 4, 0, 0.8, 1) === null);
+    check('a travel that goes nowhere is inside or not by where it stands',
+      (() => { const t = clipToShape('circle', 1, 1, 0.2, 0.2, 0, 0, 0.3, 0.9); return t && near(t[0], 0.3) && near(t[1], 0.9); })()
+      && clipToShape('circle', 1, 1, 2, 2, 0, 0, 0, 1) === null && clipToShape('hex', 1, 1, 0.2, 0.2, 0, 0, 0, 1) !== null);
+    check('a square is returned as it came, because the caller has clipped it against the box already',
+      (() => { const t = clipToShape('square', 1, 1, -5, -5, 1, 1, 0.2, 0.7); return t && t[0] === 0.2 && t[1] === 0.7; })());
+    check('nothing in, nothing out: no size, or a range that is backwards, or a word that is not a shape is not a hoop',
+      clipToShape('circle', 0, 1, 0, 0, 1, 0, 0, 1) === null && clipToShape('hex', 1, 1, 0, 0, 1, 0, 1, 0) === null
+      && clipToShape('circle', 1, Number.NaN, 0, 0, 1, 0, 0, 1) === null && (() => { const t = clipToShape('pyramid', 1, 1, 0, 0, 9, 9, 0, 1); return t && t[0] === 0 && t[1] === 1; })());
+  }
+}
+
+/*
+ * A HOOP AND A HEX GATE. Two more openings for a whoop room, one round and one six sided, made of everything a
+ * gate is made of: an element with a size, a place in the flying order, a frame that is solid and a hole that
+ * scores. What is new is that the hole is not a rectangle, so the scoring, the frame and the drawing all read
+ * the shape, and a line through the corner of the box that holds a hoop misses it.
+ */
+function suiteHoopHex() {
+  console.log('\nthe whoop builder: a hoop and a hex gate');
+  const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+  const SHAPED = { hoop: 'circle', hexGate: 'hex' };
+
+  /* WHAT THEY ARE */
+  for (const [t, shape] of Object.entries(SHAPED)) {
+    const def = ELEMENTS[t];
+    check(`${t} is an opening on the track palette, ${shape}, with a gate's own five sizes and no hotkey`,
+      Boolean(def) && def.kind === KIND.APERTURE && def.group === 'track' && def.shape === shape && def.key === undefined
+      && Object.keys(def.dims).join() === Object.keys(ELEMENTS.gate.dims).join() && def.label.length > 0 && def.note.length > 20);
+    check(`${t}: apertureShapeOf says ${shape}, for the type and for a piece of it`,
+      apertureShapeOf(t) === shape && apertureShapeOf({ type: t }) === shape);
+    const m = defaultDims(t, 'micro');
+    check(`${t}: a whoop one starts as big as a whoop gate, one opening, on the floor`,
+      m.levels === 1 && m.sillH === 0 && near(m.clearW, GATE_OPENING_DEFAULT), JSON.stringify(m));
+    check(`${t} is not on the 5 inch palette or a map's`, !PALETTE_ORDER.includes(t) && !FREESTYLE_PALETTE_ORDER.includes(t));
+  }
+  const hexDims = defaultDims('hexGate', 'micro');
+  check('a hex gate is regular: as high as a hexagon of that width is, the width times the square root of three over two',
+    near(hexDims.clearH, hexDims.clearW * Math.sqrt(3) / 2, 1e-6), JSON.stringify(hexDims));
+  check('a hoop is a circle: as high as it is wide', near(defaultDims('hoop', 'micro').clearH, defaultDims('hoop', 'micro').clearW));
+  const after = MICRO_PALETTE_ORDER.indexOf('diveGate');
+  check('they follow the horizontal gate on the whoop palette, before the poles', MICRO_PALETTE_ORDER.slice(after + 1, after + 4).join() === 'hoop,hexGate,pole', MICRO_PALETTE_ORDER.join());
+  check('and every gate that was is still a square', ['gate', 'flaggedGate', 'doubleStack', 'ladder', 'tower', 'diveGate'].every((t) => apertureShapeOf(t) === 'square')
+    && apertureShapeOf('barrier') === 'square' && apertureShapeOf(undefined) === 'square' && apertureShapeOf({ type: 'nothing' }) === 'square');
+
+  /* THE OPENING, which carries its shape only when it is not a square, so no document's openings change */
+  {
+    const d = createTrack('shapes', 'micro');
+    const gate = placeOnTrack(d, 'gate', { x: 4, y: 5 });
+    const hoop = placeOnTrack(d, 'hoop', { x: 4, y: 7 });
+    const hex = placeOnTrack(d, 'hexGate', { x: 4, y: 9 });
+    check('a hoop\'s opening says circle and a hex gate\'s says hex', aperturesOf(hoop)[0].shape === 'circle' && aperturesOf(hex)[0].shape === 'hex');
+    check('and a gate\'s says nothing at all, so what every reader was handed is what it is handed',
+      !('shape' in aperturesOf(gate)[0]) && JSON.stringify(Object.keys(aperturesOf(gate)[0])) === JSON.stringify(['index', 'sillH', 'centerH', 'clearW', 'clearH']),
+      JSON.stringify(Object.keys(aperturesOf(gate)[0])));
+    check('both are in the flying order, each a step, and the document reads back as it was written',
+      d.sequence.length === 3 && roundTripsCleanly(d) && deserialize(serialize(d)).repairs.length === 0
+      && deserialize(serialize(d)).doc.elements.map((e) => e.type).join() === 'gate,hoop,hexGate');
+    check('a document with a size a hoop cannot have is repaired as a gate\'s is', (() => {
+      const raw = JSON.parse(serialize(d));
+      raw.elements[1].dims.clearW = 0;
+      const read = deserialize(JSON.stringify(raw));
+      return read.doc.elements[1].dims.clearW > 0 && read.repairs.length === 1 && /clearW/.test(read.repairs[0]);
+    })());
+    check('a hoop and a hex gate have one opening: a document that says two is repaired to one, with a note that says so', (() => {
+      const raw = JSON.parse(serialize(d));
+      raw.elements[2].dims.levels = 2;
+      const read = deserialize(JSON.stringify(raw));
+      return read.doc.elements[2].dims.levels === 1 && read.repairs.length === 1 && /levels/.test(read.repairs[0])
+        && /hex gate/.test(read.repairs[0]) && aperturesOf(read.doc.elements[2]).length === 1;
+    })());
+    check('and a gate that says two is left as it is, so a double stack is what it was', (() => {
+      const stack = createTrack('stack', 'micro');
+      placeOnTrack(stack, 'doubleStack', { x: 4, y: 5 });
+      const read = deserialize(serialize(stack));
+      return read.repairs.length === 0 && read.doc.elements[0].dims.levels === 2;
+    })());
+    const warned = (doc) => collectWarnings(doc, buildPath(doc)).map((w) => w.code);
+    check('the racing line runs through a hoop and a hex gate as it does through a gate: no warning about either', !warned(d).some((c) => c === 'no-face' || c === 'reversal'), warned(d).join());
+    check('a hoop and a hex gate of the gate\'s width are not a different size from it, and are not under or over the limits: no size warning at all',
+      !warned(d).some((c) => c === 'rg-opening-mixed' || c === 'rg-opening-min' || c === 'rg-opening-max'), warned(d).join());
+    const narrow = createTrack('narrow', 'micro');
+    placeOnTrack(narrow, 'gate', { x: 4, y: 5 });
+    const nh = placeOnTrack(narrow, 'hexGate', { x: 4, y: 7 });
+    nh.dims.clearW = 0.6;
+    nh.dims.clearH = 0.6 * Math.sqrt(3) / 2;
+    check('a hex gate is held to the limits by its width: 24 in across the points is the least, so 0.6 m is under it and is said to be, and is a different size from the gate',
+      warned(narrow).includes('rg-opening-min') && warned(narrow).includes('rg-opening-mixed'), warned(narrow).join());
+    const ok = createTrack('ok', 'micro');
+    placeOnTrack(ok, 'gate', { x: 4, y: 5 });
+    const oh = placeOnTrack(ok, 'hexGate', { x: 4, y: 7 });
+    oh.dims.clearW = 0.62;
+    oh.dims.clearH = 0.62 * Math.sqrt(3) / 2;
+    check('and 0.62 across the points is over the least, though it is only 21 in across the flats: the width is what is held', !warned(ok).includes('rg-opening-min'), warned(ok).join());
+    const big = createTrack('big', 'micro');
+    placeOnTrack(big, 'gate', { x: 4, y: 5 });
+    const wide = placeOnTrack(big, 'hoop', { x: 4, y: 7 });
+    wide.dims.clearW = 0.9;
+    wide.dims.clearH = 0.9;
+    check('a hoop is held to the size RaceGOW allows a gate, and says so when it is bigger', warned(big).includes('rg-opening-max'), warned(big).join());
+  }
+
+  /* THE COURSE THE GAME FLIES */
+  {
+    const d = createTrack('course', 'micro');
+    const gate = placeOnTrack(d, 'gate', { x: 4, y: 5 });
+    const hoop = placeOnTrack(d, 'hoop', { x: 4, y: 7 });
+    const hex = placeOnTrack(d, 'hexGate', { x: 4, y: 9 });
+    const course = courseFromDocument(d);
+    const st = (el) => course.structures.find((x) => x.id === el.id);
+    const stn = (el) => course.stations.find((x) => x.elementId === el.id);
+    check('the course carries a hoop\'s shape on its structure and its station, circle, and a hex gate\'s, hex',
+      st(hoop).shape === 'circle' && stn(hoop).shape === 'circle' && st(hex).shape === 'hex' && stn(hex).shape === 'hex');
+    check('and a gate\'s structure and station have no shape key at all, so a course is what it always was',
+      !('shape' in st(gate)) && !('shape' in stn(gate)));
+    check('the sizes are the room\'s, as a gate\'s are: the hoop\'s hole is the gate\'s hole scaled',
+      near(stn(hoop).clearW, stn(gate).clearW) && near(stn(hoop).clearW, defaultDims('hoop', 'micro').clearW * MICRO_SCALE, 1e-9));
+  }
+
+  /* THE PASS: a line through the corner of the box that holds a hoop misses it */
+  {
+    const gateOf = (shape, clearW, clearH) => new Race([{
+      position: { x: 0, y: 0, z: 0 }, heading: 0, flyOrder: 0, virtual: false,
+      apertures: [shape ? { centreY: clearH / 2, clearW, clearH, shape } : { centreY: clearH / 2, clearW, clearH }],
+    }]);
+    /* Fly from a metre before the opening to a metre after it, through the point (lx, ly) of the hole. */
+    const passes = (shape, clearW, clearH, lx, ly, through = 1) => {
+      const race = gateOf(shape, clearW, clearH);
+      const g = race.gates[0];
+      const at = (s, x = lx, y = ly) => ({
+        x: g.x + g.ax.x * x + g.ay.x * y + g.az.x * s,
+        y: g.y + clearH / 2 + g.ax.y * x + g.ay.y * y + g.az.y * s,
+        z: g.z + g.ax.z * x + g.ay.z * y + g.az.z * s,
+      });
+      race.update(at(-through), at(through), 0, 0);
+      return race.lapStartMs != null;
+    };
+    check('the race keeps the shape on the aperture it was handed', gateOf('circle', 2, 2).gates[0].apertures[0].shape === 'circle');
+    check('through the middle of a hoop scores, and a square is scored through the middle as it was', passes('circle', 2, 2, 0, 0) && passes(null, 2, 2, 0, 0) && passes('square', 2, 2, 0, 0));
+    check('through the corner of the box that holds a hoop does not: it goes past the ring, and a square of that size scores it',
+      !passes('circle', 2, 2, 0.9, 0.9) && passes(null, 2, 2, 0.9, 0.9) && passes('square', 2, 2, 0.9, 0.9));
+    check('close in to the ring on its own axis scores, and close in to it round the corner does not: radius 0.9 is in and 1.05 is out',
+      passes('circle', 2, 2, 0.9, 0) && passes('circle', 2, 2, 0, -0.9) && passes('circle', 2, 2, 0.63, 0.63) && !passes('circle', 2, 2, 0.7, 0.7));
+    check('a hex gate: through the middle scores, through the corner of its box does not, and along a flat close to the top does',
+      passes('hex', 2, Math.sqrt(3), 0, 0) && !passes('hex', 2, Math.sqrt(3), 0.9, 0.6) && passes('hex', 2, Math.sqrt(3), 0.5, 0.75) && !passes('hex', 2, Math.sqrt(3), 0.9, 0.8));
+    check('an ellipse is scored as an ellipse: a hoop 3 wide and 1 high takes (1.3, 0) and not (1.3, 0.4)',
+      passes('circle', 3, 1, 1.3, 0) && !passes('circle', 3, 1, 1.3, 0.4));
+    /* An angled line that only crosses the hole's corner of the box on the way through. */
+    const race = gateOf('circle', 2, 2);
+    const g = race.gates[0];
+    const w = (x, y, s) => ({
+      x: g.x + g.ax.x * x + g.ay.x * y + g.az.x * s,
+      y: g.y + 1 + g.ax.y * x + g.ay.y * y + g.az.y * s,
+      z: g.z + g.ax.z * x + g.ay.z * y + g.az.z * s,
+    });
+    race.update(w(-0.9, -0.9, -1), w(0.9, 0.9, 1), 0, 0);
+    check('a diagonal that crosses the plane through the middle of the hoop scores, though it starts and ends in the corners', race.lapStartMs != null);
+    const outside = gateOf('circle', 2, 2);
+    const go = outside.gates[0];
+    const wo = (x, y, s) => ({
+      x: go.x + go.ax.x * x + go.ay.x * y + go.az.x * s,
+      y: go.y + 1 + go.ax.y * x + go.ay.y * y + go.az.y * s,
+      z: go.z + go.ax.z * x + go.ay.z * y + go.az.z * s,
+    });
+    outside.update(wo(1.2, 1.2, -1), wo(0.95, 0.95, 1), 0, 0);
+    check('and a line that stays out in the corner all the way through does not', outside.lapStartMs == null);
+    check('a reverse pass through a hoop still does not count, as through a gate', !(() => {
+      const r = gateOf('circle', 2, 2);
+      const gg = r.gates[0];
+      const p = (s) => ({ x: gg.x + gg.az.x * s, y: gg.y + 1 + gg.az.y * s, z: gg.z + gg.az.z * s });
+      r.update(p(1), p(-1), 0, 0);
+      return r.lapStartMs != null;
+    })());
+
+    /* WHEN IT COUNTS. A line that is inside the ring for a while before the plane and crosses the plane
+     * out in the corner is credited at the first moment it is in the hole, and a square's is credited
+     * at the plane, where it always was. */
+    {
+      const race = gateOf('circle', 2, 2);
+      const from = { x: 0.6, y: 0.6, z: -0.5 };
+      const to = { x: 1, y: 1, z: 0.5 };
+      const inRing = race.openingHits(from, to, 1, 1, 0, 'circle');
+      const inBox = race.openingHits(from, to, 1, 1, 0, 'square');
+      check('a line in the ring before the plane and out in the corner at it is credited when it is first in the hole, the start',
+        inRing === 0, String(inRing));
+      check('and through a square the same line is credited at the plane, half way, as it was', Math.abs(inBox - 0.5) < 1e-12, String(inBox));
+      check('a line that never is in the ring gets no credit whatever the box says',
+        race.openingHits({ x: 0.85, y: 0.85, z: -0.5 }, { x: 0.95, y: 0.95, z: 0.5 }, 1, 1, 0, 'circle') === -1
+        && race.openingHits({ x: 0.85, y: 0.85, z: -0.5 }, { x: 0.95, y: 0.95, z: 0.5 }, 1, 1, 0, 'square') >= 0);
+    }
+
+    /* THE HOLD, which stops one pass being credited twice, follows the shape too. A craft that ends
+     * the crossing in the corner of the box is outside the ring, so it is not holding the hoop and
+     * its next pass through the middle scores. The same flight through a square is inside it, and a
+     * square holds what it always held. */
+    const twice = (shape, clearW, clearH, cx, cy) => {
+      const race = gateOf(shape, clearW, clearH);
+      const gg = race.gates[0];
+      const p = (x, y, s) => ({
+        x: gg.x + gg.ax.x * x + gg.ay.x * y + gg.az.x * s,
+        y: gg.y + clearH / 2 + gg.ax.y * x + gg.ay.y * y + gg.az.y * s,
+        z: gg.z + gg.ax.z * x + gg.ay.z * y + gg.az.z * s,
+      });
+      race.update(p(0, 0, -1), p(cx, cy, 0.2), 100, 100);
+      const first = race.lapStartMs != null;
+      race.update(p(cx, cy, 0.2), p(cx, cy, -0.3), 200, 200);
+      race.update(p(cx, cy, -0.3), p(0, 0, 0.4), 300, 300);
+      return { first, laps: race.lap };
+    };
+    const HEXH = Math.sqrt(3);
+    check('a craft that ended its pass in the corner of a hoop\'s box is not holding the hoop: its next pass scores, and the lap is done',
+      twice('circle', 2, 2, 0.9, 0.9).first && twice('circle', 2, 2, 0.9, 0.9).laps === 1, JSON.stringify(twice('circle', 2, 2, 0.9, 0.9)));
+    check('and the same flight through a square, whose corner is inside it, is still held, and does not: what it was',
+      twice(null, 2, 2, 0.9, 0.9).first && twice(null, 2, 2, 0.9, 0.9).laps === 0 && twice('square', 2, 2, 0.9, 0.9).laps === 0, JSON.stringify(twice(null, 2, 2, 0.9, 0.9)));
+    check('a hex gate lets go of a craft that ended in the slanted corner of its box, where a circle of that box would still have it',
+      twice('hex', 2, HEXH, 0.88, 0.34).first && twice('hex', 2, HEXH, 0.88, 0.34).laps === 1
+      && twice('circle', 2, HEXH, 0.88, 0.34).laps === 0, `${JSON.stringify(twice('hex', 2, HEXH, 0.88, 0.34))} ${JSON.stringify(twice('circle', 2, HEXH, 0.88, 0.34))}`);
+  }
+
+  /* THE FRAME, which is where it is drawn and where it is solid */
+  {
+    const segDist = (px, py, ax, ay, bx, by) => {
+      const vx = bx - ax;
+      const vy = by - ay;
+      const l2 = vx * vx + vy * vy;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / l2)) : 0;
+      return Math.hypot(px - (ax + vx * t), py - (ay + vy * t));
+    };
+    /* The boundary of a shape, densely: the very points the pass scores. */
+    const boundary = (shape, hw, hh, n = 2400) => {
+      const pts = [];
+      if (shape === 'circle') {
+        for (let i = 0; i < n; i += 1) {
+          const a = (2 * Math.PI * i) / n;
+          pts.push([hw * Math.cos(a), hh * Math.sin(a)]);
+        }
+        return pts;
+      }
+      const poly = outlineOf(shape, hw, hh);
+      for (let i = 0; i < poly.length; i += 1) {
+        const [ax, ay] = poly[i];
+        const [bx, by] = poly[(i + 1) % poly.length];
+        for (let k = 0; k < n / poly.length; k += 1) {
+          const t = k / (n / poly.length);
+          pts.push([ax + (bx - ax) * t, ay + (by - ay) * t]);
+        }
+      }
+      return pts;
+    };
+    const tube = 0.0134;
+    const sizes = [['circle', 0.355, 0.355], ['circle', 1.2, 1.2], ['circle', 1.5, 0.5], ['circle', 0.5, 1.5], ['hex', 0.355, 0.3074], ['hex', 0.5, 0.2], ['hex', 0.2, 0.5], ['square', 0.355, 0.355], ['square', 0.7, 0.3]];
+    for (const [shape, hw, hh] of sizes) {
+      const ring = frameOutline(shape, hw, hh, tube);
+      const want = shape === 'circle' ? CIRCLE_SEGMENTS : shape === 'hex' ? 6 : 4;
+      const label = `${shape} ${hw} by ${hh}`;
+      check(`${label}: the frame is a closed run of ${want} straight tubes, all finite, every one a real length`,
+        ring.length === want && ring.flat(2).every(Number.isFinite)
+        && ring.every(([x, y], i) => Math.hypot(ring[(i + 1) % want][0] - x, ring[(i + 1) % want][1] - y) > 0.01));
+      /* convex, going the same way round: every turn is a left turn */
+      check(`${label}: and it is convex and goes once round, counter clockwise`, ring.every(([x, y], i) => {
+        const [bx, by] = ring[(i + 1) % want];
+        const [cx, cy] = ring[(i + 2) % want];
+        return (bx - x) * (cy - by) - (by - y) * (cx - bx) > 0;
+      }));
+      /* The hole is clear: no tube's axis comes nearer the shape than the tube's own radius, so its surface is
+       * never inside what scores. And it is not far: a polygon round a curve cannot be tangent all the way. */
+      let nearest = Infinity;
+      let furthest = 0;
+      for (const [x, y] of boundary(shape, hw, hh)) {
+        let d = Infinity;
+        for (let i = 0; i < ring.length; i += 1) {
+          d = Math.min(d, segDist(x, y, ring[i][0], ring[i][1], ring[(i + 1) % want][0], ring[(i + 1) % want][1]));
+        }
+        nearest = Math.min(nearest, d);
+        furthest = Math.max(furthest, d);
+      }
+      check(`${label}: no tube comes nearer the hole than its own radius, so the hole that scores is clear`, nearest >= tube - 1e-9, `${(nearest - tube).toExponential(2)} m short`);
+      if (shape === 'circle' && hw === hh) {
+        check(`${label}: a round frame is out of the ring by no more than the straight tube's sagitta, under 1 percent of the radius`,
+          furthest - tube <= hw * (1 - Math.cos(Math.PI / CIRCLE_SEGMENTS)) + 1e-9, `${(furthest - tube).toFixed(5)} m out`);
+      } else if (shape !== 'circle') {
+        check(`${label}: a ${shape} frame is a tube's radius from the hole all the way round`, furthest - tube <= 1e-9, `${(furthest - tube).toExponential(2)} m`);
+      }
+      /* Symmetric about both axes, the way every shape is, so a hoop is drawn upright and not leaning. */
+      const has = (x, y) => ring.some(([px, py]) => Math.abs(px - x) < 1e-9 && Math.abs(py - y) < 1e-9);
+      check(`${label}: the frame is the same left and right and top and bottom`, ring.every(([x, y]) => has(-x, y) && has(x, -y)));
+    }
+    const sq = frameOutline('square', 0.355, 0.355, tube);
+    check('the square frame is the four tubes a gate has always had, centred a tube out from the hole on each side',
+      sq.length === 4 && sq.every(([x, y]) => Math.abs(Math.abs(x) - (0.355 + tube)) < 1e-12 && Math.abs(Math.abs(y) - (0.355 + tube)) < 1e-12), JSON.stringify(sq));
+    check('a word that is not a shape is framed as a square, and the frame is the same numbers every time',
+      JSON.stringify(frameOutline('pyramid', 0.3, 0.2, tube)) === JSON.stringify(frameOutline('square', 0.3, 0.2, tube))
+      && JSON.stringify(frameOutline('circle', 0.355, 0.355, tube)) === JSON.stringify(frameOutline('circle', 0.355, 0.355, tube)));
+    check('a hoop\'s corner at the right hand end of the width is the first, and the ring is a little wider there than it is at the flat of a tube',
+      (() => {
+        const r = frameOutline('circle', 1, 1, 0);
+        return Math.abs(r[0][1]) < 1e-12 && Math.abs(r[0][0] - 1 / Math.cos(Math.PI / CIRCLE_SEGMENTS)) < 1e-12;
+      })());
+  }
+
+  /* THE FRAME AS PARTS: the tubes, the joints, the posts and the solids, in one place, so what the game
+   * draws, what it makes solid and what a flight check flies against are the same numbers. */
+  {
+    const R = 0.355;
+    const tube = 0.0134;
+    const floorHoop = frameParts('circle', R, R, tube, 0);
+    check('a hoop standing on the floor is a ring set into it: the tubes wholly below the floor are not built, and the rest are',
+      floorHoop.tubes.length === CIRCLE_SEGMENTS - 2 && floorHoop.caps.length === floorHoop.tubes.length && floorHoop.posts.length === 0,
+      `${floorHoop.tubes.length} tubes, ${floorHoop.caps.length} solids, ${floorHoop.posts.length} posts`);
+    check('every solid is a capsule of the tube\'s radius, of kind gate, from one end of a tube to the other',
+      floorHoop.caps.every((c, i) => c.kind === 'gate' && c.r === tube && c.ax === floorHoop.tubes[i][0].x && c.by === floorHoop.tubes[i][1].y));
+    const floorHex = frameParts('hex', R, R * Math.sqrt(3) / 2, tube, 0);
+    check('a hex gate on the floor is an open bottomed frame: five of its six tubes', floorHex.tubes.length === 5 && floorHex.caps.length === 5 && floorHex.posts.length === 0);
+    const airHoop = frameParts('circle', R, R, tube, 0.5);
+    check('a hoop that hangs in the air is all its tubes and stands on one post, on the micro gate\'s stub',
+      airHoop.tubes.length === CIRCLE_SEGMENTS && airHoop.posts.length === 1 && airHoop.caps.length === CIRCLE_SEGMENTS + 2
+      && airHoop.caps.filter((c) => c.kind === 'obstacle').length === 1 && airHoop.foot.w === tube * 2 && airHoop.foot.h === tube * 1.6 && airHoop.foot.d === tube * 4,
+      `${airHoop.tubes.length} tubes, ${airHoop.posts.length} posts, ${airHoop.caps.length} solids`);
+    check('the post is under the lowest corner, from the floor to it, and the stub is on the floor under the post',
+      Math.abs(airHoop.posts[0].x) < 1e-9 && Math.abs(airHoop.posts[0].y - Math.min(...airHoop.ring.map((p) => p.y))) < 1e-9
+      && airHoop.caps.some((c) => c.kind === 'gate' && c.ay === 0 && c.by === airHoop.posts[0].y && c.ax === airHoop.posts[0].x)
+      && airHoop.caps.some((c) => c.kind === 'obstacle' && c.ay === tube * 0.8 && c.by === tube * 0.8 && c.bz - c.az === tube * 4));
+    const airHex = frameParts('hex', R, R * Math.sqrt(3) / 2, tube, 0.5);
+    check('a hex gate that hangs in the air stands on two posts, under the two ends of its bottom side', airHex.tubes.length === 6 && airHex.posts.length === 2
+      && Math.abs(airHex.posts[0].x + airHex.posts[1].x) < 1e-9 && airHex.posts[0].x !== airHex.posts[1].x);
+    check('a frame that is not built is a frame with nothing in it, and still says where it is', (() => {
+      const none = frameParts('circle', R, R, tube, 0.5, 0, true);
+      return none.tubes.length === 0 && none.caps.length === 0 && none.posts.length === 0 && none.joints.length === 0 && none.ring.length === CIRCLE_SEGMENTS && none.top > 0.5;
+    })());
+    check('it reports its own top: the highest corner, which is on the ring a tube out and one over the cosine of half a step, and a tube on it',
+      Math.abs(airHoop.top - (0.5 + R + (R + tube) / Math.cos(Math.PI / CIRCLE_SEGMENTS) + tube)) < 1e-9, String(airHoop.top));
+
+    /* The hole is clear in three dimensions and at a tilt: no capsule comes nearer the shape than its radius. */
+    const segDist3 = (p, a, b) => {
+      const vx = b.x - a.x;
+      const vy = b.y - a.y;
+      const vz = b.z - a.z;
+      const l2 = vx * vx + vy * vy + vz * vz;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.y - a.y) * vy + (p.z - a.z) * vz) / l2)) : 0;
+      return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t), p.z - (a.z + vz * t));
+    };
+    for (const [shape, halfW, halfH, sill, pitch] of [['circle', R, R, 0.3, 0], ['circle', R, R, 0.3, 0.6], ['hex', R, 0.3074, 0.3, 0], ['hex', R, 0.3074, 0.3, -0.9], ['circle', 1.22, 1.22, 0.4, 0.3]]) {
+      const parts = frameParts(shape, halfW, halfH, tube, sill, pitch);
+      const centre = { y: sill + halfH };
+      const cp = Math.cos(pitch);
+      const sp = Math.sin(pitch);
+      let nearest = Infinity;
+      for (const [x, y] of (shape === 'circle' ? Array.from({ length: 720 }, (_, i) => [halfW * Math.cos((2 * Math.PI * i) / 720), halfH * Math.sin((2 * Math.PI * i) / 720)]) : outlineOf('hex', halfW, halfH))) {
+        const p = { x, y: centre.y + y * cp, z: y * sp };
+        for (const [a, b] of parts.tubes) {
+          nearest = Math.min(nearest, segDist3(p, a, b));
+        }
+      }
+      check(`${shape} ${halfW} at a sill of ${sill} and a tilt of ${pitch}: no tube comes nearer the hole than its radius, and the ring lies in the tilted plane`,
+        nearest >= tube - 1e-9 && parts.ring.every((p) => Math.abs(p.z * cp - (p.y - centre.y) * sp) < 1e-9), `${(nearest - tube).toExponential(2)}`);
+    }
+    check('a tilted frame is the upright one turned about the middle of the hole: the same corners, moved', (() => {
+      const flat = frameParts('circle', R, R, tube, 0.3, 0);
+      const lean = frameParts('circle', R, R, tube, 0.3, 0.6);
+      const c = 0.3 + R;
+      return flat.ring.every((p, i) => Math.abs(Math.hypot(p.y - c, p.z) - Math.hypot(lean.ring[i].y - c, lean.ring[i].z)) < 1e-9 && Math.abs(p.x - lean.ring[i].x) < 1e-12);
+    })());
+    check('the same numbers every time', JSON.stringify(frameParts('hex', R, 0.3, tube, 0.2, 0.4)) === JSON.stringify(frameParts('hex', R, 0.3, tube, 0.2, 0.4)));
+  }
+
+  /* THE SIZE PRESETS read a hoop and a hex gate by their shape: the width is the preset's, and the height is the shape's
+   * own proportion of it, so a new hoop is RaceGOW's 28 inches and is said to be, not "custom". */
+  {
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+    const hoopDims = defaultDims('hoop', 'micro');
+    const hexDims2 = defaultDims('hexGate', 'micro');
+    check('a new hoop and a new hex gate are the 28 inch preset, read in their own shape',
+      matchingGatePreset(hoopDims, 'circle')?.id === 'racegow28' && matchingGatePreset(hexDims2, 'hex')?.id === 'racegow28');
+    check('and read as squares they are not: a hex gate is not a 28 by 24 inch gate, and a hoop of a square preset is one', matchingGatePreset(hexDims2) === null && matchingGatePreset(hoopDims)?.id === 'racegow28');
+    const dims = { ...hexDims2, clearW: 0.5, clearH: 0.4 };
+    applyGatePreset(dims, MICRO_GATE_PRESETS[0], 'hex');
+    check('applying a preset to a hex gate keeps it regular, and to a hoop keeps it round',
+      near(dims.clearW, MICRO_GATE_PRESETS[0].clearW) && near(dims.clearH, MICRO_GATE_PRESETS[0].clearW * Math.sqrt(3) / 2, 1e-9)
+      && (() => { const q = { ...hoopDims, clearW: 0.5, clearH: 0.4 }; applyGatePreset(q, MICRO_GATE_PRESETS[0], 'circle'); return near(q.clearH, q.clearW); })());
+    const sq = { ...defaultDims('gate', 'micro'), clearW: 0.5, clearH: 0.4 };
+    applyGatePreset(sq, MICRO_GATE_PRESETS[0]);
+    check('and a gate is given the preset\'s own height, as it always was', near(sq.clearW, MICRO_GATE_PRESETS[0].clearW) && near(sq.clearH, MICRO_GATE_PRESETS[0].clearH));
+    check('presetHeight is the one place the three proportions are written', presetHeight(MICRO_GATE_PRESETS[0], 'square') === MICRO_GATE_PRESETS[0].clearH
+      && presetHeight(MICRO_GATE_PRESETS[0], 'circle') === MICRO_GATE_PRESETS[0].clearW && near(presetHeight(MICRO_GATE_PRESETS[0], 'hex'), MICRO_GATE_PRESETS[0].clearW * Math.sqrt(3) / 2));
+  }
+
+  /* REPLACE WITH. A gate can become a hoop or a hex gate and back, in place. The width is what carries over,
+   * because every gate on a track is meant to be one size, and the height is the new shape's own proportion
+   * of it: a hoop is as high as it is wide and a hex gate is as high as a hexagon that wide is. */
+  {
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+    const d = createTrack('swap', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 4, y: 6 });
+    a.dims.clearW = 0.65;
+    a.dims.clearH = 0.65;
+    const order = d.sequence.map((q) => q.elementId).join();
+    replaceWith(d, [a.id], 'hoop');
+    check('a gate becomes a hoop in place, round, with the width it had', a.type === 'hoop' && near(a.dims.clearW, 0.65) && near(a.dims.clearH, 0.65) && d.sequence.map((q) => q.elementId).join() === order);
+    replaceWith(d, [a.id], 'hexGate');
+    check('and a hex gate of that width, as high as a hexagon that wide is, not as high as the gate was',
+      a.type === 'hexGate' && near(a.dims.clearW, 0.65) && near(a.dims.clearH, 0.65 * Math.sqrt(3) / 2, 1e-9), JSON.stringify(a.dims));
+    replaceWith(d, [a.id], 'gate');
+    check('and back to a gate that is a square of that width', a.type === 'gate' && near(a.dims.clearW, 0.65) && near(a.dims.clearH, 0.65));
+    replaceWith(d, [a.id], 'hexGate');
+    replaceWith(d, [a.id], 'hoop');
+    check('a hex gate becomes a hoop, and is round', a.type === 'hoop' && near(a.dims.clearH, a.dims.clearW));
+    const stack = placeOnTrack(d, 'doubleStack', { x: 5, y: 6 });
+    stack.dims.clearW = 0.6;
+    stack.dims.clearH = 0.7;
+    replaceWith(d, [stack.id], 'tower');
+    check('two openings of a size that are neither of them a hoop keep the size they had, both ways, as before', near(stack.dims.clearW, 0.6) && near(stack.dims.clearH, 0.7));
+    replaceWith(d, [stack.id], 'hoop');
+    check('a stack that becomes a hoop has one opening, round, and the passes at the other are gone',
+      stack.dims.levels === 1 && near(stack.dims.clearH, 0.6) && d.sequence.filter((q) => q.elementId === stack.id).every((q) => (q.apertureIndex ?? 0) === 0));
+    check('the track reads back as it was written', roundTripsCleanly(d) && deserialize(serialize(d)).repairs.length === 0);
+    check('a hoop is not flown to a pole or a barrier, and a pole is not a hoop', replaceWith(d, [a.id], 'pole').length === 0 && replaceWith(d, [a.id], 'barrier').length === 0);
+  }
+
+  /* THE CARD'S PLAN. A track's card and the board's thumbnail are drawn from a plan that is read off the
+   * document, and a piece the plan has no drawing for is left off the plate. */
+  {
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+    const d = createTrack('plan', 'micro');
+    const gate = placeOnTrack(d, 'gate', { x: 4, y: 5 });
+    const hoop = placeOnTrack(d, 'hoop', { x: 5.4, y: 5 });
+    const hex = placeOnTrack(d, 'hexGate', { x: 6.8, y: 5 });
+    const plan = planFromDocument(toPlain(d));
+    const mark = (el) => plan.marks.find((m) => m.type === el.type);
+    check('the plan carries a hoop\'s shape as circle and a hex gate\'s as hex, and a gate\'s carries none',
+      mark(hoop).shape === 'circle' && mark(hex).shape === 'hex' && !('shape' in mark(gate)) && plan.marks.length === 3);
+    check('the plan\'s shape table says what the builder\'s does, for every kind of opening there is',
+      Object.entries(PLAN_SHAPE).every(([t, sh]) => apertureShapeOf(t) === sh)
+      && Object.values(ELEMENTS).filter((e) => e.kind === KIND.APERTURE && apertureShapeOf(e.id) !== 'square').every((e) => PLAN_SHAPE[e.id] === apertureShapeOf(e.id)));
+    check('a hoop and a hex gate are in the flying order and numbered on the card as a gate is: three numbers, in order',
+      plan.numbers.length === 3 && plan.numbers.map((n) => n.n).join() === '1,2,3' && plan.path.length === 3);
+    const cw = mark(hoop).clearW;
+    const ch = mark(hoop).clearH;
+    const [hoopLevel] = isoApertures(mark(hoop), true);
+    check('a hoop is drawn in the isometric card as a ring of the builder\'s corners, standing on the plane of the gate, with the gate\'s own middle',
+      hoopLevel.pts.length === CIRCLE_SEGMENTS && near(hoopLevel.centre, ch / 2)
+      && hoopLevel.pts.every((q, i) => {
+        const [u, v] = outlineOf('circle', cw / 2, ch / 2)[i];
+        const yaw = mark(hoop).yaw;
+        return near(q[0], mark(hoop).x + -Math.sin(yaw) * u, 1e-9) && near(q[1], mark(hoop).y + Math.cos(yaw) * u, 1e-9) && near(q[2], hoopLevel.centre + v, 1e-9);
+      }));
+    const hexLevel = isoApertures(mark(hex), true)[0];
+    check('a hex gate is six corners, and a gate is the four it was',
+      hexLevel.pts.length === 6 && isoApertures(mark(gate), true)[0].pts.length === 4);
+    const legs = (m) => isoShapes({ ...m, z: 0, sillH: 0.5 }, true).filter((sh) => sh.pts.length === 2);
+    check('a hoop that hangs in the air stands on one leg, a hex gate on two, and a gate on two',
+      legs(mark(hoop)).length === 1 && legs(mark(hex)).length === 2 && legs(mark(gate)).length === 2, `${legs(mark(hoop)).length} ${legs(mark(hex)).length} ${legs(mark(gate)).length}`);
+    check('and on the floor none of them has a leg', [hoop, hex, gate].every((el) => isoShapes({ ...mark(el), z: 0, sillH: 0 }, true).filter((sh) => sh.pts.length === 2).length === 0));
+    check('the frame the card draws for a hoop is one closed ring and for a gate is its four sides',
+      isoShapes(mark(hoop), true)[0].pts.length === CIRCLE_SEGMENTS + 1 && isoShapes(mark(gate), true)[0].pts.length === 5);
+  }
+
+  /* THE BUILD SHEET. A hex gate is six pipes; a hoop is not pipe, so the sheet lists it as a thing to bring. */
+  {
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+    const d = createTrack('sheet', 'micro');
+    placeOnTrack(d, 'hexGate', { x: 4, y: 5 });
+    const one = membersOf(d);
+    check('a hex gate is six pipes, each from one corner of its frame to the next, and nothing else', one.length === 6
+      && one.every((m) => near(Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y, m.b.z - m.a.z), Math.hypot(one[0].b.x - one[0].a.x, one[0].b.y - one[0].a.y, one[0].b.z - one[0].a.z), 1e-9)),
+      `${one.length} members`);
+    const sheet = buildSheet(d);
+    check('and the sheet counts six pipes and six angled elbows for it, cut to the length a side of it is',
+      sheet.members === 6 && sheet.parts.fittings.some((f) => f.kind === 'angled elbow' && f.count === 6)
+      && (sheet.parts.sections.count + sheet.parts.cuts.reduce((n, c) => n + c.count, 0)) === 6, JSON.stringify(sheet.parts));
+    const raised = createTrack('raised', 'micro');
+    const rh = placeOnTrack(raised, 'hexGate', { x: 4, y: 5 });
+    rh.dims.sillH = 0.4;
+    check('a hex gate that hangs in the air stands on two more pipes, one under each end of its bottom side', membersOf(raised).length === 8);
+    const hoopTrack = createTrack('hoop', 'micro');
+    placeOnTrack(hoopTrack, 'hoop', { x: 4, y: 5 });
+    placeOnTrack(hoopTrack, 'hoop', { x: 6, y: 5 });
+    const hs = buildSheet(hoopTrack);
+    check('a hoop is not pipe: no member, no fitting, and it is listed as what to bring, once for each', membersOf(hoopTrack).length === 0
+      && hs.parts.fittings.length === 0 && hs.parts.other.some((o) => o.label === 'Hoop' && o.count === 2), JSON.stringify(hs.parts.other));
+    check('the sheet says so in its notes, and does not when there is no hoop',
+      hs.notes.some((n) => /hoop is not pipe/i.test(n)) && !buildSheet(d).notes.some((n) => /hoop is not pipe/i.test(n)));
+    check('a hoop and a hex gate are pieces on the sheet like any gate: a row, a key, and a height for the bottom of the hole',
+      hs.pieces.length === 2 && hs.pieces.every((p) => p.kind === KIND.APERTURE && p.heights.length === 1 && p.label === 'Hoop') && sheet.pieces[0].label === 'Hex gate');
+    check('a gate beside them is what it was: four pipes', membersOf((() => { const g = createTrack('g', 'micro'); placeOnTrack(g, 'gate', { x: 4, y: 5 }); return g; })()).length === 4);
+  }
+
+  /* BARS ALONG A RUN, which is how the builder draws a tube and the game draws the lit outline: one
+   * bar for each side of a closed shape, each lengthened at its ends so a corner is filled. */
+  {
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+    const sq = barsAlong([[1, 1], [-1, 1], [-1, -1], [1, -1]], 0.1);
+    check('a square of side 2 in bars 0.1 thick is four bars of 2.1, at the middle of each side, turned to it',
+      sq.length === 4 && sq.every((b) => near(b.len, 2.1)) && near(sq[0].x, 0) && near(sq[0].y, 1) && near(sq[0].angle, Math.PI)
+      && near(sq[1].x, -1) && near(sq[1].y, 0) && near(sq[1].angle, -Math.PI / 2) && near(sq[2].y, -1) && near(sq[2].angle, 0) && near(sq[3].x, 1) && near(sq[3].angle, Math.PI / 2),
+      JSON.stringify(sq));
+    const hexRun = outlineOf('hex', 1, Math.sqrt(3) / 2);
+    const hb = barsAlong(hexRun, 0.1);
+    check('a regular hexagon is six bars, each its side lengthened at both ends by half a bar times the tangent of half the turn, 0.0577 apiece',
+      hb.length === 6 && hb.every((b) => near(b.len, 1 + 2 * 0.05 * Math.tan(Math.PI / 6), 1e-9)), JSON.stringify(hb.map((b) => +b.len.toFixed(5))));
+    /* No corner is left as a notch: every point of the mitred outer corner is under some bar. */
+    let uncovered = 0;
+    for (const shapeName of ['circle', 'hex', 'square']) {
+      const run = outlineOf(shapeName, 0.8, shapeName === 'hex' ? 0.6928 : 0.8);
+      const t = 0.1;
+      const bars = barsAlong(run, t);
+      const outer = frameOutline(shapeName, 0.8 - 0, shapeName === 'hex' ? 0.6928 : 0.8, 0.05);
+      for (const [px, py] of shapeName === 'square' ? [[0.85, 0.85], [-0.85, 0.85], [-0.85, -0.85], [0.85, -0.85]] : outer) {
+        const under = bars.some((b) => {
+          const dx = px - b.x;
+          const dy = py - b.y;
+          const along = dx * Math.cos(b.angle) + dy * Math.sin(b.angle);
+          const across = -dx * Math.sin(b.angle) + dy * Math.cos(b.angle);
+          return Math.abs(along) <= b.len / 2 + 1e-9 && Math.abs(across) <= t / 2 + 1e-9;
+        });
+        if (!under && shapeName === 'square') {
+          uncovered += 1;
+        }
+      }
+    }
+    check('and a square\'s outer corners are under a bar, so nothing is notched', uncovered === 0, `${uncovered} corners`);
+    check('a run of fewer than three points is no bars, and the numbers are always finite',
+      barsAlong([], 0.1).length === 0 && barsAlong([[0, 0]], 0.1).length === 0 && barsAlong([[0, 0], [1, 0]], 0.1).length === 0
+      && ['circle', 'hex', 'square'].every((k) => barsAlong(outlineOf(k, 0.3, 0.2), 0.03).every((b) => Object.values(b).every(Number.isFinite))));
+  }
+
+  /* THE PANE: a fan of triangles from the middle to each corner, the box that holds the shape being 0 to 1 in uv. */
+  {
+    const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+    const area = (fan) => {
+      let a = 0;
+      for (let i = 0; i < fan.index.length; i += 3) {
+        const [p, q, r] = [0, 1, 2].map((k) => fan.position.slice(3 * fan.index[i + k], 3 * fan.index[i + k] + 2));
+        a += Math.abs((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])) / 2;
+      }
+      return a;
+    };
+    const hoop = paneFan('circle', 2, 2);
+    check('a round pane is a fan of twenty four triangles round a middle point, with a position and a uv for each point',
+      hoop.position.length === 3 * (CIRCLE_SEGMENTS + 1) && hoop.uv.length === 2 * (CIRCLE_SEGMENTS + 1) && hoop.index.length === 3 * CIRCLE_SEGMENTS);
+    check('its area is that of the twenty four sided shape it is: n over two a b sin of a step', near(area(hoop), (CIRCLE_SEGMENTS / 2) * Math.sin((2 * Math.PI) / CIRCLE_SEGMENTS), 1e-9), String(area(hoop)));
+    const hexFan = paneFan('hex', 2, 1.7);
+    check('a hex pane is six triangles, and its area is three quarters of the box that holds it', hexFan.index.length === 18 && near(area(hexFan), 0.75 * 2 * 1.7, 1e-9), String(area(hexFan)));
+    check('the middle is the middle of the box in uv, and no uv is outside the box',
+      near(hoop.uv[0], 0.5) && near(hoop.uv[1], 0.5) && hoop.uv.every((v) => v >= -1e-9 && v <= 1 + 1e-9) && hexFan.uv.every((v) => v >= -1e-9 && v <= 1 + 1e-9));
+    check('every index names a point that is there', [hoop, hexFan].every((f) => f.index.every((i) => Number.isInteger(i) && i >= 0 && i < f.position.length / 3)));
+  }
+}
+
 
 async function main() {
   if (process.argv.includes('--emit')) {
@@ -8292,6 +9013,8 @@ async function main() {
   suiteWhoopBadges();
   suiteWhoopPasses();
   suiteRoomParts();
+  suiteApertureShapes();
+  suiteHoopHex();
   await suiteShareLink();
   suiteBuildSheet();
   suiteImportFpv();

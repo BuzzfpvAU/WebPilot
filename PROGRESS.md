@@ -61419,3 +61419,170 @@ present). Against the code as it was before the whole whoop builder work (`31433
                              the shell's input), and `lint:catalog` (cannot run in this container). Nothing
                              was tried on a real phone or tablet, on a real GPU, or in a browser that is
                              not Chromium.
+
+## 2026-09-30 | builder | Whoop builder, Stage 4 continues: a hoop and a hex gate
+
+The fourth and fifth of the six parts the owner asked for on 2026-09-30 (the answers are recorded in the
+entry above and are not repeated). Decision 6, the board, is still unanswered and nothing in the LeaderBoard
+or landing repositories was touched; the simulator still refuses to publish a track that holds a part the
+board does not know, and the list now names five.
+
+### What was built
+
+An opening that is not a rectangle. **The shape is inscribed in the rectangle every opening already has**,
+so `clearW` and `clearH` stay what they were, the size of the box the opening fits in, and everything that
+reads a gate's size (the envelope, the rules, the sheet, the presets) reads a hoop the same way. What
+scores is what is left of the box: a line through the corner of the box that holds a hoop goes past the
+ring and does not count.
+
+- **`src/props/aperture.js` (new, pure, no Three.js).** The shapes (`square`, `circle` = the ellipse that
+  touches all four sides, `hex` = a point at each end of the width and a flat above and below, regular when
+  the height is the width times root three over two). `insideShape` and `clipToShape` (exact, not sampled:
+  a circle is a quadratic and a hexagon is four half planes, so a segment shorter than a step cannot slip
+  through). `frameOutline` (the run of tubes: a hex is its outline pushed out by the tube, a ring is 24
+  straight tubes each lying on the tangent of the ellipse at the middle of its step, so every tube is at
+  least a tube's radius from the hole for any two sizes), `frameParts` (the tubes, joints, posts and solids
+  as data), `barsAlong` and `paneFan` (what the renderers wrap in boxes and a pane). Every point on a circle
+  goes through `props/trig.js`, because the capsules made from it reach the physics.
+- **The elements (`elements.js`, `model.js`).** `hoop` and `hexGate`: kind aperture, no hotkey, on the
+  whoop palette after the horizontal gate and before the poles, and nowhere else. The shape is a property of
+  the type (`apertureShapeOf`), not a stored word, so no document has one to get wrong; an opening says it
+  only when it is not a square, so no gate's opening, structure, station or plan changes a byte. `levels`
+  is repaired to 1 (there is no stack of hoops). `unbuiltSides` means nothing for either; `unbuilt` still
+  takes the frame away.
+- **The race (`race.js`).** `openingHits` and `insideOpening` take the shape: the swept segment is clipped
+  against the rectangle as always and then exactly against the shape, and a square never reaches the second
+  clip. The hold (what stops one pass being credited twice) follows the shape too.
+- **The game (`scene.js`).** `shapedGate` builds the frame from `frameParts` (a cylinder and a capsule for
+  every tube from the same two points, a joint, a post under each lowest corner of a frame that hangs in the
+  air, on the stub every micro gate stands on). The floor is the sill, as it is under an upright gate that
+  builds no bottom member: a tube wholly under the floor is not built. The lit target follows the shape: the
+  outline is one bar for each side, the glow's band follows the hole's own edge (a separate shader for the
+  shaped, the square's is byte for byte what it was), the pane is a fan.
+- **The room, the plan, the animation (`view3d.js`, `share/plan.js`, `stage.js`).** Tubes, a pane in the
+  shape, posts; the card's plan draws them as gates (the top down view of a ring is a bar) and the
+  isometric card draws the ring and the hexagon; the exported animation draws the tubes, the joints, the feet
+  and a lit pane in the shape (made only for a track that has one, so a track of squares is the objects it
+  was).
+- **The inspector (`ui.js`).** One size, the width, called a diameter for a hoop and the width across the
+  points for a hex gate, with the height following the shape; no count of levels, no four sides to take
+  away; the preset row reads each in its own shape ("28 in across", "28 in across, 24.2 in high") and says
+  which is on; the lap strip marks the two passes as a ring and a hexagon.
+- **The rules (`warnings.js`).** A hoop and a hex gate are held to RaceGOW's limits by their width, and are
+  "the same size as a gate" when the width matches (a hex 28 in across the points is 24 in across the flats
+  and is still a 28 in gate).
+- **Replace with (`snap.js`).** A gate can become a hoop or a hex gate and back, in place. The width carries
+  over and the height is the new shape's proportion of it.
+- **The sheet (`buildsheet.js`).** A hex gate is six lengths of pipe and six angled elbows (and two legs when
+  it hangs above the floor); a hoop is not pipe, and is listed under "Other" and said to be something to bring.
+- **The importer (`importfpv.js`).** Their hoops and hexes were "a square gate of the same width"; they are
+  a hoop and a hex gate now. The one thing the file does not say, which way a hexagon's size is measured, is
+  read as across the points and the report says so.
+- **The board (`share/board.js`).** `BOARD_UNKNOWN_TYPES` names five; the sentence and the dialog name a hex
+  gate in two words.
+
+### Physics: no change (the answer to 5, again)
+
+`git diff --stat -- src/native dist configs vendor scripts/build-wasm.sh tests/goldens` is empty, as it was
+for the furniture. A hoop is a ring of `sim_world_capsule` calls and the world holds 49,152 shapes. It was
+flown, not only claimed:
+
+- **`npm run check:room` now has 71 checks (32 before).** The real `dist/sim.wasm` through a hoop, a hex gate
+  and a hoop that hangs in the air, built exactly as the game builds them: the document read by
+  `courseFromDocument`, the capsules from `frameParts`, the transform `scene.js` places every gate with, the
+  same `Colliders` and `uploadWorld`. Through the middle, three fifths of the way out, and across the low
+  part a little above the floor (the floor is the sill, so there is no bar there): not one step in contact.
+  Past the corner of the box that holds it, on a line that stays 0.23 m (hoop) and 0.15 m (hex) clear of every
+  tube: not in contact, and **the real `Race`, fed the trace the plant flew, does not score it**. Into the top
+  tube, and into the post under a hoop that hangs: touches. Every flight twice, identical to the bit.
+- **The real game.** After Fly this track on a track with a start, a hoop, a hex gate and a gate, the game's
+  collider set was 30 gate capsules (22 for the hoop, 5 for the hex gate, 3 for the gate) and 2 stubs, which
+  is what `frameParts` says, and the page reported no error. Pictures taken through the game's own harness
+  camera show the ring, the hexagon with its darker joints, a hoop on its post and a hex gate on two, and the
+  lit ring on the start gate. Run by hand, not part of a check.
+- **Mutations.** Six of `race.js` (no shape clip, the hold blind to the shape, the shape never passed, the
+  range not narrowed, a hex read as a circle in the clip and in the hold) and eight of `aperture.js` (no tube
+  offset on the ring, the hex offset inward, nothing buried, no post, the centre at the sill, the tilt
+  ignored, the two shapes swapped in the clip, sixteen segments): every one caught. The first pass of
+  mutations did not catch the hold reading a hex as a circle, so a test was written that flies to the corner
+  a circle holds and a hexagon does not.
+
+### Where this departs from the plan, and why
+
+- **24 straight tubes for a ring, not 16.** The plan said 16 to 24. A hoop is 2.4 m across as built and the
+  pilot flies close to it, and sixteen read as a polygon.
+- **The ring is circumscribed on tangent lines,** not scaled from a regular polygon. The first construction
+  (a circumscribed regular polygon scaled to the two sizes) put a tube 1.7 mm inside the hole of a 3 to 1
+  oval and 11 mm inside a thinner one with a fat tube, found by a numeric check written for it. Tangent lines
+  at the middle of each step are clear of the hole by construction, for any two sizes.
+- **One size field, not two.** A hoop is as high as it is wide and a hex gate as high as a hexagon that wide
+  is, so the inspector asks for the width and the height follows. The document still stores both, so a
+  hand edited oval reads, flies and draws correctly; the builder just does not make one.
+- **A hoop is not a gate for the sheet.** The plan said "a ring of capsules"; the sheet is a list of pipe to
+  buy, and a ring is not pipe.
+- **A hoop that hangs is stood on one post,** a hex gate on two, on the stub every micro gate stands on: my
+  choice, the designer's file says nothing about stands.
+
+### The tracks that exist are not touched
+
+Against the code as it was before the whole whoop builder work (`31433d8`), on this tree: the same report as
+the last stage, line for line. 431 documents: 390 identical in every respect, the same 41 differ (each a
+Stage 0 repair, named), 0 throw on either side.
+
+### What went wrong
+
+- **A first frame that intruded.** See above: the ring for an oval. The numeric check found it; the tangent
+  construction replaced it, and the frame tests now hold every shape and size to the clearance.
+- **Weak checks of mine.** A frame check written with `|| true` in it, a numbering check with a tautology,
+  and a centre check that compared a number to itself. Each was found on reading the diff and rewritten to
+  say something that can fail.
+- **One flaky check, which is not mine.** `a 300 element map is checked in well under a quarter second`
+  failed once, at 293 ms, while other work was using the machine. It passes 48 of 48 runs one at a time and
+  fails about one in twenty four when eight selftests run at once. It is an existing timing check; its
+  threshold was not touched.
+- **A default that broke a rule.** `hexGate` was given a level spacing of a square gate's, and the check that
+  every library default sits on a derived spacing caught it (`levelPitchFor(clearH)`).
+- **A helper that has no `dims`.** The first version of the new flow case read a hoop's sizes off
+  `elements(page)`, which does not carry them, and threw. It reads the document now.
+- **The chip marks.** The lap strip's kind marks (`tall`, `flat`, `pole`, `cone`) have never taken effect: the
+  general rule for the mark has two `:not()` and beats every specific one, so a tall gate is drawn as the same
+  8 px square as a gate. **Found, not fixed**: fixing it would change how every piece already on a strip
+  looks. The two new marks spell the `:not()`s out and do take effect (a ring and a hexagon).
+
+### Decisions for the owner (also asked in the reply)
+
+- **6, the board.** Still open, and now five parts long: a table, a chair, a banner, a hoop and a hex gate
+  (and the cube next). The board's `validate.js` (`PLAN_APERTURE`, `planFromDocument`) and its plan card have
+  to learn them, and it deploys first.
+- **Which way a designer's hexagon is measured.** Read as across the points. A real file with a hex gate in it
+  and its real size would settle it.
+- **Whether a hoop should stand on a post.** The look is mine.
+
+### RUN LOG
+
+    files                    src/props/aperture.js (new); src/trackbuilder/elements.js, model.js, snap.js,
+                             warnings.js, view3d.js, ui.js, buildsheet.js, stage.js, importfpv.js, schema.md,
+                             index.html, selftest.js; src/game/race.js, trackdoc.js; src/render/scene.js;
+                             src/share/plan.js, board.js; scripts/room-check.js, builder-flow-check.js;
+                             src/fresh.js (generated); the plan
+    self test                node src/trackbuilder/selftest.js: 1682 passed, 0 failed (1505 before; 177 new,
+                             written before the code they check)
+    physics                  npm run check:room: 71 passed, 0 failed (32 before); world-golden: all passed
+    browser check            npm run check:builder: all cases pass, exit 0, 397 assertions; a new case, "a
+                             hoop and a hex gate" (palette, placing by pointer, the room's tubes and panes,
+                             picking, the inspector, typing a diameter, the lap strip, replace with both
+                             ways and undo, the plan, Publish saying the board does not know them, the
+                             sheet), and the replace with case's list updated
+    device check            npm run lint:devices: PASS; lint:responsive: PASS; lint:boot: 9 of 9
+    the rest                micro:check exit 0; whoop:gates 21 of 21; check:path 12 passed; check:props all
+                             passed; lint:presets 4 of 4; lint:nouns PASS; lint:fc 33 of 33; lint:partners
+                             45 passed; lint:preload up to date (boot 127 modules, city 75, built 33; 239
+                             served); check:fresh 18 passed
+    animation                the real Export animation button on a track with two hoops and two hex gates
+                             (two of them raised): 96 frames, 512 by 512, no error from the page; the lit
+                             pane is the ring
+    dashes and non ASCII     none added (scanned over the diff)
+    not run                  `npm run verify` (no physics, plant, ABI or build change, and check:room and
+                             world-golden are the physics evidence), `shots.js` and a hand flight (offered at
+                             the end of the turn), `lint:input`, and `lint:catalog` (cannot run in this
+                             container). Nothing was tried on a real phone or tablet, or on a real GPU.

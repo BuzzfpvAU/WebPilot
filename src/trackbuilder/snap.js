@@ -23,7 +23,7 @@
  */
 
 import {
-  ELEMENTS, KIND, MICRO_PALETTE_ORDER, trackClassOf, docModeOf, defaultDims, defaultPitch, defaultZ,
+  ELEMENTS, KIND, MICRO_PALETTE_ORDER, trackClassOf, docModeOf, defaultDims, defaultPitch, defaultZ, apertureShapeOf,
 } from './elements.js';
 import {
   envelopeFor, GATE_OPENING_DEFAULT, GATE_SPACING_MIN, GATE_SPACING_MAX, GATE_SPACING_NOMINAL, inches,
@@ -38,6 +38,7 @@ import { applyFigure, defaultFigure } from './figures.js';
 import { applyAutoFaces, defaultYawFor, lastAnchorOf } from './faces.js';
 import { apertureFrame, wrapAngle } from './geometry.js';
 import { isRoomType } from '../props/room.js';
+import { HEX_HEIGHT_RATIO } from '../props/aperture.js';
 
 /* ------------------------------------------------------------------ */
 /* What is in frame                                                    */
@@ -774,7 +775,7 @@ export function rulerReading(a, b) {
  * clearance), so what would "keep its place" mean. A waypoint is not a piece.
  */
 const SWAP_GROUPS = [
-  ['gate', 'doubleStack', 'ladder', 'tower', 'diveGate'],
+  ['gate', 'doubleStack', 'ladder', 'tower', 'diveGate', 'hoop', 'hexGate'],
   ['pole', 'cone'],
   ['horizontalPole', 'barrier'],
 ];
@@ -833,6 +834,13 @@ export function replaceWith(doc, ids, type) {
     if (opening && opening.clearW > 0 && opening.clearH > 0) {
       el.dims.clearW = opening.clearW;
       el.dims.clearH = opening.clearH;
+      /* A hoop is as high as it is wide and a hex gate is as high as a hexagon that wide is. Where the
+       * piece was one of them, or becomes one, the width carries over and the height is the new type's
+       * own proportion of it; between two pieces that are neither, both sizes carry over as they did. */
+      const shape = apertureShapeOf(type);
+      if (shape !== 'square' || apertureShapeOf(from) !== 'square') {
+        el.dims.clearH = shape === 'hex' ? opening.clearW * HEX_HEIGHT_RATIO : opening.clearW;
+      }
     }
     if (pitchIsDefault) {
       el.pitch = defaultPitch(type, cls);

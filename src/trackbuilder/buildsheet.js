@@ -48,11 +48,12 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { KIND, frameSidesOf, isUnbuilt, labelOf } from './elements.js';
+import { KIND, apertureShapeOf, frameSidesOf, isUnbuilt, labelOf } from './elements.js';
 import { aperturesOf, apertureCenter, kindOf } from './model.js';
 import { sequenceNumbers } from './sequence.js';
 import { isRoomType, roomFootprint } from '../props/room.js';
 import { placedYaw } from '../props/solids.js';
+import { frameOutline } from '../props/aperture.js';
 import { apertureCorners, apertureFrame, gateSupportFeet } from './geometry.js';
 import {
   GATE_OPENING_MAX, PIPE_LEN_MAX, PIPE_LEN_MIN, PIPE_OD, inches,
@@ -111,6 +112,19 @@ export function membersOf(doc) {
     if (kindOf(el) !== KIND.APERTURE || isUnbuilt(el)) {
       continue;
     }
+    /*
+     * A HOOP IS NOT PIPE, and a hex gate is six lengths of it: one from each corner of the frame to the
+     * next, at the corners src/props/aperture.js gives the game, and two legs from the ends of its
+     * bottom side when it hangs above the floor.
+     */
+    const shape = apertureShapeOf(el);
+    if (shape === 'circle') {
+      continue;
+    }
+    if (shape === 'hex') {
+      hexMembers(out, el, tube);
+      continue;
+    }
     const f = apertureFrame(el.yaw, el.pitch);
     const sides = frameSidesOf(el);
     const levels = aperturesOf(el);
@@ -151,6 +165,29 @@ export function membersOf(doc) {
     });
   }
   return out;
+}
+
+/* The six pipes of a hex gate, and its legs. The frame is the hexagon through the centre lines of
+ * its pipes, which is the hole pushed out by half a pipe (frameOutline), so its corners are where
+ * the fittings are. */
+function hexMembers(out, el, tube) {
+  const ap = aperturesOf(el)[0];
+  const f = apertureFrame(el.yaw, el.pitch);
+  const c = apertureCenter(el, 0);
+  const at = ([x, y]) => add(c, add(mul(f.widthAxis, x), mul(f.heightAxis, y)));
+  const run = frameOutline('hex', ap.clearW / 2, ap.clearH / 2, tube / 2).map(at);
+  for (let i = 0; i < run.length; i += 1) {
+    out.push({ a: run[i], b: run[(i + 1) % run.length], from: el.id });
+  }
+  /* Legs: down from the lowest corners, the way the game and the room stand it. */
+  const lowest = Math.min(...run.map((p) => p.z));
+  if (lowest - el.position.z - tube / 2 > 0.02) {
+    for (const p of run) {
+      if (Math.abs(p.z - lowest) <= 1e-6) {
+        out.push({ a: { x: p.x, y: p.y, z: el.position.z }, b: p, from: el.id });
+      }
+    }
+  }
 }
 
 /*
@@ -521,7 +558,7 @@ export function buildSheet(doc, opts = {}) {
     } else if (el.type === 'horizontalPole') {
       const k = `${round((el.dims.width || 0) / IN, 2)}|${round(el.position.z / IN, 2)}`;
       bars.set(k, { count: (bars.get(k)?.count ?? 0) + 1, length: el.dims.width || 0, height: el.position.z });
-    } else if (el.type === 'cone' || el.type === 'barrier' || isRoomType(el.type)) {
+    } else if (el.type === 'cone' || el.type === 'barrier' || isRoomType(el.type) || apertureShapeOf(el) === 'circle') {
       other.set(labelOf(el.type, 'micro'), (other.get(labelOf(el.type, 'micro')) ?? 0) + 1);
     } else if (kindOf(el) === KIND.START) {
       other.set('Start pads', (other.get('Start pads') ?? 0) + (el.dims.pads || 1));
@@ -558,6 +595,9 @@ export function buildSheet(doc, opts = {}) {
       'A junction of more than three pipes that is not a cross (a stack meeting the corner of a cube) is not one fitting: build it from a cross or a tee and a short pipe.',
       ...(physical.some((el) => isRoomType(el.type))
         ? ['A table, a chair or a banner is furniture, not pipe: put one where the room has it, at the position and the heading given. A chair faces the way its heading says, with its back behind it.']
+        : []),
+      ...(physical.some((el) => apertureShapeOf(el) === 'circle')
+        ? [`A hoop is not pipe: bring a ring ${inches(aperturesOf(physical.find((el) => apertureShapeOf(el) === 'circle'))[0].clearW)} across inside, and a stand for any that hangs above the floor. Nothing is cut for it.`]
         : []),
     ],
   };

@@ -293,6 +293,8 @@ Each row's `kind` decides everything the tool does with it.
 | `ladder` | R | aperture | yes, once per opening | same. Three stacked 5x5s. The palette calls it Triple stack. |
 | `tower` | T | aperture | yes, once per opening | same |
 | `diveGate` | D | aperture | yes, once per opening | same |
+| `hoop` | none | aperture | yes, once | same, with `levels` always 1. A round gate: the opening is the ellipse that touches all four sides of the `clearW` by `clearH` box, a circle when the two are equal, which is what a new one is. The whoop palette's only. See **The shape of an opening**. |
+| `hexGate` | none | aperture | yes, once | same, with `levels` always 1. A six sided gate: a point at each end of `clearW` and a flat above and below, so it is a regular hexagon when `clearH` is `clearW` times the square root of three over two, which is what a new one is. The whoop palette's only. See **The shape of an opening**. |
 | `barrier` | B | obstacle | **never** | `width depth height` |
 | `flag` | F | marker | yes, with a pass side | `height poleRadius clearance` |
 | `cone` | C | marker | yes, with a pass side | `height baseRadius clearance` |
@@ -309,8 +311,9 @@ Each row's `kind` decides everything the tool does with it.
 The keys are the palette's, and each palette has its own: the five inch
 palette, the whoop palette and a map's palette. `pole` and `horizontalPole`
 are on the whoop's and a map's, not the five inch's, and a key that is not on
-the palette in front of the author does nothing. `table`, `chair` and `banner`
-are on the whoop's alone and have no key at all: the letters ran out.
+the palette in front of the author does nothing. `table`, `chair`, `banner`,
+`hoop` and `hexGate` are on the whoop's alone and have no key at all: the
+letters ran out.
 
 **The furniture is sized by three numbers and built of boxes.** A `table`, a
 `chair` and a `banner` hold `width`, `depth` and `height` exactly as a
@@ -323,6 +326,25 @@ boxes, so they turn in quarter turns and the heading is snapped to the nearest
 one wherever they are drawn or flown: a document that says 40 degrees is a
 table standing at 0. A track that holds one is not published to the board until
 the board knows them.
+
+**The shape of an opening.** Every opening that ever was is a rectangle, and
+a `hoop` and a `hexGate` are not. Nothing is stored for it: the shape is a
+property of the `type`, so a document has no word to get wrong, and `clearW`
+and `clearH` stay what they were, the size of the box the opening is inscribed
+in. That is why the envelope, the rules, the build sheet and the presets read a
+hoop the way they read a gate. What scores is what is left of the box: a line
+through the corner of the box that holds a hoop goes past the ring and does not
+count. The frame is a run of straight tubes on the outline of the shape (24 for
+a hoop, 6 for a hex gate), each tube's inner surface on the edge of the hole,
+and where it stands and what it is made of is worked out in
+`src/props/aperture.js` from the size alone, which is the one place the game,
+the room and a flight check all read. The floor is the sill, as it is under an
+upright gate: a tube wholly under the floor is not built, and a frame whose
+lowest tube is more than two centimetres above the floor stands on a post under
+each lowest corner. A reader repairs `levels` to 1, since there is no stack of
+hoops. `frameSides` and `unbuiltSides` mean nothing for either, which has no
+four sides; `unbuilt` still takes the frame away and leaves the opening. A
+track that holds one is not published to the board until the board knows them.
 
 A map also holds the freestyle assets, of two more kinds, `structure` and
 `zone`, and roads and vehicles, of two more, `road` and `vehicle`; they are

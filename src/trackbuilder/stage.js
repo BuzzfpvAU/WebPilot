@@ -67,6 +67,8 @@ import { PIPE_OD as RACEGOW_PIPE_OD } from './racegow.js';
 import { aperturesOf, elementById, apertureCenter } from './model.js';
 import { apertureFrame, apertureCorners, clamp } from './geometry.js';
 import { isRoomType, roomWorldBoxes } from '../props/room.js';
+/* A hoop and a hex gate: the run of tubes round the hole, and a pane in its shape. */
+import { frameOutline, paneFan } from '../props/aperture.js';
 
 const ALL_SIDES = { top: true, bottom: true, left: true, right: true };
 
@@ -551,6 +553,15 @@ function paneCorners(doc, knot) {
   return apertureCorners(apertureCenter(el, idx), el.yaw, el.pitch, ap.clearW, ap.clearH);
 }
 
+/*
+ * The shape of an element's opening. Read through the namespace, for the reason given at the import:
+ * a copy of elements.js from before hoops existed has no such function, and every opening in it is a
+ * square.
+ */
+function shapeOfEl(el) {
+  return typeof elementLib.apertureShapeOf === 'function' ? elementLib.apertureShapeOf(el) : 'square';
+}
+
 export function buildStage(THREE, doc, path, {
   size = 512, width = size, height = size, camera: fixed = null,
   /*
@@ -661,6 +672,44 @@ export function buildStage(THREE, doc, path, {
       return;
     }
     const base = el.position.z;
+    /*
+     * A HOOP OR A HEX GATE: a run of tubes round the shape, a joint at each corner, and a post and
+     * a foot under each of the lowest corners. A tube wholly under the floor is not drawn, as the
+     * world does not build it. The same maths as the room and the game, so the pipe stands where
+     * they say the frame is.
+     */
+    const shape = shapeOfEl(el);
+    if (shape !== 'square') {
+      const ap = levels[0];
+      const centre = apertureCenter(el, 0);
+      const f = apertureFrame(el.yaw, el.pitch);
+      const run = frameOutline(shape, ap.clearW / 2, ap.clearH / 2, tubeOD / 2).map(([x, y]) => ({
+        x: centre.x + f.widthAxis.x * x + f.heightAxis.x * y,
+        y: centre.y + f.widthAxis.y * x + f.heightAxis.y * y,
+        z: centre.z + f.widthAxis.z * x + f.heightAxis.z * y,
+      }));
+      for (let i = 0; i < run.length; i += 1) {
+        const a = run[i];
+        const b = run[(i + 1) % run.length];
+        if (Math.max(a.z, b.z) - base > 1e-6) {
+          pipes.push(pipeGeometry(THREE, a, b, tubeR));
+        }
+        if (a.z - base > -tubeOD) {
+          pipes.push(ballGeometry(THREE, a, jointR));
+        }
+      }
+      const lowest = Math.min(...run.map((p) => p.z));
+      for (const p of run) {
+        if (Math.abs(p.z - lowest) > 1e-6) {
+          continue;
+        }
+        if (p.z - base > GROUND_EPS) {
+          pipes.push(pipeGeometry(THREE, { x: p.x, y: p.y, z: base }, p, tubeR));
+        }
+        addFoot({ x: p.x, y: p.y, z: base });
+      }
+      return;
+    }
     /*
      * The four sides, as the builder's preview and the race field read them
      * (FRAME_SIDES in elements.js). The corners below run c0 low left, c1 low
@@ -1087,6 +1136,21 @@ export function buildStage(THREE, doc, path, {
   pane.visible = false;
   pane.frustumCulled = false;
   track.add(pane);
+  /*
+   * A HOOP'S AND A HEX GATE'S PANE is the shape of its opening: a fan of triangles from the middle
+   * (src/props/aperture.js), rewritten the same way the quad is. Only a track that has one of them
+   * makes it, so a track of squares is exactly the objects it was.
+   */
+  let shapedPane = null;
+  if (doc.elements.some((e) => shapeOfEl(e) !== 'square')) {
+    const shapedGeo = keep(new THREE.BufferGeometry());
+    shapedGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * 40), 3));
+    shapedPane = new THREE.Mesh(shapedGeo, paneMat);
+    shapedPane.renderOrder = 3;
+    shapedPane.visible = false;
+    shapedPane.frustumCulled = false;
+    track.add(shapedPane);
+  }
 
   const ribbonR = Math.max(
     clamp(RIBBON_R_PER_METRE * radius, RIBBON_R_MIN, RIBBON_R_MAX),
@@ -1220,6 +1284,9 @@ export function buildStage(THREE, doc, path, {
     paneAt = knotIndex;
     const knot = knotIndex >= 0 ? path.knots[knotIndex] : null;
     const corners = knot && knot.seq ? paneCorners(doc, knot) : null;
+    if (shapedPane) {
+      shapedPane.visible = false;
+    }
     if (!corners) {
       pane.visible = false;
       return;
@@ -1231,6 +1298,34 @@ export function buildStage(THREE, doc, path, {
     const nx = (-t.x / len) * 0.02;
     const ny = (-t.y / len) * 0.02;
     const nz = (-t.z / len) * 0.02;
+    const el = shapedPane ? elementById(doc, knot.seq.elementId) : null;
+    const shape = el ? shapeOfEl(el) : 'square';
+    if (el && shape !== 'square' && knot.role === 'aperture') {
+      const levels = aperturesOf(el);
+      const idx = Math.min(Math.max(0, knot.seq.apertureIndex ?? 0), levels.length - 1);
+      const ap = levels[idx];
+      const centre = apertureCenter(el, idx);
+      const f = apertureFrame(el.yaw, el.pitch);
+      const fan = paneFan(shape, ap.clearW, ap.clearH);
+      const pos = shapedPane.geometry.getAttribute('position');
+      for (let i = 0; i < fan.position.length / 3; i += 1) {
+        const x = fan.position[3 * i];
+        const y = fan.position[3 * i + 1];
+        pos.setXYZ(
+          i,
+          centre.x + f.widthAxis.x * x + f.heightAxis.x * y + nx,
+          centre.y + f.widthAxis.y * x + f.heightAxis.y * y + ny,
+          centre.z + f.widthAxis.z * x + f.heightAxis.z * y + nz,
+        );
+      }
+      pos.needsUpdate = true;
+      shapedPane.geometry.setIndex(fan.index);
+      shapedPane.geometry.setDrawRange(0, fan.index.length);
+      shapedPane.geometry.computeBoundingSphere();
+      shapedPane.visible = true;
+      pane.visible = false;
+      return;
+    }
     for (let i = 0; i < 4; i += 1) {
       panePos.setXYZ(i, corners[i].x + nx, corners[i].y + ny, corners[i].z + nz);
     }

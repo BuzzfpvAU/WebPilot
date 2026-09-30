@@ -264,7 +264,37 @@ const LEVELS = {
   flaggedDoubleStack: 2,
   ladder: 3,
   tower: 2,
+  hoop: 1,
+  hexGate: 1,
 };
+
+/*
+ * THE SHAPE OF AN OPENING THAT IS NOT A SQUARE. A hoop is round and a hex gate has six sides, and the
+ * card draws them so. It is a table of its own and not an import because this file has no imports:
+ * the board's iframe and the game's menus both load it as it stands. The selftest holds it to
+ * src/trackbuilder/elements.js, which is the copy of record. Exported for that.
+ */
+export const PLAN_SHAPE = { hoop: 'circle', hexGate: 'hex' };
+
+/*
+ * The corners of a shape in its box, x across and y up from the middle, the same points
+ * src/props/aperture.js's outlineOf gives (the selftest holds the two together): a ring is twenty
+ * four straight sides with a corner at the right hand end of its width, and a hexagon has a point at
+ * each end of its width and a flat above and below. This is a picture, so the ordinary sine will do.
+ */
+function planOutline(shape, halfW, halfH) {
+  if (shape === 'circle') {
+    const out = [];
+    for (let i = 0; i < 24; i += 1) {
+      const a = (2 * Math.PI * i) / 24;
+      out.push([halfW * Math.cos(a), halfH * Math.sin(a)]);
+    }
+    return out;
+  }
+  return [
+    [halfW, 0], [halfW / 2, halfH], [-halfW / 2, halfH], [-halfW, 0], [-halfW / 2, -halfH], [halfW / 2, -halfH],
+  ];
+}
 
 /*
  * The ladders the grid and the scale bar choose a step from, and the three
@@ -887,7 +917,7 @@ export function drawPlan(canvas, plan, options = {}) {
  */
 const PLAN_SKIP = new Set(['label', 'waypoint']);
 const PLAN_APERTURE = new Set([
-  'gate', 'flaggedGate', 'doubleStack', 'flaggedDoubleStack', 'ladder', 'tower', 'diveGate',
+  'gate', 'flaggedGate', 'doubleStack', 'flaggedDoubleStack', 'ladder', 'tower', 'diveGate', 'hoop', 'hexGate',
 ]);
 
 function isObject(value) {
@@ -981,6 +1011,9 @@ export function planFromDocument(doc) {
        * and not a box around it. Undefined on every ordinary gate, which
        * keeps a plan the same shape it was before this existed. */
       unbuilt: item.unbuilt === true ? true : undefined,
+      /* A hoop's is 'circle' and a hex gate's is 'hex'. Not there at all
+       * on a gate, for the same reason. */
+      ...(PLAN_SHAPE[type] ? { shape: PLAN_SHAPE[type] } : {}),
     });
   }
   const path = [];
@@ -1129,7 +1162,7 @@ function isoProjector(marks) {
  * card draws, and the lit pane the travelling ribbon puts on the opening it
  * is flying at.
  */
-function isoApertures(mark, small) {
+export function isoApertures(mark, small) {
   const cw = mark.clearW || (small ? 0.711 : 1.524);
   const ch = mark.clearH || cw;
   const lp = mark.levelPitch || (ch + 0.034);
@@ -1144,9 +1177,23 @@ function isoApertures(mark, small) {
   /* A dive gate's plane lies flat, so its opening is a square on the ground
    * plane rather than a rectangle standing on it. */
   const flat = Math.abs(mark.pitch || 0) > 0.7;
+  const shaped = mark.shape === 'circle' || mark.shape === 'hex' ? mark.shape : null;
   const out = [];
   for (let i = 0; i < levels; i += 1) {
     const sill = base + s0 + i * lp;
+    /* A hoop or a hex gate: the corners of its own outline, in the plane a gate's rectangle is in. */
+    if (shaped) {
+      const z = sill + ch / 2;
+      const outline = planOutline(shaped, cw / 2, ch / 2);
+      out.push({
+        flat,
+        centre: z,
+        pts: flat
+          ? outline.map(([u, v]) => [mark.x + wx * u + hx * v, mark.y + wy * u + hy * v, z])
+          : outline.map(([u, v]) => [mark.x + wx * u, mark.y + wy * u, z + v]),
+      });
+      continue;
+    }
     if (flat) {
       const z = sill + ch / 2;
       out.push({
@@ -1177,7 +1224,7 @@ function isoApertures(mark, small) {
 /* The world geometry of one element, as a list of polylines. Everything the
  * card draws is a line: a frame is its opening's rectangle and its legs, a
  * pole is a stick, a bar is a span on two legs. */
-function isoShapes(mark, small) {
+export function isoShapes(mark, small) {
   const cw = mark.clearW || (small ? 0.711 : 1.524);
   const ch = mark.clearH || cw;
   const lp = mark.levelPitch || (ch + 0.034);
@@ -1207,9 +1254,12 @@ function isoShapes(mark, small) {
     /* The legs, from the ground to the lowest opening, so an elevated gate
      * stands on something instead of floating. */
     if (s0 > 0.02 || base > 0.02) {
-      for (const s of [-1, 1]) {
-        const px = mark.x + (s * wx * cw) / 2;
-        const py = mark.y + (s * wy * cw) / 2;
+      /* A hoop hangs on one leg under its lowest point, a hex gate on two under the ends of its
+       * bottom side, and a gate on two at the foot of its sides. */
+      const feet = mark.shape === 'circle' ? [0] : (mark.shape === 'hex' ? [-0.25, 0.25] : [-0.5, 0.5]);
+      for (const s of feet) {
+        const px = mark.x + s * wx * cw;
+        const py = mark.y + s * wy * cw;
         out.push({ pts: [[px, py, 0], [px, py, base + s0]], colour: C.gate });
       }
     }
