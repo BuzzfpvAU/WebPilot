@@ -60686,3 +60686,8 @@ main as much as for this branch.
     input:selftest          316 passed (main's 24 new ones included)
     lint:input              merged tree: 184 of 185, then 185 of 185; main's tip: 185 of 185;
                             the one failing check is main's race, as above
+
+    exporter, again         the eight GIFs re-exported through the real button on the merged tree
+                            (after the reader change and the merge, which came after the first
+                            batch): 8 of 8 byte identical to the pre-work build's again, no error
+                            from the page in any
