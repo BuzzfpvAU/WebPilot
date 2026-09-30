@@ -9191,7 +9191,11 @@ export async function boot({ loading, bootStart, mapId }) {
       ui.paintFcAttitude();
     }
     if (touch) {
-      const touchOn = mode === 'flight' && ui.screen === 'flight' && !input.firstGamepad();
+      /* Nor while a stick key has taken the sticks from the thumbs: the
+       * plates go away and the ghost gimbals come, exactly as on a desktop,
+       * until a finger lands. See InputManager.takeKeys. */
+      const touchOn = mode === 'flight' && ui.screen === 'flight' && !input.firstGamepad()
+        && input.hand !== 'keys';
       /*
        * The one-time thumb-rates hand-off, at the first moment touch is
        * actually about to fly. A fresh touch profile was already seeded

@@ -24,10 +24,11 @@
  * touch emulation on covers the thumb sticks, and a third with no radio at
  * all flies a real race on the keys. A fourth is Safari 27 on a Mac with a
  * radio the browser will not list, which is bug-616cc604, and a fifth is a
- * TX15 flown and paused, which is bug-2d93629e. Two more walk the
- * builder's Fly this map into the air, and a linked map that fails to load,
- * and the last walk the gate's Map builder card into the builder and its
- * chooser.
+ * TX15 flown and paused, which is bug-2d93629e. A sixth is a touchscreen
+ * laptop with no radio, flown on its keys and on its glass, which is
+ * bug-d1d3f4fb. Two more walk the builder's Fly this map into the air, and a
+ * linked map that fails to load, and the last walk the gate's Map builder
+ * card into the builder and its chooser.
  *
  * Not part of `npm run verify`: this says nothing about the flight model.
  * Same shape as lint:shell. Run it on a change to src/input, to the
@@ -149,6 +150,23 @@ try {
   st.fullscreenFly = false;
   localStorage.setItem(k, JSON.stringify(st));
 } catch (e) { /* Storage refused. The page then meets an uncalibrated radio and says so. */ }`;
+
+/*
+ * The Chromebook pilot of bug-d1d3f4fb: a touchscreen laptop, 1366 by 768, no
+ * radio, a five inch on the built map. The page is booted with touch emulation
+ * on, so navigator reports touch points and the thumb plates mount, which is
+ * the whole of what made the keyboard dead there.
+ */
+const TOUCH_LAPTOP_SEED = `try {
+  const k = ${JSON.stringify(SETTINGS_KEY)};
+  const s = JSON.parse(localStorage.getItem(k) || '{}');
+  s.graphics = 'low';
+  s.graphicsAuto = false;
+  s.airframe = '5inch';
+  s.map = 'built';
+  localStorage.setItem(k, JSON.stringify(s));
+  localStorage.setItem('webfpv.airhint.v2', '1');
+} catch (e) { /* Storage refused. The flight then fails to start, and says so. */ }`;
 
 /*
  * The keyboard pilot: no radio, no touch, on the whoop, with one shipped
@@ -1431,6 +1449,89 @@ async function touchPage(page) {
   check('one arrow right puts it back', await ev("return ui.settings.stickMode === 2 && input.throttleKeys.up === 'KeyW';"));
 }
 
+async function touchLaptopPage(page) {
+  const ev = (expr) => page.evaluate(`(() => { const ui = window.__ui; const input = window.__input; ${expr} })()`);
+  const snap = `return JSON.stringify({ ch: input.channels, source: input.source, hand: input.hand,
+    overlay: document.getElementById('ui').classList.contains('touch-fly-on'), touchPrimary: input.isTouchPrimary(),
+    keyboardPrimary: input.isKeyboardPrimary() });`;
+  /* A key held until the page has answered it, and sampled while it is down.
+   * Not for a fixed time: the keyboard's hold clock advances at most 40 ms a
+   * poll, so on a busy machine 400 ms of wall time is well under 400 ms of
+   * hold, and a fixed wait reads a smaller stick than the same key on a quiet
+   * one (0.179 against 0.34 in one run). What is asked is that the keyboard
+   * flies at all, so the wait is for the channel and it is generous. */
+  const hold = async (code, answered) => {
+    const info = keyInfo(code);
+    await page.cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...info }, page.sessionId);
+    await page.until(`(() => { const input = window.__input; return ${answered}; })()`, 4000).catch(() => {});
+    const during = JSON.parse(await ev(snap));
+    await page.cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...info }, page.sessionId);
+    return during;
+  };
+  /* A real finger, through the browser's own touch input, so the page gets
+   * a pointerdown of type touch and not a synthetic one. */
+  const finger = (type, x, y) => page.cdp.send('Input.dispatchTouchEvent',
+    { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] }, page.sessionId);
+
+  /* --------------------------------------------------------------------
+   * 9. A touchscreen laptop. bug-d1d3f4fb, "keyboard doesn't work it when I
+   *    press the keboard it doesn't move anything": a Chromebook, 1366 by
+   *    768, Chrome 152, no radio, and 93 seconds flown on the thumb plates
+   *    with none on the keys. The plates mount wherever navigator reports
+   *    touch points and poll() took their branch and never read a key.
+   *    Measured on this page before the fix, holding W, the right arrow and
+   *    D with the plates up: every channel read 0. The same page with touch
+   *    emulation off read 0.34 for each.
+   * ------------------------------------------------------------------ */
+  section('a touchscreen laptop: the keys fly with the thumb plates up, and the sticks pass from hand to hand: bug-d1d3f4fb');
+  await page.until("(() => { const m = window.__map(); return m.id === 'built' && m.ready; })()", 120000);
+  await ev(`${PAST_GATE} ui.mode = 'freestyle'; ui.show('title'); ui.act('fly'); return 1;`);
+  await page.until("window.__ui.screen === 'flight' && window.__craftState().mode === 'flight'", 60000);
+  await page.sleep(800);
+  const start = JSON.parse(await ev(snap));
+  check('in flight the thumb plates are up and the thumbs have the sticks, before any key is pressed',
+    start.overlay && start.hand === 'thumbs' && start.touchPrimary && start.source === 'the touch sticks', JSON.stringify(start));
+
+  const w = await hold('KeyW', 'input.channels.throttle > 0.25');
+  check('W raises the throttle: the keyboard flies, with the plates up when it was pressed',
+    w.source === 'the keyboard' && w.ch.throttle > 0.25, JSON.stringify(w));
+  await page.sleep(300);
+  const right = await hold('ArrowRight', 'input.channels.roll > 0.2');
+  const yaw = await hold('KeyD', 'input.channels.yaw > 0.2');
+  check('the right arrow rolls and D yaws',
+    right.ch.roll > 0.2 && yaw.ch.yaw > 0.2, JSON.stringify({ roll: right.ch.roll, yaw: yaw.ch.yaw }));
+  await page.sleep(300);
+  const keys = JSON.parse(await ev(snap));
+  check('the plates go away and the keyboard is the primary, as on a desktop',
+    !keys.overlay && !keys.touchPrimary && keys.keyboardPrimary && keys.hand === 'keys', JSON.stringify(keys));
+
+  const before = keys.ch.throttle;
+  await finger('touchStart', 683, 300);
+  await page.sleep(500);
+  await finger('touchEnd');
+  await page.until("document.getElementById('ui').classList.contains('touch-fly-on')", 3000).catch(() => {});
+  const back = JSON.parse(await ev(snap));
+  check('a finger on the glass brings the plates back, and the thumbs are the source again',
+    back.overlay && back.hand === 'thumbs' && back.touchPrimary && back.source === 'the touch sticks', JSON.stringify(back));
+  check('at the throttle the keys left, with no punch at the change of hand',
+    Math.abs(back.ch.throttle - before) < 0.05, `${before} -> ${back.ch.throttle}`);
+
+  const zone = JSON.parse(await ev(`const r = document.querySelector('.touch-zone-right').getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });`));
+  await finger('touchStart', zone.x, zone.y);
+  await page.sleep(150);
+  await finger('touchMove', zone.x + 90, zone.y);
+  await page.sleep(250);
+  const drag = JSON.parse(await ev(snap));
+  await finger('touchEnd');
+  check('and a thumb on the plate flies it: roll follows the drag',
+    drag.ch.roll > 0.2 && drag.source === 'the touch sticks', JSON.stringify(drag));
+
+  const again = await hold('KeyD', 'input.channels.yaw > 0.2');
+  check('and a stick key takes the sticks again, the other way',
+    again.hand === 'keys' && again.source === 'the keyboard' && again.ch.yaw > 0.2, JSON.stringify(again));
+}
+
 async function keyboardPage(page) {
   const ev = (expr) => page.evaluate(`(() => { const ui = window.__ui; const input = window.__input; ${expr} })()`);
   /* A key held for real wall time, which is what the keyboard's hold clock
@@ -2104,6 +2205,16 @@ async function main() {
     await touchPage(page);
     const uncaught2 = page.errors.filter((e) => e.startsWith('uncaught:'));
     check('no uncaught exception on the touch page', uncaught2.length === 0, uncaught2.slice(0, 3).join(' | '));
+    await page.close();
+    page = null;
+
+    console.log('\nbooting the shell as a touchscreen laptop, a Chromebook with no radio');
+    page = await bootPage({
+      touch: true, width: 1366, height: 768, seed: [TOUCH_LAPTOP_SEED],
+    });
+    await touchLaptopPage(page);
+    const uncaughtL = page.errors.filter((e) => e.startsWith('uncaught:'));
+    check('no uncaught exception on the touch laptop page', uncaughtL.length === 0, uncaughtL.slice(0, 3).join(' | '));
     await page.close();
     page = null;
 

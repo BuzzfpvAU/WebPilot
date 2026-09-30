@@ -34,6 +34,14 @@
  * reports touch points. Menus never see these zones; the overlay is shown
  * in flight and hidden everywhere else by the shell.
  *
+ * A TOUCHSCREEN LAPTOP KEEPS ITS KEYBOARD TOO, BY HAND OVER. A stick key
+ * takes the sticks from the plates (InputManager.takeKeys) and the shell puts
+ * the plates away; a finger on the glass takes them back (takeThumbs) and
+ * sets the sticky throttle where the keys left the collective, through
+ * setThrottle below. Until bug-d1d3f4fb this file said the keyboard "still
+ * works" and it did not: the input manager took this source's branch and
+ * never read a key.
+ *
  * Channel signs are the keyboard's, which are the radio's: yaw and roll
  * positive rightward, throttle 0 at the bottom of the plate, and stick
  * forward is NEGATIVE pitch, the same sign the up arrow feeds and
@@ -78,8 +86,9 @@ const TRAVEL_FRACTION = 0.72;
 /*
  * Whether this device wants thumb sticks at all. Touch points are the
  * signal: a phone and a tablet report them, a desktop does not, and a
- * touchscreen laptop reports them and ALSO keeps its keyboard, which
- * still works because the zones only answer to touch pointers.
+ * touchscreen laptop reports them and ALSO keeps its keyboard: a stick key
+ * takes the sticks from the plates and a touch takes them back, see
+ * InputManager.hand.
  */
 export function touchWanted() {
   try {
@@ -317,6 +326,14 @@ export function mountTouchSticks({ onPause } = {}) {
         stick.nub.style.left = `${50 + ch[map.horiz] * 50}%`;
         stick.nub.style.top = `${50 - vert * 50}%`;
       }
+    },
+
+    /* The keys had the sticks and a finger has landed: the sticky throttle
+     * starts at the collective the keys left, so the hand change is not a
+     * punch. Only the level moves; no grip is made, because the plates were
+     * hidden and this finger is what wakes them. */
+    setThrottle(v) {
+      ch.throttle = clamp(Number(v) || 0, 0, 1);
     },
 
     /* A fresh craft gets fresh sticks, throttle included: resetCraft
