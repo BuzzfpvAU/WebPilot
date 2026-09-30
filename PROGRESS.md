@@ -61724,6 +61724,9 @@ same `obstacle()` and `tiltedGate()`. It was flown, not only claimed:
   intended change and were brought up to date.
 - **Displaced comments.** Two of my insertions sat between an existing doc comment and its function. Found on
   reading the diff.
+- **A stale list, seen straight after the commit.** The list of served modules (`src/fresh.js`) is made from the files
+  git tracks, so regenerating it before `git add` left the new module out. `lint:preload` said so after the commit
+  and a second commit fixed it. The order is: add, regenerate, check, commit.
 - **Still there, not mine, not fixed.** The lap strip's kind marks (`tall`, `flat`, `pole`, `cone`) have never taken
   effect; one timing check in the self test (a 300 element map) fails about one run in twenty four when eight run at once.
 
@@ -61764,7 +61767,7 @@ same `obstacle()` and `tiltedGate()`. It was flown, not only claimed:
     the rest                 micro:check exit 0, with a new cube pipeline of 8 checks that fails without the game's list;
                              whoop:gates 21 of 21; check:path 12 passed; check:props all passed; lint:presets 4 of
                              4; lint:nouns PASS; lint:fc 33 of 33; lint:partners 45 passed; lint:preload up to
-                             date (boot 127 modules, city 75, built 33; 240 served); check:fresh 18 passed; the
+                             date (boot 127 modules, city 75, built 33; 241 served); check:fresh 18 passed; the
                              documents differential 390 of 431 identical, 0 throw
     real game                the collider census: a cube on the floor 8 gate capsules and 4 stubs, lifted 12
                              and 4, flown top then right 8 and 4; eight whoop tracks and ten saved five inch
