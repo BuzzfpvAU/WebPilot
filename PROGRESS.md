@@ -61204,3 +61204,21 @@ Housekeeping:
                              `lint:catalog`, which cannot run in this container (vendor/betaflight is not
                              checked out here). Nothing was tried on a real phone or tablet, on a real
                              GPU, or in a browser that is not Chromium.
+
+### After the merge with main (same turn)
+
+`origin/main` had moved while this work was open: two commits (the pause menu fix, `src/input/padgate.js`,
+`src/main.js`, the shell's `ui.js`, the input checks, and their PROGRESS entry). Only PROGRESS.md was
+touched by both sides, and each side had appended, so the one conflict was resolved by keeping both, main's
+entry first and this branch's after, nothing dropped from either (`git diff origin/main -- PROGRESS.md` is
+insertions only). `src/fresh.js` merged without a conflict and `lint:preload` is up to date on the merged tree
+(238 served, `passes.js` and `padgate.js` both in). `git merge-base origin/main HEAD` is main's tip, so putting
+this branch on main is a fast forward. Nothing was pushed to main: that is the owner's word to give.
+
+    merged tree              builder selftest 1403 passed, 0 failed; input:selftest 338 passed; three of the
+                             new flow cases re run (one piece many passes 41, fly order 19, passes by touch
+                             14 assertions, all pass); device check PASS, which includes the shell's screens
+                             that the pause menu change touches
+    not re run               the full flow check (nothing in main's change reaches the builder), `lint:input`
+                             (main's own, and the one racy check in it is described in the entry of the
+                             earlier merge)
