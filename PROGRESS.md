@@ -60641,3 +60641,48 @@ passes, 38 checks.
                              container (vendor/betaflight is not checked out here). Nothing was
                              tried on a real phone or tablet, on a real GPU, or in a browser that
                              is not Chromium.
+
+### After the merge with main (same turn)
+
+`origin/main` had moved while this branch was open: two commits since a6766a4, the Safari and
+iPad words (`src/input/input.js`, `src/main.js`, `src/ui/ui.js`, `src/ui/stickhelp.js` and their two
+checks) and their PROGRESS entry. Only PROGRESS.md was touched by both sides, and it is an append on
+each, so the one conflict was resolved by keeping both, main's entry first and this branch's
+after, nothing dropped from either. `git merge-base origin/main HEAD` is now main's tip, so putting
+this branch on main is a fast forward. The preload list is unchanged and `lint:preload` is up to
+date on the merged tree. Nothing was pushed to main: that is the owner's word to give.
+
+**One check failed on the merged tree, and it fails on main's own tip too.** The first
+`npm run lint:input` on the merged tree was 184 passed, 1 failed: "set down on the floor under it,
+landed, and it stays down with the keys at idle, parked at 11.695 for 28 frames, throttle 1 0".
+That is a check of the shell (X in a climb), in a file this work does not touch, and it had
+passed in Stage 3 and in main's own entry, so it was not put down to the container. It was
+sampled instead:
+
+    merged tree, the whole check       run 1: 184 of 185 (that failure)       run 2: 185 of 185
+    main's tip d60d385, whole check    185 of 185 (220 s)
+    the failing section on its own     main 1 failure in 12 (parked at 11.612, throttle 1 0)
+      in a loop of 12, both trees      merged 2 failures in 12 (11.828 and 11.657, throttle 0)
+
+The failure on main has the same signature as the first one here. The cause is in the check. It
+records the craft on every animation frame and finds the first frame that says `landed`, then
+wants every frame from there to be on the floor. X flags `landed` at once, in the key handler, but
+the craft's drawn position (and sometimes the held throttle) only follow in the shell's next frame,
+so a sample taken in between is torn: landed, and still at the height X was pressed, 11.6 to 11.8
+m. The whoop is climbing at 23.5 m/s when X goes, to a 13.7 m ceiling, and a frame here is about 90
+ms, so X goes in within a frame or two of the ceiling and the window is real. The fix is a line in
+the check (begin at the first frame that is landed AND under 0.3 m), and I have not made it:
+it is main's test, in a file the Safari commit changed, and it is not this work's. On these
+samples the merged tree is not shown to be worse than main (3 failures in 14 runs against 1 in 13)
+and cannot be shown better either. So `lint:input` is not a reliable gate on this container, for
+main as much as for this branch.
+
+    Run log, after the merge
+    builder selftest        1320 passed, 0 failed (merged tree)
+    micro:check             267 pass
+    whoop:gates             21 of 21
+    lint:presets            4 of 4 clean
+    lint:preload            up to date, 236 served
+    input:selftest          316 passed (main's 24 new ones included)
+    lint:input              merged tree: 184 of 185, then 185 of 185; main's tip: 185 of 185;
+                            the one failing check is main's race, as above
