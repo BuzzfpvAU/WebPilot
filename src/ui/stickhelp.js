@@ -18,7 +18,9 @@
  *               moves its axes. See firefoxRadio in src/input/input.js.
  *   desktops    mostly a radio flown on the built in guess of the channel
  *               order, which the wizard fixes in a minute.
- *   Safari      a radio never seen at all.
+ *   Safari      a radio never seen at all. Every WebKit ticket on the board
+ *               reads the keyboard and 0 Hz, and the pilots who had a radio
+ *               plugged in were told to swap cables. See radioBlind.
  *
  * So the screen does not start with instructions. It starts with the one
  * question that splits every cause into two piles, asked while the pilot's
@@ -102,6 +104,114 @@ export function stickBrowser(userAgent = '') {
   return 'chromium';
 }
 
+/*
+ * A BROWSER THAT DOES NOT SHOW A RADIO TO A PAGE, and what to say when the
+ * pilot has come here to fly with one.
+ *
+ * bug-616cc604, 29 September, Safari 27: a Radiomaster Pocket that neither a
+ * MacBook Air nor an iPad showed to the sim, and "I've tried several USB-C to
+ * USB-C cables and even my USB-C hub to a USB-A to USB-C cable". Everything
+ * the sim said had sent them to do exactly that. "No radio or gamepad found.
+ * Plug one in, set it to joystick mode" is right for a radio in the wrong
+ * mode, and on Safari it sent a pilot off to swap cables that could not
+ * matter. The title and the pause menu said nothing at all, because their
+ * trouble rows only exist once a pad has reached the sim.
+ *
+ * WHAT IS KNOWN. Of the 200 tickets on the board that day, eight came from
+ * WebKit: four Safari on a Mac and four on an iPhone or iPad, where every
+ * browser is WebKit underneath. All eight read `source` the keyboard and
+ * `padHz` 0. Three of the Mac ones were about a radio (bug-c3ecb273,
+ * bug-7d3064fc, bug-616cc604, on Safari 26.5, 26.6.2 and 27.0) and so was
+ * the iPad's bug-40980a75, and not one of the four was ever shown a pad. The
+ * same board holds 22 tickets from Chrome and Firefox on Macs that flew a
+ * pad or a radio. That evidence is one sided, since a pilot whose radio works
+ * has no reason to file a ticket, but the flight feel tickets come from
+ * exactly those pilots and none of them is a Safari radio.
+ *
+ * WHAT IS NOT. Why. On an iPhone or iPad the GameController framework is the
+ * only source of pads and it lists the controllers Apple knows, which a USB
+ * radio is not. On a Mac WebKit has a generic HID reader beside that one, so
+ * "Safari only shows controllers it knows" is NOT a reason this file can give
+ * for a Mac, and it does not. Nobody on this project has had a radio in
+ * Safari to try. So the Mac words say what has been seen ("usually cannot")
+ * and ask for the one test that settles it for the pilot in front of the
+ * screen: the same radio, plugged in the same way, in Chrome, Edge or
+ * Firefox. A report now carries what the browser listed (browserPads in
+ * src/input/input.js), so the next Safari ticket says whether it listed
+ * anything at all.
+ *
+ * One entry per surface, because the surfaces have different room: the
+ * banner over a flight, the help column beside a menu row, a row of the
+ * How to fly screen, the sentence under Stick help's bars, and its block for
+ * when no bar moves. Null for every other browser, whose surfaces keep their
+ * own words.
+ */
+const RADIO_TEST = 'Try Chrome, Edge or Firefox before anything else, with the radio plugged in and'
+  + ' in joystick mode. If it shows up there, it was Safari.';
+
+const RADIO_BLIND = {
+  safari: {
+    banner: 'Safari usually cannot see USB radios: try Chrome, Edge or Firefox.',
+    note: 'Safari usually cannot see USB radios, so no cable, port or radio setting changes that.'
+      + ' Open this page in Chrome, Edge or Firefox with the radio plugged in and in joystick mode.',
+    howto: 'Safari usually cannot see USB radios. Open this page in Chrome, Edge or Firefox first,'
+      + ' put the radio in joystick mode before loading it, then run Calibrate sticks in Settings.',
+    say: 'Safari is not showing this page a radio or gamepad. It usually cannot see USB radios at all,'
+      + ' and no cable, port or radio setting changes that: open this page in Chrome, Edge or Firefox'
+      + ' instead. A game controller is shown once something on it moves.',
+    lines: [
+      'Safari usually does not show a USB radio to a web page at all, so changing the cable, the'
+        + ` port or the hub is unlikely to help. ${RADIO_TEST}`,
+    ],
+  },
+  ios: {
+    banner: 'An iPhone or iPad usually cannot show a USB radio. Use a computer.',
+    note: 'Every browser on an iPhone or iPad is Safari underneath, and it shows a page only the game'
+      + ' controllers Apple knows. A USB radio is usually not one of them, so no cable, adapter or'
+      + ' radio setting changes that. Use a computer with Chrome, Edge or Firefox.',
+    howto: 'An iPhone or iPad usually cannot show a USB radio to any browser. Use a computer with'
+      + ' Chrome, Edge or Firefox, put the radio in joystick mode before loading the page, then run'
+      + ' Calibrate sticks in Settings.',
+    say: 'This iPhone or iPad is not showing the page a radio or gamepad. A browser here shows only the'
+      + ' game controllers Apple knows, and a USB radio is usually not one of them: use a computer with'
+      + ' Chrome, Edge or Firefox.',
+    lines: [
+      'Every browser on an iPhone or iPad is Safari underneath, and Safari there shows a page only the'
+        + ' game controllers it knows. A USB radio is usually not one of them, so no cable, adapter or'
+        + ' radio setting changes it.',
+      'A computer with Chrome, Edge or Firefox is the surest way to fly a radio. An Android phone can'
+        + ' see one too, but Chrome there drops some of its axes.',
+    ],
+  },
+};
+
+export function radioBlind(platform, browser) {
+  if (platform === 'ios') {
+    return RADIO_BLIND.ios;
+  }
+  if (platform === 'mac' && browser === 'safari') {
+    return RADIO_BLIND.safari;
+  }
+  return null;
+}
+
+/*
+ * THE BANNER FOR A RADIO THAT IS NOT THERE, for the pilot who asked for one:
+ * Choose joystick, Calibrate sticks, Check sticks, the restart switch. Two
+ * lines, the way lostStickNotice is. `then` is what the ordinary advice ends
+ * on: move the stick so the browser shows the pad, or reload after plugging
+ * it in.
+ */
+export function noRadioNotice(platform, browser, then = 'move') {
+  const blind = radioBlind(platform, browser);
+  if (blind) {
+    return `No radio or gamepad found.\n${blind.banner}`;
+  }
+  return then === 'reload'
+    ? 'No radio or gamepad found.\nPlug one in, set it to joystick mode, and reload.'
+    : 'No radio or gamepad found.\nPlug one in, set it to joystick mode, then move it.';
+}
+
 export function capital(word) {
   const w = String(word || '');
   return w ? w[0].toUpperCase() + w.slice(1) : w;
@@ -134,9 +244,15 @@ export function lostStickNotice(channel) {
  * is a fact about this second, and everything after that is waiting for
  * the pilot to try.
  */
-export function stickSay(view, platform = 'other') {
+export function stickSay(view, platform = 'other', browser = '') {
   const v = view || {};
   if (!v.pad) {
+    /* Where nothing a pilot does with a stick or a cable can matter, saying
+     * "move a stick" is the wrong answer: see radioBlind. */
+    const blind = radioBlind(platform, browser);
+    if (blind) {
+      return blind.say;
+    }
     return 'No radio or gamepad is reaching this browser yet. Plug it in, set it to joystick'
       + ' mode and move a stick: a browser shows a pad to a page only once something on it moves.';
   }
@@ -229,12 +345,11 @@ export function platformHelp(platform, browser = 'chromium', facts = {}) {
     };
   }
   if (platform === 'mac') {
+    const blind = radioBlind('mac', browser);
     return {
       title: 'If no bar moves: Mac',
       lines: [
-        ...(browser === 'safari'
-          ? ['Safari may not hand a radio to a page at all. Try Chrome, Edge or Firefox before anything else.']
-          : []),
+        ...(blind ? blind.lines : []),
         'macOS has no stick test of its own, so these bars are the test. If a stick moves here in one'
           + ' browser and not in another, report a bug from this screen and say which.',
         RADIO_LINE,
@@ -260,8 +375,7 @@ export function platformHelp(platform, browser = 'chromium', facts = {}) {
     return {
       title: 'If no bar moves: iPhone and iPad',
       lines: [
-        'Safari on iPhone and iPad hands a page only the game controllers it knows, and a radio is'
-          + ' usually not one of them. A computer or an Android phone will see it.',
+        ...radioBlind('ios', browser).lines,
         RADIO_LINE,
       ],
     };

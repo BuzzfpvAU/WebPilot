@@ -22,9 +22,11 @@
  * boots. It is deliberately the radio the AETR guess gets wrong, because
  * a radio the guess gets right exercises none of this. A second page with
  * touch emulation on covers the thumb sticks, and a third with no radio at
- * all flies a real race on the keys. Two more walk the builder's Fly this
- * map into the air, and a linked map that fails to load, and the last walk
- * the gate's Map builder card into the builder and its chooser.
+ * all flies a real race on the keys. A fourth is Safari 27 on a Mac with a
+ * radio the browser will not list, which is bug-616cc604. Two more walk the
+ * builder's Fly this map into the air, and a linked map that fails to load,
+ * and the last walk the gate's Map builder card into the builder and its
+ * chooser.
  *
  * Not part of `npm run verify`: this says nothing about the flight model.
  * Same shape as lint:shell. Run it on a change to src/input, to the
@@ -108,6 +110,19 @@ const PAD_SEED = `window.__pad = {
   buttons: [0, 1, 2, 3].map(() => ({ pressed: false, touched: false, value: 0 })),
 };
 navigator.getGamepads = () => [window.__pad];`;
+
+/*
+ * The Safari pilot of bug-616cc604: a Pocket plugged in on a MacBook Air, and
+ * a browser that lists nothing. Safari's own user agent goes on the page
+ * before the app runs, because the shell reads it once, and getGamepads
+ * answers with four empty slots, which is what a browser with nothing to show
+ * hands over. No radio is there to find, which is the point.
+ */
+const SAFARI_SEED = `Object.defineProperty(Navigator.prototype, 'userAgent', {
+  configurable: true,
+  get: () => 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15',
+});
+navigator.getGamepads = () => [null, null, null, null];`;
 
 /*
  * The keyboard pilot: no radio, no touch, on the whoop, with one shipped
@@ -1079,6 +1094,91 @@ async function mousePage(page) {
   await page.sleep(200);
   check('and Escape from Stick help goes back to the pause it came from, with the watch stopped',
     toPause && await ev('return input.stickCheck === null;'));
+
+  /* The report: bug-616cc604 and three Safari tickets before it could not
+   * say what the browser had listed. With a radio it says one, and says which
+   * of them this page flies. */
+  const listed = await ev('return JSON.stringify(ui.bugSnapshot().stick.pads);').then(JSON.parse);
+  check('a report from a page with a radio says the browser listed it and this page flies it, with its six axes named',
+    listed.api === true && listed.listed === 1 && listed.used === 1 && listed.list.length === 1
+    && /Selftest six axis radio/.test(listed.list[0]) && /6 axes, 4 buttons, connected$/.test(listed.list[0]),
+    JSON.stringify(listed));
+}
+
+/*
+ * Safari 27 on a Mac, and a Pocket the browser will not list: bug-616cc604.
+ * Everything a pilot could ask of a radio that is not there, and what each
+ * asks back. The banner is read from the page, the way the pilot reads it,
+ * and each is waited out before the next so one cannot answer for another.
+ */
+async function safariPage(page) {
+  const ev = (expr) => page.evaluate(`(() => { const ui = window.__ui; const input = window.__input; ${expr} })()`);
+  const SAFARI = '/Safari usually cannot see USB radios: try Chrome, Edge or Firefox\\./';
+  const banner = () => ev('return ui.banner.textContent;');
+  /* Ask for a radio one way, and read what the banner says of it. */
+  const ask = async (expr) => {
+    await page.until("window.__ui.banner.textContent === ''", 9000).catch(() => {});
+    await ev(expr);
+    let said = true;
+    await page.until(`${SAFARI}.test(window.__ui.banner.textContent)`, 3000).catch(() => { said = false; });
+    return { said, text: await banner(), screen: await ev('return ui.screen;') };
+  };
+
+  section('safari: a browser that lists no radio says so, wherever a pilot asks for one');
+  const who = await ev('return JSON.stringify({ platform: ui.stickPlatform, browser: ui.stickBrowser, blind: Boolean(ui.radioBlind) });')
+    .then(JSON.parse);
+  check('the shell reads the page as Safari on a Mac, which does not show a radio to a page',
+    who.platform === 'mac' && who.browser === 'safari' && who.blind, JSON.stringify(who));
+
+  const row = await ev(`${PAST_GATE} ui.show('pilot');
+    const it = ui.items().find((x) => x && x.action === 'choosepad');
+    return JSON.stringify({ note: it ? it.note : null });`).then(JSON.parse);
+  check('Settings\' Choose joystick row says Safari in its help column, and not to plug one in',
+    /^Safari usually cannot see USB radios/.test(row.note || '') && !/Plug in a radio in joystick mode/.test(row.note || ''),
+    JSON.stringify(row));
+
+  const chose = await ask("ui.act('choosepad'); return 1;");
+  check('Choose joystick with none listed: the banner names Safari and the browsers to use, over two lines',
+    chose.said && /^No radio or gamepad found\.\n/.test(chose.text) && chose.text.split('\n').length === 2
+    && !/Plug one in/.test(chose.text) && chose.screen === 'pilot', JSON.stringify(chose));
+  const calibrated = await ask("ui.act('calibrate'); return 1;");
+  check('Calibrate sticks with none listed says the same, and does not open a wizard with nothing to calibrate',
+    calibrated.said && calibrated.screen !== 'calibrate', JSON.stringify(calibrated));
+  const checked = await ask("ui.act('calibrate-check'); return 1;");
+  check('Check sticks with none listed says the same', checked.said && checked.screen !== 'calibrate', JSON.stringify(checked));
+  const restart = await ask("ui.act('restart-switch'); return 1;");
+  check('and so does the restart switch row', restart.said, JSON.stringify(restart));
+
+  await ev("ui.act('stickhelp'); return 1;");
+  await page.until("window.__ui.screen === 'stickhelp'", 3000).catch(() => {});
+  await page.sleep(400);
+  const help = await ev(`const h = ui.stickSteps.querySelector('h3');
+    return JSON.stringify({ screen: ui.screen, pad: ui.stickPad.textContent, say: ui.stickSay.textContent,
+      title: h ? h.textContent : null, block: ui.stickSteps.textContent });`).then(JSON.parse);
+  check('Stick help with nothing listed: no pad, and a sentence that names Safari and does not ask for a stick to be moved',
+    help.screen === 'stickhelp' && help.pad === 'No radio or gamepad.' && /^Safari is not showing this page/.test(help.say)
+    && !/move a stick/.test(help.say), JSON.stringify({ pad: help.pad, say: help.say }));
+  check('and its block is the Mac one, leading with the test that settles it: the same radio in another browser',
+    help.title === 'If no bar moves: Mac' && /Try Chrome, Edge or Firefox before anything else/.test(help.block)
+    && /If it shows up there, it was Safari/.test(help.block), JSON.stringify({ title: help.title }));
+  await ev("ui.show('pilot'); return 1;");
+
+  const howto = await ev(`ui.show('howto'); ui.setHowtoSource('radio');
+    const dt = Array.from(ui.howtoKeys.querySelectorAll('dt')).map((n) => n.textContent);
+    const dd = Array.from(ui.howtoKeys.querySelectorAll('dd')).map((n) => n.textContent);
+    ui.show('pilot');
+    return JSON.stringify(dd[dt.indexOf('Before you fly')] || '');`).then(JSON.parse);
+  check('How to fly, on the radio tab: Before you fly leads with Safari, where the pilot looking for radio setup reads',
+    /^Safari usually cannot see USB radios\. Open this page in Chrome, Edge or Firefox first/.test(howto), howto);
+
+  const snap = await ev(`const s = ui.bugSnapshot();
+    return JSON.stringify({ pads: s.stick && s.stick.pads, map: s.stick && s.stick.map, keys: Object.keys(s).length,
+      chars: JSON.stringify(s).length });`).then(JSON.parse);
+  check('a report from this page says the browser listed nothing, with the API there: the field the Safari tickets lacked',
+    snap.pads && snap.pads.api === true && snap.pads.listed === 0 && snap.pads.used === 0 && snap.pads.list.length === 0
+    && snap.map === null, JSON.stringify(snap));
+  check(`and it stays inside the board's 32 keys and 8000 characters, at ${snap.keys} keys and ${snap.chars}`,
+    snap.keys + 5 <= 32 && snap.chars < 8000);
 }
 
 async function touchPage(page) {
@@ -1174,6 +1274,22 @@ async function keyboardPage(page) {
   check('the front page whoop card leads with 1S, as the five inch card leads with 6S',
     Array.isArray(whoopCard.whoop) && whoopCard.whoop[0] === '1S' && Array.isArray(whoopCard.five) && whoopCard.five[0] === '6S',
     JSON.stringify(whoopCard));
+
+  /* A browser that CAN show a radio, with none plugged in, is told what it
+   * always was. bug-616cc604's words are for Safari and WebKit and nobody
+   * else: see radioBlind in src/ui/stickhelp.js. */
+  section('a browser that can show a radio, with none plugged in, keeps the ordinary advice');
+  await ev(`${PAST_GATE} ui.show('pilot'); ui.act('choosepad'); return 1;`);
+  let plain = true;
+  await page.until('/Plug one in, set it to joystick mode, then move it\\./.test(window.__ui.banner.textContent)', 3000)
+    .catch(() => { plain = false; });
+  check('Choose joystick with no radio, in Chrome: plug one in, joystick mode, then move it, and no word about Safari',
+    plain && await ev('return ui.radioBlind === null && !/Safari/.test(ui.banner.textContent);'),
+    await ev('return JSON.stringify(ui.banner.textContent);'));
+  const none = await ev('return JSON.stringify(ui.bugSnapshot().stick.pads);').then(JSON.parse);
+  check('and its report says the API is there and the browser listed nothing, the same as a Safari page reads',
+    none.api === true && none.listed === 0 && none.used === 0 && none.list.length === 0, JSON.stringify(none));
+  await page.until("window.__ui.banner.textContent === ''", 9000).catch(() => {});
 
   section('keyboard: the throttle keys spring to the measured hover, or stay put');
   const hand = await ev(`
@@ -1804,6 +1920,14 @@ async function main() {
     await keyboardPage(page);
     const uncaught3 = page.errors.filter((e) => e.startsWith('uncaught:'));
     check('no uncaught exception on the keyboard page', uncaught3.length === 0, uncaught3.slice(0, 3).join(' | '));
+    await page.close();
+    page = null;
+
+    console.log('\nbooting the shell as Safari on a Mac, with a radio the browser will not list');
+    page = await bootPage({ seed: [SETTINGS_SEED, SAFARI_SEED] });
+    await safariPage(page);
+    const uncaughtS = page.errors.filter((e) => e.startsWith('uncaught:'));
+    check('no uncaught exception on the Safari page', uncaughtS.length === 0, uncaughtS.slice(0, 3).join(' | '));
     await page.close();
     page = null;
 

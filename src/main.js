@@ -83,7 +83,7 @@ import { Chase, CHASE_EVERY, pays } from './game/chase.js';
 import { sincos } from './props/trig.js';
 import { setCraftAirframe, CRAFT_R, CRAFT_WORLD_R, CRAFT_V_UP, CRAFT_V_DOWN, craftVerticalHalf, craftVerticalOffset, canPerch, shouldScorePass, shouldEnterTurtle, uprightPlantQuat, turtleFlipEase, turtleFlipLift, turtleSlerpQuat, TURTLE_STICK_MIN, TURTLE_SPEED, TURTLE_RATE, TURTLE_FLIP_MS, TURTLE_INVERT_UPZ, TURTLE_EXIT_UPZ, turtleClearance, findRestSpot, PROP_PLANE_MAX_UP_DOT, GRAZE_SPEED_MAX, BOUNCE_SPEED_MAX, BOUNCE_COOLDOWN_MS, LAND_DESCENT_MAX, LAND_HORIZONTAL_MAX, LAND_TILT_MAX_DEG, LAND_TILT_HARD_DEG, LAND_TIP_SPEED_MAX, GROUND_MU, GROUND_E, CLIP_SPAWN_GRACE_MS, CrashJudge, emptyWorldReport, foldWorldReport } from './game/collide.js';
 import { Ui, formatTime, WEIGHT_STOCK, clampWeight, gravityScaleFor, loadSettings, pacingTimerOn } from './ui/ui.js';
-import { lostStickNotice } from './ui/stickhelp.js';
+import { lostStickNotice, noRadioNotice } from './ui/stickhelp.js';
 import {
   adoptMapFromLocation, adoptMostFlownTrack, adoptShareFromLocation, boardPageUrl, fetchGhost,
   fetchMapDocument, fetchTrackDocument, fetchTrackTimes, postFreestyleRun, postTime,
@@ -6263,6 +6263,21 @@ export async function boot({ loading, bootStart, mapId }) {
     }
   }
 
+  /*
+   * THE BANNER FOR A RADIO THAT IS NOT THERE, when the pilot asked for one.
+   * Where the browser will not show a radio to a page (Safari, an iPhone or
+   * an iPad: see radioBlind in ui/stickhelp.js) it says so, because "plug
+   * one in" sent bug-616cc604's pilot through several cables and a hub, and
+   * it stays up for the seconds it takes to read a browser's name and act
+   * on it, which the ordinary advice never needed.
+   */
+  function noRadioBanner(then) {
+    return {
+      text: noRadioNotice(ui.stickPlatform, ui.stickBrowser, then),
+      untilMs: performance.now() + (ui.radioBlind ? 6000 : 3200),
+    };
+  }
+
   function openPadPick(reason) {
     if (ui.nameDialog && !ui.nameDialog.hidden) {
       input.requestPadPick(reason);
@@ -6273,7 +6288,7 @@ export async function boot({ loading, bootStart, mapId }) {
     }
     if (!input.startPadPick(reason)) {
       if (reason === 'menu') {
-        notice = { text: 'No radio or gamepad found.\nPlug one in, set it to joystick mode, then move it.', untilMs: performance.now() + 3200 };
+        notice = noRadioBanner('move');
       }
       return;
     }
@@ -6432,7 +6447,7 @@ export async function boot({ loading, bootStart, mapId }) {
         input.startCalibration();
         ui.show('calibrate');
       } else {
-        notice = { text: 'No radio or gamepad found.\nPlug one in, set it to joystick mode, and reload.', untilMs: performance.now() + 3200 };
+        notice = noRadioBanner('reload');
       }
     } else if (action === 'calibrate-check' || action === 'stickhelp-check') {
       /* The check step on its own, against the mapping already saved. Same
@@ -6443,7 +6458,7 @@ export async function boot({ loading, bootStart, mapId }) {
         calReturn = action === 'stickhelp-check' ? 'stickhelp' : 'pilot';
         ui.show('calibrate');
       } else {
-        notice = { text: 'No radio or gamepad found.\nPlug one in, set it to joystick mode, and reload.', untilMs: performance.now() + 3200 };
+        notice = noRadioBanner('reload');
       }
     } else if (action === 'calibrate-cancel') {
       input.cancelCalibration();
@@ -6488,7 +6503,7 @@ export async function boot({ loading, bootStart, mapId }) {
       /* The row toggles: choose it to listen for a flip, choose it again to
        * stop. See beginRestartCapture in input.js. */
       if (!input.firstGamepad()) {
-        notice = { text: 'No radio or gamepad found.\nPlug one in, set it to joystick mode, and reload.', untilMs: performance.now() + 3200 };
+        notice = noRadioBanner('reload');
       } else if (input.restartCapture) {
         input.cancelRestartCapture();
       } else {
@@ -10774,6 +10789,11 @@ export async function boot({ loading, bootStart, mapId }) {
     /* Which axes are being flown and what they read: see mapReport.
      * bug-c9423f3e could not be checked without it. */
     map: input.mapReport(),
+    /* What the browser listed, which `map` above cannot say when it is null:
+     * bug-616cc604 and three Safari tickets before it read the same with no
+     * pad, and nothing in them said whether the browser had listed nothing
+     * or something this page dropped. See browserPads in input.js. */
+    pads: input.browserPads(),
     /* padHz, sampleHz and fps above are read at the moment of sending,
      * from a menu with the sticks at rest. This is the flight: its stick
      * refresh ceiling and how far each channel went. See flightRec in

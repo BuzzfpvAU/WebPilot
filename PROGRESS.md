@@ -59558,3 +59558,239 @@ Found and not touched.
 Cross repo. The landing page vendors `src/maps/built/place.js` (its yard is drawn with it) and pins it by SHA-256, so its copy is now behind the simulator's. Nothing is wrong: the yard is drawn with `placeDocument`, which did not change. The next `node scripts/vendor.js ../WebFPVSimulator` will copy `seat.js` in with it, because it copies the import closure. The board's copies are untouched, as above.
 
 To main. The owner said "push to main" on 2026-09-29, after the summary above: the decisions taken by default, what was run and what was not. That ships the fold as written. It does not answer the one open question, whether to republish the three courses on the board, which clears the times set on their sky layout: nothing was republished, and that stays the owner's. No further verification scale was chosen, so none was run beyond a short gate on the final merged tree, all exit 0: `check:fresh` 18 of 18, `lint:preload` up to date (boot 122, 231 served), `lint:boot` 9 of 9, `check:props`, `check:orbit` 17 of 17, and the trackbuilder selftest 990 of 990. It goes to main as a fast forward of origin/main (ec0c8ec), and never with force, as the git section of CLAUDE.md says.
+
+## 2026-09-30 | input, ui | A Safari or iPad pilot is told the browser is the problem, and a report says what the browser listed (bug-616cc604)
+
+### The ask
+
+"Find root cause and fix", on bug-616cc604, "Radiomaster pocket", kind
+blocking, filed on 29 September 2026 from Safari 27.0 on a MacBook Air M4,
+with the iPad tried as well: a Pocket on the top USB-C port, several cables
+and a hub, "Nothing seems to recognize my radio". The reporter left contact
+details in the report; they are not copied here. Nothing in this change
+touches the plant, the module ABI, the build or the physics.
+
+### What the ticket itself says
+
+`stick.source` is "the keyboard", `padHz` 0 and `map` null, on `screen`
+"pilot", so the sim was never handed a pad. That is all a report of this shape
+can say, and it is the whole of the trouble: it reads the same whether the
+browser listed nothing or listed something the sim then dropped.
+
+### What the board says (read only, nothing written)
+
+`GET /board/api/bugs?limit=500` for the list, then every one of the 200
+tickets' full report. The per ticket path is `/board/api/bugs/<id>`; the
+`/api/bugs/<id>` that earlier entries name answers 404 from the main host.
+
+    Macs, Chrome or Edge     18 tickets flew "a radio", 1 the wizard, 4 keys
+    Macs, Firefox            4 tickets flew "a radio"
+    Macs, Safari             4 tickets, all 4 on the keyboard, padHz 0
+    iPhone or iPad           4 tickets (3 Safari, 1 Chrome, which is WebKit
+                             underneath), all 4 on the keyboard, padHz 0
+
+Eight WebKit tickets, eight with no pad. Four of them were pilots with a
+radio: bug-c3ecb273 (Pocket, Safari 26.6.2, closed "fixed" with advice to set
+joystick mode before loading the page), bug-7d3064fc ("Radio is not
+detected", Safari 26.5, wontfix, 13.6 s flown with `padHzMax` 0),
+bug-40980a75 (an iPad, "radio master and DJI", wontfix) and this one. The
+other four are keyboard or touch pilots who happen to be on WebKit.
+
+That evidence is one sided, and this entry does not pretend otherwise: a
+pilot whose radio works has no reason to file a ticket. What softens it is
+the flight feel tickets, which come from pilots who are flying: exactly two
+are from WebKit (bug-a8cd61db on an iPhone, bug-61cdc775 on a Mac) and both
+flew on the keyboard, while the 22 Chrome and Firefox tickets from Macs, of
+every kind, flew a pad or a radio. Independently, an Apple Community thread
+(discussions.apple.com/thread/255083050, Safari 16 on macOS 13.3) reports USB
+joysticks failing in Safari and working in Chrome and Firefox on the same
+Mac, with no cause given.
+
+### Root cause, in two parts
+
+1. THE BROWSER. Safari, and every browser on an iPhone or iPad, did not hand
+   the page the radio. Nothing a pilot does to the cable, the port or the hub
+   changes what a page is shown if the browser does not list the device. On
+   an iPhone or iPad this is understood: every browser there is WebKit, the
+   GameController framework is the only source of pads and it lists
+   controllers Apple knows, which a USB radio is not. ON A MAC IT IS NOT
+   KNOWN WHY. Read as a search result's summary of WebKit's commit pages, and
+   not from its source (trac answered 403 and the bugzilla page had no
+   detail), WebKit on a Mac has a generic HID reader beside the GameController
+   one. If that is right, "Safari only shows controllers it knows" is not a
+   reason that can be given for a Mac, and none is given. What is on the
+   record is what was seen: no radio, in every Safari ticket, on 26.5, 26.6.2
+   and 27.0. No one on this project has had a radio in Safari to try.
+2. THE SIM'S ANSWER WAS THE WRONG ONE FOR SAFARI. Every path answered a missing radio with "plug
+   one in, set it to joystick mode": the four banners in main.js, the
+   Settings help column, the sentence on Stick help ("plug it in ... and move
+   a stick") and the How to fly row. The trouble rows on the title and the
+   pause menu do not exist without a pad (`padTroubleItem` returns null when
+   `info.count` is 0), so a Safari pilot got no row at all. The only Safari
+   sentence lived in Stick help, hedged ("may not hand a radio to a page"),
+   two screens from anywhere a pilot would look. This ticket's pilot did what
+   the sim said, at length. And no report could settle the question:
+   `mapReport()` is null with no pad, and `listGamepads()` silently drops a
+   pad that is not connected or has fewer than four axes.
+
+### What changed
+
+- `src/ui/stickhelp.js`: `radioBlind(platform, browser)`, one table of words
+  for the two browsers that do not show a radio (Safari on a Mac, and
+  anything on an iPhone or iPad), one entry per surface, and
+  `noRadioNotice(platform, browser, then)` for the banner. `stickSay` takes
+  the browser and, with no pad, says Safari's or the iPad's sentence instead
+  of "move a stick". `platformHelp` for Mac in Safari leads with "changing
+  the cable, the port or the hub is unlikely to help. Try Chrome, Edge or
+  Firefox before anything else ... If it shows up there, it was Safari": the
+  one test that settles it for the pilot at the screen. The iPhone and iPad
+  block says a computer is the way and offers Android with its catch (Chrome
+  there drops some axes). The Mac wording says "usually cannot", because the
+  Mac cause is unproven.
+- `src/main.js`: the four "No radio or gamepad found" banners go through one
+  `noRadioBanner`, and stay up 6 s in these browsers, not 3.2 s, because they
+  have a browser's name to read and something to do about it. The stick probe
+  gains `pads: input.browserPads()`, inside `stick`, so no new top level key.
+- `src/ui/ui.js`: `this.radioBlind`, read once. The Choose joystick help
+  column (two rows), the How to fly row "Before you fly" and Stick help's
+  sentence use it. Every other browser gets the words it always had.
+- `src/input/input.js`: `browserPads()`: whether the Gamepad API is there,
+  how many entries `getGamepads()` returned, how many this page flies, and a
+  line for the first four (slot, id cut to 64 characters, mapping, axes,
+  buttons, connected). A browser that throws from `getGamepads` is reported as
+  having thrown. Read when a report is sent and never by the frame loop. No
+  line that reads a stick moved: `listGamepads`, `pickPad`, `readGamepad`,
+  `poll` are as they were.
+- Checks: `scripts/input-selftest.js` 292 to 316; `scripts/input-check.js`
+  170 to 185 (a Safari 27 page; a Chrome page with no radio, which must keep
+  the old words; and the report on the radio page).
+
+### What it does not do
+
+- It does not make a radio work in Safari. Nothing in a page can: the browser
+  does not list the device, and WebHID, which would read it directly, is
+  reported by the compatibility pages read this session to ship in Chrome and
+  Edge and not in Safari (not tried). No WebHID path is added.
+- It does not change what flies, for any pilot on any browser.
+- A game controller in Safari that has not been touched yet gets the radio
+  banner. Stick help's sentence carries "shown once something on it moves";
+  the banner and the help column do not, to stay short. No WebKit ticket on
+  the board was a controller.
+- The banner is three lines on a 1440 px window and four on an iPad's 1080
+  (both seen), and sits over the screen's title as every notice does. By
+  arithmetic on the old sentence's length, not measured, that is one line
+  more than the old advice on the iPad and the same on the Mac. Nothing that
+  matters is covered.
+- The two earlier Safari tickets and the iPad's stay as they are on the
+  board.
+
+### Decisions made here, for the owner to overrule
+
+1. "Usually cannot", not "cannot", for Safari on a Mac. The iPhone and iPad
+   words say "usually" too, on the same hedge as the sentence they replace.
+2. No standing row on the title or the pause menu for Safari pilots. A
+   browser that hides a device cannot say a radio is plugged in, so the row
+   would nag every Safari visitor on keys or touch. The words are where a
+   pilot asks for a radio: Choose joystick, Calibrate sticks, Check sticks,
+   the restart switch, Settings' help column, Stick help, How to fly. If the
+   owner wants a line on the front page for Safari on a Mac, it is one row.
+3. The report carries the browser's listing on every ticket, radio or not:
+   42 characters when nothing is listed, 146 with one radio, 493 at the
+   worst, four pads with the longest ids. Reports on the board peak at 2261
+   characters over 25 keys against a cap of 8000 and 32; a Safari page reads
+   1045 and 20.
+
+### What went wrong
+
+- git. The first `git fetch` failed on the branch (it does not exist on the
+  remote yet) and `origin/main` was stale from the container's `--depth 50`
+  clone. After fetching main alone it printed `forced update`, and
+  `git merge-base` between the old `origin/main` and HEAD came back empty,
+  which CLAUDE.md says to stop on. I stopped, and did not merge. The clone
+  was shallow. `git fetch --deepen=150 origin main` made 633 commits
+  reachable and `9ed8b9c` an ancestor of `origin/main`: main was only
+  appended to, and HEAD equals its tip. The entry before this one hit the
+  same false alarm; a shallow clone gives exactly this symptom.
+- My first browser run died with "no DevTools endpoint". I had set `TMPDIR`
+  to the scratch directory; Chromium keeps a Unix socket under it and the
+  path came to about 138 characters against a limit of 107, so it never
+  started. Proved by launching it by hand with and without the variable, not
+  guessed. Unset, the same runner passed.
+- The sandbox restarted during that run (exit 137). The working tree was
+  whole. Twice I killed my own shell (exit 144) with a `pkill` and a `kill`
+  whose pattern also matched my own command line.
+- The first banners had a second newline and so were three lines, where every
+  other banner is two. Fixed before any check was written.
+- A test comment claimed the frame loop never builds the report, over a check
+  that counted reads per report. The check now tests the claim (twenty
+  frames of polling build it zero times) and the brittle count is gone.
+- The first Node run was green at the first go, which proves nothing about a
+  new check, so each was mutated. See the log.
+
+### RUN LOG
+
+    git fetch --deepen=150       633 commits, 9ed8b9c an ancestor of
+                                 origin/main, HEAD = origin/main tip
+    node --check                 input.js, main.js, ui.js, stickhelp.js clean
+    node scripts/input-selftest.js  all 316 passed (292 before, 24 new), 0
+    Node mutations, each         13: Safari not blind; iOS not blind;
+      restored, md5 compared     stickSay, banner ignoring the browser; the
+                                 ordinary advice edited; an en dash in a
+                                 Safari note; used always 0; a throw not
+                                 caught; the list unbounded; ids not cut;
+                                 empty slots not skipped; no API check; the
+                                 frame loop building the report. Each caught
+    node scripts/input-check.js  all 185 passed, 193 s, exit 0 (170 before,
+      (npm run lint:input)       15 new). The Safari page is 12 of them
+    browser mutations, each      6: banner ignoring the browser; the help
+      restored, md5 compared     note; the How to fly row; the report field
+                                 dropped; Stick help's browser; radioBlind
+                                 never set. Each caught
+    npm run lint:preload         up to date, boot 122, city 75, built 35, 231
+                                 served, exit 0. No module added or removed
+    git diff --check             clean
+    dash scan (Node)             476 added lines, none
+    pictures                     mac and iPad, the Settings help column, the
+                                 banner, Stick help and How to fly, from the
+                                 real shell under Safari 27 and iPad user
+                                 agents, looked at, in the scratchpad, not
+                                 committed
+    npm run verify               not run. CLAUDE.md: for physics, the plant,
+                                 the module ABI or the build, or when asked.
+                                 The verify-flight-model skill names
+                                 src/input as a trigger, but this change moves
+                                 no line that reads a stick or reaches the
+                                 integrator, and the input path it does touch
+                                 is words and a report field. That is
+                                 reasoning, not a result
+    node scripts/shots.js        not run; put to the owner
+    lint:shell, lint:devices     not run: they walk every screen as Chrome,
+                                 where none of these words show
+
+### For the owner
+
+The check that matters needs a Safari and no radio at all. Reload, open the
+sim in Safari on any Mac or an iPad: Settings, Choose joystick should read
+"Safari usually cannot see USB radios ..." in the help column, Enter on it
+should raise the banner, Stick help should say "Safari is not showing this
+page a radio or gamepad", and How to fly, Radio or gamepad, Before you fly
+should lead with Safari. The same page in Chrome on the same machine should
+say what it always did. Then send a report from Safari: `stick.pads` should
+read `api` true, `listed` 0.
+
+What would count as wrong: the Safari words in Chrome, Edge, Firefox or on
+Windows; the old "plug one in" words in Safari or on an iPad; a radio that
+DOES show in Safari, which would make the Mac words wrong, and the report
+would then say what Safari listed and dropped; a report that no longer sends.
+
+A reply for bug-616cc604, not posted: "Thanks. It is most likely Safari and
+not your radio, cable or port. On an iPad no browser can show a USB radio
+to a web page, because every browser there is Safari underneath. On the
+MacBook, open webfpv.org in Chrome, Edge or Firefox with the Pocket already
+plugged in and joystick chosen on the radio when it asks, then Settings,
+Choose joystick and Calibrate sticks. If it shows up there, Safari was the
+cause. If it does not, send a report from that screen: it now records what
+the browser listed. The sim now says this itself on Safari and iPad, where it
+used to tell you to plug the radio in."
+
+Nothing was written to the board. bug-616cc604 is open.
