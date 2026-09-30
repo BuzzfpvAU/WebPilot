@@ -51,6 +51,10 @@ import { docFromQuery, docFromHash, decodeTrack, encodeTrack, trackLink, canComp
 import { buildSheet, sheetHtml, sheetSvg, membersOf, mergeMembers, nodesOf, fittingKind, CORNERS, SECTION, FITTING_ALLOWANCE, compass } from './buildsheet.js';
 import { importFpvEvents, looksLikeFpvEvents, reportLines } from './importfpv.js';
 import {
+  passList, tagsOf, reuseOf, lanesOf, focusFor, aroundPass, stretchOf, flyAgain, apertureAt,
+  removeLastPass, MAX_PASSES,
+} from './passes.js';
+import {
   frameRectFor, nearestQuarter, placementFor, placeOnTrack, spacingTone, snapTurn, copyElements,
   moveToPlace, measuresFor, magnetFor, sideBySideYaw, MAGNET_RADIUS, rowPlan, placeRow, ROW_MAX,
   rulerPoint, rulerReading, replacementsFor, replaceWith,
@@ -7458,6 +7462,267 @@ function suiteImportFpv() {
   check('an arena wider than the hall drops what stands outside it, by name, and says why', big.doc.elements.filter((e) => e.type === 'gate').length === 0 && big.report.dropped.filter((l) => /stands outside the 10 by 12 m hall/.test(l)).length === 2 && /The arena is 14 by 6 m/.test(reportLines(big.report).join(' ')), JSON.stringify(big.report));
 }
 
+function suiteWhoopPasses() {
+  console.log('\nthe whoop builder: a piece flown more than once');
+  const preset = (n) => normalize(JSON.parse(JSON.stringify(PRESETS.find((p) => p.id === `racegow5-track${n}`)))).doc;
+  const t8 = preset(8);
+  const t1 = preset(1);
+
+  /* THE LIST OF PASSES is the flying order with the pieces looked up and the
+   * numbers the builder shows, so nothing else has to walk the sequence. */
+  {
+    const list = passList(t8);
+    check('every entry of the flying order is a pass, in order', list.length === t8.sequence.length
+      && list.every((p, i) => p.seq === t8.sequence[i] && p.index === i),
+    `${list.length} of ${t8.sequence.length}`);
+    check('a waypoint is a pass with no number, the rest are numbered one to 29 in order',
+      list.filter((p) => p.number == null).length === 6
+      && list.filter((p) => p.number != null).map((p) => p.number).join(',') === Array.from({ length: 29 }, (_, i) => i + 1).join(','),
+    list.map((p) => p.number).join(','));
+    check('and each carries its piece', list.every((p) => p.element && p.element.id === p.seq.elementId));
+  }
+
+  /* ONE TAG FOR EACH OPENING THAT IS FLOWN, not one for each pass. Track 8's
+   * tall pole is flown six times and is one tag; its towers are flown at one
+   * opening each three times. */
+  {
+    const tags = tagsOf(t8);
+    const pole = tags.find((t) => t.elementId === 'el-14');
+    check('the tall pole flown six times is one tag, first number 2, six passes',
+      Boolean(pole) && pole.count === 6 && pole.first === 2 && pole.numbers.join(',') === '2,4,14,17,24,27',
+      pole ? `${pole.count} ${pole.numbers.join(',')}` : 'none');
+    const top = tags.find((t) => t.elementId === 'el-6');
+    check('a gate flown three times is one tag, 3, 18 and 26', Boolean(top) && top.count === 3 && top.numbers.join(',') === '3,18,26');
+    const counted = tags.reduce((a, t) => a + t.count, 0);
+    check('every numbered pass is in exactly one tag', counted === 29, `${counted}`);
+    check('and a tag has a key, one for each opening', new Set(tags.map((t) => t.key)).size === tags.length);
+    check('tags come in the order the lap first reaches them', tags.every((t, i) => i === 0 || tags[i - 1].first < t.first));
+    const one = tagsOf(t1);
+    check('a track that flies nothing twice has a tag for each pass, each of one',
+      one.length === 6 && one.every((t) => t.count === 1), `${one.length} tags`);
+  }
+
+  /* A STACK IS ONE PIECE AND SEVERAL OPENINGS, so it has a tag for each opening
+   * that is flown, and the count is of that opening. */
+  {
+    const d = createTrack('stack', 'micro');
+    const st = place(d, 'doubleStack', 5, 6);
+    addToSequence(d, st.id, 0);
+    addToSequence(d, st.id, 1);
+    addToSequence(d, st.id, 0);
+    applyAutoFaces(d);
+    const tags = tagsOf(d);
+    check('a stack flown low, high and low again has two tags, one of two passes and one of one',
+      tags.length === 2 && tags[0].count === 2 && tags[1].count === 1 && tags[0].apertureIndex === 0 && tags[1].apertureIndex === 1,
+      JSON.stringify(tags.map((t) => [t.apertureIndex, t.count])));
+    const r = reuseOf(d);
+    check('and it is one piece flown three times', r.pieces === 1 && r.passes === 3 && r.reused === 1, JSON.stringify(r));
+    const once = createTrack('stack once each', 'micro');
+    const st2 = place(once, 'doubleStack', 5, 6);
+    addToSequence(once, st2.id, 0);
+    addToSequence(once, st2.id, 1);
+    applyAutoFaces(once);
+    const r2 = reuseOf(once);
+    check('a stack flown once through each opening is one piece flown twice, though no opening is flown twice',
+      r2.pieces === 1 && r2.passes === 2 && r2.reused === 1 && tagsOf(once).every((t) => t.count === 1), JSON.stringify(r2));
+  }
+
+  {
+    const r8 = reuseOf(t8);
+    check('Track 8 is 14 pieces flown 29 times, eight of them more than once, and six waypoints',
+      r8.pieces === 14 && r8.passes === 29 && r8.reused === 8 && r8.waypoints === 6, JSON.stringify(r8));
+    const r1 = reuseOf(t1);
+    check('Track 1 flies no piece twice', r1.reused === 0 && r1.pieces === r1.passes, JSON.stringify(r1));
+    check('an empty track is nothing flown', JSON.stringify(reuseOf(createTrack('e', 'micro')))
+      === JSON.stringify({ pieces: 0, passes: 0, reused: 0, waypoints: 0 }));
+  }
+
+  /* DIRECTIONS: an arrow for each way an opening is flown, not for each pass. */
+  {
+    const tags = tagsOf(t8);
+    const top = tags.find((t) => t.elementId === 'el-6');
+    check('a gate flown backwards, forwards, forwards has two lanes, one each way',
+      lanesOf(top).join(',') === '-1,1', lanesOf(top).join(','));
+    const pole = tags.find((t) => t.elementId === 'el-14');
+    check('a pole has a lane for each side it is passed on', lanesOf(pole).every((x) => x === 'left' || x === 'right')
+      && new Set(lanesOf(pole)).size === lanesOf(pole).length, lanesOf(pole).join(','));
+    const seqOf = (entry, side) => ({ seq: { entry, passSide: side }, element: { type: entry == null ? 'pole' : 'gate' } });
+    check('the lanes come in a fixed order whichever way was flown first',
+      lanesOf({ passes: [seqOf(1), seqOf(-1), seqOf(1)] }).join(',') === '-1,1'
+      && lanesOf({ passes: [seqOf(null, 'right'), seqOf(null, 'left')] }).join(',') === 'left,right');
+    check('a pass whose face is not decided has no lane yet', lanesOf({
+      passes: [{ seq: { entry: 0 }, element: { type: 'gate' } }],
+    }).length === 0);
+  }
+
+  /* FOCUS: one pass at a time, and which. */
+  {
+    const d = t8;
+    const first = (id) => d.sequence.find((q) => q.elementId === id).id;
+    const poleFirst = first('el-14');
+    const poleSecond = d.sequence.filter((q) => q.elementId === 'el-14')[1].id;
+    const topFirst = first('el-6');
+    check('nothing selected, nothing pinned or hovered: no focus', focusFor(d, { selection: new Set(), pinned: null, hover: null }) === null);
+    check('one piece selected: its first pass',
+      focusFor(d, { selection: new Set(['el-14']), pinned: null, hover: null }) === poleFirst);
+    const pads = startPadsOf(d);
+    check('a piece that is not in the order has no pass to focus',
+      Boolean(pads) && !d.sequence.some((q) => q.elementId === pads.id)
+      && focusFor(d, { selection: new Set([pads.id]), pinned: null, hover: null }) === null);
+    check('a pinned pass of the selected piece is the focus',
+      focusFor(d, { selection: new Set(['el-14']), pinned: poleSecond, hover: null }) === poleSecond);
+    check('a pinned pass of another piece is not, the selected piece\'s first pass is',
+      focusFor(d, { selection: new Set(['el-6']), pinned: poleSecond, hover: null }) === topFirst);
+    check('a pinned pass with nothing selected is the focus', focusFor(d, { selection: new Set(), pinned: poleSecond, hover: null }) === poleSecond);
+    check('the pass under the pointer beats a pinned one',
+      focusFor(d, { selection: new Set(['el-14']), pinned: poleSecond, hover: topFirst }) === topFirst);
+    check('a pass that is not in the document is ignored, hover and pinned alike',
+      focusFor(d, { selection: new Set(['el-14']), pinned: 'seq-nope', hover: 'seq-nope' }) === poleFirst);
+    check('several pieces selected: no focus unless the pointer is on a pass',
+      focusFor(d, { selection: new Set(['el-14', 'el-6']), pinned: null, hover: null }) === null
+      && focusFor(d, { selection: new Set(['el-14', 'el-6']), pinned: null, hover: topFirst }) === topFirst);
+    check('a selection of things that are not in the document is nothing',
+      focusFor(d, { selection: new Set(['el-nope']), pinned: null, hover: null }) === null);
+  }
+
+  /* THE PASS BEFORE AND THE PASS AFTER, and the stretch of racing line between
+   * them, which is what is drawn bright. */
+  {
+    const d = t8;
+    const path = buildPath(d);
+    const mid = d.sequence[10];
+    const a = aroundPass(d, mid.id);
+    check('the pass before and the pass after', a.prev === d.sequence[9] && a.next === d.sequence[11] && a.index === 10);
+    const f = aroundPass(d, d.sequence[0].id);
+    check('the first pass has none before it and the last none after', f.prev === null
+      && aroundPass(d, d.sequence[d.sequence.length - 1].id).next === null);
+    check('a pass that is not there has no place', aroundPass(d, 'seq-nope') === null);
+    const st = stretchOf(path, mid.id);
+    const kIndex = path.knots.findIndex((k) => k.seq && k.seq.id === mid.id);
+    check('the stretch is the two segments that meet at the pass\'s knot, and the sample that ends the last',
+      Boolean(st) && st.knotIndex === kIndex
+      && path.samples[st.from].segment === kIndex - 1
+      && path.samples[st.to].segment >= kIndex && path.samples[st.to].segment <= kIndex + 1,
+      st ? `${st.from}..${st.to} of ${path.samples.length}` : 'none');
+    let nearest = -1;
+    let best = Infinity;
+    const kp = path.knots[kIndex].pos;
+    path.samples.forEach((sm, i) => {
+      const dd = Math.hypot(sm.pos.x - kp.x, sm.pos.y - kp.y, sm.pos.z - kp.z);
+      if (dd < best) { best = dd; nearest = i; }
+    });
+    check('and it contains the pass itself', st.from <= nearest && nearest <= st.to, `${nearest} in ${st.from}..${st.to}`);
+    check('and ends on the first sample of the segment after, which is the far knot, so the bright line has no gap',
+      path.samples[st.to].segment === kIndex + 1 && path.samples[st.to].t === 0,
+      `segment ${path.samples[st.to].segment}, t ${path.samples[st.to].t}`);
+    const s0 = stretchOf(path, d.sequence[0].id);
+    check('the first pass\'s stretch starts at the start of the line', s0 && s0.from === 0);
+    const sl = stretchOf(path, d.sequence[d.sequence.length - 1].id);
+    check('the last pass\'s stretch ends at the end of the line', sl && sl.to === path.samples.length - 1);
+    check('no line, or a pass with no knot, is no stretch', stretchOf(null, mid.id) === null && stretchOf(path, 'seq-nope') === null
+      && stretchOf({ knots: [], samples: [] }, mid.id) === null);
+  }
+
+  /* WHICH OPENING OF A STACK A CLICK LANDED ON. */
+  {
+    const d = createTrack('stack', 'micro');
+    const st = place(d, 'doubleStack', 5, 6);
+    const levels = aperturesOf(st);
+    check('a click on the lower opening of a stack is opening 0 and on the upper is opening 1',
+      apertureAt(d, st.id, levels[0].centerH) === 0 && apertureAt(d, st.id, levels[1].centerH) === 1);
+    check('a click between them goes to the nearer one', apertureAt(d, st.id, (levels[0].centerH + levels[1].centerH) / 2 + 0.01) === 1);
+    check('a click above or below the stack goes to the end one', apertureAt(d, st.id, -1) === 0 && apertureAt(d, st.id, 99) === 1);
+    const up = place(d, 'doubleStack', 8, 3, { z: 0.3 });
+    const upLevels = aperturesOf(up);
+    check('a stack standing on a raised floor is measured from where it stands, not from zero',
+      apertureAt(d, up.id, 0.3 + upLevels[1].centerH) === 1 && apertureAt(d, up.id, 0.3 + upLevels[0].centerH) === 0
+      && apertureAt(d, up.id, upLevels[1].centerH - 0.35) === 0);
+    const g = place(d, 'gate', 3, 3);
+    check('a gate has only opening 0, and so does a pole and a piece that is not there',
+      apertureAt(d, g.id, 0.4) === 0 && apertureAt(d, 'el-nope', 1) === 0);
+  }
+
+  /* FLY IT AGAIN: the one way to fly a single gate a second time. */
+  {
+    const d = deepClone(t1);
+    const gate = d.elements.find((e) => e.type === 'gate');
+    const before = d.sequence.length;
+    const e = flyAgain(d, gate.id, 0);
+    check('a gate flown again adds one pass at the end, through the same gate',
+      Boolean(e) && d.sequence.length === before + 1 && d.sequence[before] === e && e.elementId === gate.id);
+    check('its direction is worked out, not left undecided', e.entry === 1 || e.entry === -1, String(e.entry));
+    check('and now the gate is flown twice', tagsOf(d).find((t) => t.elementId === gate.id).count === 2);
+    const mid = flyAgain(d, gate.id, 0, 2);
+    check('at a place, it goes in at that place', d.sequence[2] === mid && d.sequence.length === before + 2);
+    const back = deserialize(serialize(d));
+    check('and the document round trips with both passes', back.error == null && back.doc.sequence.filter((q) => q.elementId === gate.id).length === 3,
+      String(back.error));
+
+    const pole = d.elements.find((e2) => e2.type === 'pole');
+    check('Track 1 has a pole to fly again', Boolean(pole));
+    const pe = flyAgain(d, pole.id, 0);
+    check('a pole flown again has a side and a clearance', Boolean(pe) && (pe.passSide === 'left' || pe.passSide === 'right')
+      && pe.clearance > 0, JSON.stringify(pe));
+    const bar = place(d, 'barrier', 1, 1);
+    const n = d.sequence.length;
+    check('a piece that cannot be flown is refused and the order is as it was', flyAgain(d, bar.id, 0) === null && d.sequence.length === n);
+    check('a piece that is not there is refused', flyAgain(d, 'el-nope', 0) === null);
+    check('the cap is a number', Number.isFinite(MAX_PASSES) && MAX_PASSES >= 100);
+    while (d.sequence.length < MAX_PASSES) {
+      d.sequence.push(createSequenceEntry(d, gate.id, 0));
+    }
+    check('at the cap it refuses, so a held key cannot grow a track without end', flyAgain(d, gate.id, 0) === null && d.sequence.length === MAX_PASSES);
+  }
+
+  /* THE LAST PASS COMES OFF (Backspace in the tool). */
+  {
+    const d = deepClone(t1);
+    const gate = d.elements.find((e) => e.type === 'gate');
+    const n = d.sequence.length;
+    const firstBefore = d.sequence[0];
+    const added = flyAgain(d, gate.id, 0);
+    const gone = removeLastPass(d);
+    check('the last pass comes off and it is the one just added, and the first is still there',
+      d.sequence.length === n && gone === added && d.sequence[0] === firstBefore);
+    check('an empty order has nothing to take off', removeLastPass(createTrack('e', 'micro')) === null);
+  }
+
+  /* HOSTILE DOCUMENTS never throw, and a hand-built one with a hole in it is read as far as it goes. */
+  {
+    let threw = '';
+    try {
+      const junk = normalize({ sequence: [{ id: 'q1', elementId: 'gone' }, null, 7], elements: [] }).doc;
+      passList(junk); tagsOf(junk); reuseOf(junk);
+      focusFor(junk, { selection: new Set(['x']), pinned: 'q1', hover: 'q1' });
+      aroundPass(junk, 'q1'); stretchOf(buildPath(junk), 'q1'); apertureAt(junk, 'gone', 1);
+      flyAgain(junk, 'gone', 0); removeLastPass(junk);
+      const bare = { sequence: [{ id: 'a', elementId: 'zz' }], elements: [] };
+      passList(bare); tagsOf(bare); reuseOf(bare); focusFor(bare, {});
+    } catch (e) {
+      threw = e.message;
+    }
+    check('nothing here throws on a document with entries that point at nothing', threw === '', threw);
+  }
+
+  /* EVERY SHIPPED TRACK: the tags add up to the passes, and the reuse figures agree with a count made another way. */
+  for (const p of PRESETS) {
+    const d = normalize(JSON.parse(JSON.stringify(p))).doc;
+    const nums = gateNumbers(d);
+    const numbered = [...nums.values()].filter((n) => n != null).length;
+    const tags = tagsOf(d);
+    const perPiece = new Map();
+    for (const [elId, list] of sequenceNumbers(d)) {
+      const n = list.filter((x) => x.number != null).length;
+      if (n) { perPiece.set(elId, n); }
+    }
+    const r = reuseOf(d);
+    check(`${p.id}: the tags add up to the numbered passes and to the count made another way`,
+      tags.reduce((a, t) => a + t.count, 0) === numbered && r.passes === numbered
+      && r.pieces === perPiece.size && r.reused === [...perPiece.values()].filter((n) => n > 1).length,
+      `${tags.length} tags, ${numbered} passes, ${JSON.stringify(r)}`);
+  }
+}
+
 async function main() {
   if (process.argv.includes('--emit')) {
     process.stdout.write(serialize(demoTrack()));
@@ -7507,6 +7772,7 @@ async function main() {
   suiteWhoopRow();
   suiteWhoopReplace();
   suiteWhoopBadges();
+  suiteWhoopPasses();
   await suiteShareLink();
   suiteBuildSheet();
   suiteImportFpv();

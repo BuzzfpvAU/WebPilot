@@ -307,6 +307,92 @@ opens the elevation profile and the list.
    (section 5). Everything else changes in place. No framework, no bundler, no
    build step, and a GPLv3 header on each new file.
 
+### 3.8 A piece flown more than once (added 2026-09-30, the owner's ask)
+
+The owner: "design and fix the super cluttered experience of building a tiny track where
+gates are used more than once on a lap", and "don't touch the existing tracks". The
+RaceGOW5 tracks do this all the time: Track 8 flies 14 pieces 29 times, one tall pole six
+times and two of its gates three times each; Track 6 flies 11 pieces 20 times; Track 5,
+13 pieces 20 times. Tracks 1 and 2 never do, which is why they read cleanly.
+
+**What is wrong, measured on the builder as it stands after Stage 3.**
+
+1. Every pass draws its own arrow, 0.85 of the opening wide, on the same opening, so a
+   piece flown three times is three arrows on top of each other and a gate under them.
+2. Every pass of a pole or cone draws its own green and red scoring square with a
+   translucent pane each. Track 8's tall pole is six squares of coloured glass round one
+   pipe.
+3. Every pass has its own number chip, 29 on Track 8, each a button.
+4. The card is about the first pass only. Track 8's pole says "number 2" and the other
+   five passes are nowhere on it; Place in order and Other side act on pass 2 whichever
+   pass the pilot meant.
+5. The flying order list cuts names to "Tall ..." in its narrow column, so six rows read
+   the same, and nothing links a row to its piece except selecting it.
+6. There is no way to fly a single gate again. "Fly another level" exists for stacks only
+   and "Add to the track" for a piece that is not in the order at all.
+7. The racing line is one hairline whatever it is doing, so six turns round a pole are
+   not readable as six.
+8. The lap bar says "Gates 29" for 14 gates and 29 passes.
+
+**The idea: pieces stand in the room, passes are moments in the lap.** The room shows
+pieces, a strip along the foot shows passes in flying order, and pointing at either lights
+the other. At most one pass is in focus at a time, and everything about a pass that is not
+in focus is quiet.
+
+**The room at rest** (nothing selected, nothing under the pointer):
+
+- One number tag for each opening that is flown, not for each pass: its first number, and
+  a count when there is more than one ("2 x6"). A pole flown six times is one tag.
+- One arrow for each direction an opening is flown in, at the size of the opening and not
+  wider than it, and side by side when it is flown both ways, so an arrow is never under
+  another.
+- A pole or cone's scoring squares are outlines only, with no panes.
+- The racing line is as it is.
+
+**In focus.** The pass whose number is under the pointer (a tag, a chip on the strip), or
+the one the card is showing. Its arrow is bright and its two panes (green in, red out) are
+drawn; the stretch of racing line from the pass before it to the pass after it is drawn
+thick and bright; every other arrow, outline and line is drawn back to a third; the
+neighbouring pieces keep their tags and the others fade. Selecting a piece puts its first
+pass in focus, and the card's pass chips move the focus.
+
+**The lap strip,** a row along the foot of the room above the lap bar: one chip per pass
+in flying order, the number and a small mark for what kind of piece it is, waypoints as
+small dots between. Hover a chip and the pass lights in the room; click it to pin the
+focus and select the piece; drag it to move the pass in the order; Delete takes that pass
+out, and only that pass. When a chip is in focus the other chips of the same piece are
+ringed, which is how a reused piece is found on a strip without a colour to remember, and a
+chip with a warning has a red dot. It scrolls on a narrow screen and keeps the focused chip
+in view. The last chip is Fly order, the tool below.
+
+**Fly order, a tool (O).** Armed, a click on a piece adds a pass through it at the end of
+the lap, and clicking the same piece again is the second pass. That is the whole way to
+fly a gate again. The pass is in focus at once, so its arrow, its stretch of line and its
+chip show what the click did. On a stack the opening is the one under the pointer.
+Backspace takes the last pass off and Escape puts the tool away. The direction is worked
+out from the line, as it is for every pass (faces.js), and Reverse on the card changes it.
+The coach line says so, with a Start over that empties the order in one undo step, so a
+lap can be clicked out from nothing.
+
+**The card,** for a piece flown more than once: "Tall pole, flown 6 times", a row of its
+pass chips with the focused one filled, and under it what is about the focused pass alone
+(Place in order, Other side or Reverse, Remove this pass), then Fly again, then what is
+about the piece (position, height, Replace with, Copy, Remove piece). Remove says how many
+passes it takes with it.
+
+**Words.** The lap bar says "Passes 29 on 14 pieces" when a piece is flown more than once
+and "Gates 6" when none is. The order list wraps a name onto two lines on a whoop canvas.
+
+**What does not change.** No document field is added and the schema stays 3. Nothing in
+`tracks/json`, the presets, the maps or the reader is edited, and the differential run
+against the pre-work reader, the GIF exporter and the game course are the proof that no
+existing track has moved. It is the whoop canvas only: the 5 inch and freestyle canvases
+stay pixel identical, and the plan view follows the room in a second slice.
+
+**Not in this design.** A colour per piece (a hue to remember is what the ring is for,
+and it fails for a colour blind pilot), animating the lap, and any change to how a pass
+is stored.
+
 ## 4. Parts, and a club profile
 
 ### 4.1 Why a profile, and the switch
@@ -541,6 +627,17 @@ fixture, and `micro:check` unchanged.
 Exit: green, and the owner prints Track 1's sheet and builds from it, or says why
 not.
 
+**Stage R. A piece flown more than once (M),** 3.8, on the owner's ask after Stage 3.
+A pure module first (`passes.js`: tags, directions, focus, the stretch of line, adding a
+pass), then the room, the strip, the card and the tool, then the plan view.
+Checks: selftest for `passes.js` on the shipped tracks and on hostile documents; the flow
+check drives the strip, the tag, the card chips and the tool with real events on Track 8
+and on a track laid from nothing by clicking a piece twice; `device-check.js` for the strip
+and card at finger size; the differential run against the pre-work reader on every shipped
+document (identical), the eight GIFs (byte identical), and the 5 inch and freestyle
+canvases (pixel identical). Exit: green, and the owner clicks a lap out on Track 8's
+pieces.
+
 **Stage 4. The club profile and the parts (L),** with approvals in it (section 7).
 The order is the `spec` field, free gate size and room size (S); table, chair and
 banner (S each); hoop and hex (M); the cube spike; the cube (L). Every part lands
@@ -642,6 +739,15 @@ Risks:
     the MIT notice.
 12. **The test.** The first track test as Stage 1's acceptance (recommended), and
     who else runs it.
+
+13. **A piece flown more than once (3.8).** The tag shows the first number and a count,
+    the rest on hover (recommended). Or every number always, as now, or only a count.
+14. **Fly order appends at the end of the lap** and the strip and the card move a pass
+    (recommended). Or a click inserts after the pass in focus.
+15. **Fly order's key is O, and Start over empties the order** in one undo step
+    (recommended).
+16. **The lap strip stays beside the Flying order drawer** (recommended). Or it replaces
+    the list on a whoop canvas.
 
 ## 9. Not in this plan, and what it is built from
 
