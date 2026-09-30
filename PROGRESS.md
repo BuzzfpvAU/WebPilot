@@ -60602,3 +60602,45 @@ beat.
     npm run verify      not run: no physics, plant, ABI or build change
     lint:devices, shell not run: the first presses no stick key, the second
                         has a known red on main from before
+
+### The owner's answer, 2026-09-30, and the push to main (the ticket pass)
+
+"push to main", after the summary above: what was fixed and what was left
+alone, the decisions the owner may overrule, and the verification scale asked
+for, which was not chosen. So no pass beyond the RUN LOG above was run, and
+nobody has yet flown any of it. Nothing was written to the board.
+bug-d1d3f4fb, bug-453fb074 and bug-fe9215c0 stay open there even though their
+fixes are live now: the practice since 21 September is to close a ticket once
+its fix is on webfpv.org/sim, and the answer did not ask for the closing, so
+it is the owner's to ask for.
+
+main had not moved from 596ed9e, fetched and checked just before the push, and
+the merge base with the branch was 596ed9e itself, so it went to main as a
+fast-forward of ccr-07e2c12d-fuvn2z (596ed9e..5e674d3): five commits (the
+earlier board record, the three fixes, and this entry as it stood before the
+push), with no merge commit, no rebase and no force. The clone is still
+shallow, so the ancestry check was git merge-base --is-ancestor origin/main
+HEAD, which was true.
+
+### Live on webfpv.org (the ticket pass)
+
+main moved 596ed9e..5e674d3 at 10:11:00 UTC, and webfpv.org/sim served it
+within about 65 s: src/input/input.js, src/input/touchsticks.js, src/main.js,
+src/render/audio.js and src/game/collide.js, read off the live site with a
+cache busting query, each hash the same as the commit. The polls went 0 of 5
+at 4 s, 23 s and 42 s and 5 of 5 at 61 s, so the comparison can tell old from
+new. Last-Modified on the site read 10:11:50 UTC. No module was added or
+removed, so src/fresh.js and index.html are unchanged.
+
+The modules are still served with cache-control public, max-age=14400,
+s-maxage=300, so a returning pilot's browser can hold the old files for up to
+four hours; a hard reload (Ctrl+Shift+R) gets the new ones at once. Any
+resolution written for these tickets should say so, as the ones of 27
+September did.
+
+That says the served files are the ones tested here. It says nothing about how
+a touchscreen laptop with a keyboard, the sound after an output device
+changes, or a set down beside a wall feel, which is the owner's look: what to
+do and what would count as wrong are under "For the owner" above. The live
+site was not loaded in a browser for this check, so as not to add a visit to
+its statistics.
