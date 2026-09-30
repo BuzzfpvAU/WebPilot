@@ -241,6 +241,106 @@ const BAR_PROBE = `(() => {
 })()`;
 
 /*
+ * THE WHOOP ROOM, ON A TABLET. A track is built standing in the hall it is for,
+ * and the room is the tool there (WHOOP-BUILDER-PLAN.md, 3.2), so it has to work
+ * with fingers on a screen of about 1000 px: the drawing has to be most of the
+ * screen, the page must not take the touches, every tool has to be reachable and
+ * finger sized, and the card a tap on a gate brings up has to leave the room and
+ * the piece it is about visible. Touch emulation is on, so `pointer: coarse`
+ * matches and the sizes that rule asks for are the ones measured.
+ */
+const WHOOP_WINDOWS = [
+  ['tablet portrait', 820, 1180],
+  ['tablet landscape', 1024, 768],
+  ['tablet landscape, large', 1180, 820],
+];
+
+const WHOOP_PROBE = `(async () => {
+  const bad = [];
+  const app = window.trackBuilder;
+  const box = (n) => { const r = n.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; };
+  if (!matchMedia('(pointer: coarse)').matches) { bad.push('pointer: coarse did not match, so the touch sizes were not exercised'); }
+  const stage = box(document.getElementById('tb-stage'));
+  if (stage.w < innerWidth * 0.55) { bad.push('the drawing is only ' + Math.round(stage.w) + ' px of ' + innerWidth + ' across'); }
+  if (stage.h < innerHeight * 0.4) { bad.push('the drawing is only ' + Math.round(stage.h) + ' px of ' + innerHeight + ' high'); }
+  const cv = document.getElementById('tb-3d');
+  if (getComputedStyle(cv).touchAction !== 'none') { bad.push('the room does not take the touches itself (touch-action ' + getComputedStyle(cv).touchAction + ')'); }
+  const { PRESETS } = await import('/src/trackbuilder/presets.js');
+  app.loadDocument(JSON.parse(JSON.stringify(PRESETS.find((p) => p.id === 'racegow5-track6'))), '');
+  await new Promise((r) => setTimeout(r, 1200));
+
+  /* Every tool on the palette can be brought into view by scrolling it, and is finger sized. */
+  const tools = [...document.querySelectorAll('#tb-palette .tb-tool')];
+  if (tools.length < 12) { bad.push('only ' + tools.length + ' tools on the palette'); }
+  for (const t of tools) {
+    t.scrollIntoView({ block: 'nearest' });
+    const b = box(t);
+    const e = document.elementFromPoint((b.l + b.r) / 2, (b.t + b.b) / 2);
+    const name = (t.textContent || '').trim().slice(0, 22);
+    if (!(e && (e === t || t.contains(e)))) { bad.push('the tool ' + name + ' is covered after scrolling to it'); }
+    if (b.h < 43.5) { bad.push('the tool ' + name + ' is ' + Math.round(b.h) + ' px tall, less than a finger'); }
+  }
+  document.getElementById('tb-palette').scrollTop = 0;
+
+  /* The card that a tap on a gate brings up. */
+  const gate = app.doc.elements.find((e) => e.type === 'gate');
+  app.setSelection([gate.id]);
+  await new Promise((r) => setTimeout(r, 900));
+  const card = document.getElementById('tb-card');
+  if (card.hidden) {
+    bad.push('selecting a gate did not bring up its card');
+  } else {
+    const c = box(card);
+    if (c.l < stage.l - 0.5 || c.r > stage.r + 0.5 || c.t < stage.t - 0.5 || c.b > stage.b + 0.5) { bad.push('the card is not inside the drawing: ' + JSON.stringify([c, stage].map((q) => [q.l, q.t, q.r, q.b].map(Math.round)))); }
+    if (c.h > stage.h * 0.45) { bad.push('the card is ' + Math.round(c.h) + ' px of a ' + Math.round(stage.h) + ' px drawing, and covers the track it is for'); }
+    const lap = box(document.getElementById('tb-lapbar'));
+    if (c.l < lap.r && c.r > lap.l && c.t < lap.b && c.b > lap.t) { bad.push('the card sits on the lap bar'); }
+    for (const b of card.querySelectorAll('button')) {
+      const q = box(b);
+      if (q.h < 43.5) { bad.push('the card button ' + (b.textContent || '').trim().slice(0, 16) + ' is ' + Math.round(q.h) + ' px tall, less than a finger'); }
+    }
+    for (const w of ['Turn', 'Reverse', 'Copy', 'Remove', 'More']) {
+      const b = [...card.querySelectorAll('button')].find((x) => x.textContent === w);
+      if (!b) { bad.push('the card has no ' + w + ' button, which a touch screen has no key for'); }
+    }
+    if (!card.querySelector('[data-tbkey="card-replace"]')) { bad.push('the card has no Replace with'); }
+    /* The piece is not under it. */
+    const v = app.view3d;
+    v.applyCamera(); v.camera.updateMatrixWorld(true); v.root.updateMatrixWorld(true);
+    const p = new v.camera.position.constructor(gate.position.x, gate.position.y, 0.35);
+    v.root.localToWorld(p); p.project(v.camera);
+    const r = cv.getBoundingClientRect();
+    const px = r.left + ((p.x + 1) / 2) * r.width;
+    const py = r.top + ((1 - p.y) / 2) * r.height;
+    const under = document.elementFromPoint(px, py);
+    if (under && card.contains(under)) { bad.push('the card is on top of the gate it is about'); }
+  }
+
+  /* The bar along the foot, the numbers and the marks. */
+  for (const b of document.querySelectorAll('#tb-lapbar button')) {
+    const q = box(b);
+    if (q.h < 43.5) { bad.push('the lap bar button is ' + Math.round(q.h) + ' px tall'); }
+  }
+  for (const n of document.querySelectorAll('.tb-bubble, .tb-warnbadge')) {
+    const q = box(n);
+    if (n.style.display !== 'none' && q.w < 29.5) { bad.push('a number or a mark is ' + Math.round(q.w) + ' px across'); break; }
+  }
+
+  /* More opens the drawer, and its fields are finger sized and inside the screen. */
+  const more = [...card.querySelectorAll('button')].find((x) => x.textContent === 'More');
+  if (more) { more.click(); }
+  await new Promise((r) => setTimeout(r, 500));
+  const side = box(document.getElementById('tb-side'));
+  if (side.r > innerWidth + 1 || side.b > innerHeight + 1 || side.l < 0) { bad.push('the drawer runs off the screen'); }
+  const fields = [...document.querySelectorAll('#tb-inspector input')].filter((n) => n.getBoundingClientRect().width > 2);
+  if (fields.length < 3) { bad.push('the drawer shows only ' + fields.length + ' inspector fields'); }
+  for (const f of fields) {
+    if (box(f).h < 39.5) { bad.push('a field in the drawer is ' + Math.round(box(f).h) + ' px tall'); break; }
+  }
+  return JSON.stringify({ bad, tools: tools.length });
+})()`;
+
+/*
  * THE FREESTYLE RESULTS PAGE, ON A LAPTOP. The lettering's five panel
  * fixture has four kinds of trick, which is three rows and a "more" line.
  * At 1280 by 720 the copy column used to run under the menu, and Fly again
@@ -523,6 +623,20 @@ async function runBuilder(label, mode, w, h) {
   }
 }
 
+async function runWhoop(label, w, h) {
+  const page = await openPage({ root, width: w, height: h, url: '/src/trackbuilder/index.html?class=micro', touch: true });
+  try {
+    await page.until('!!(window.trackBuilder && window.trackBuilder.doc)', 60000);
+    await page.until("window.trackBuilder.mode === '3d' && !!window.trackBuilder.view3d.renderer", 60000).catch(() => {});
+    await page.sleep(800);
+    const top = JSON.parse(await page.evaluate(BAR_PROBE));
+    const room = JSON.parse(await page.evaluate(WHOOP_PROBE));
+    return { bad: [...top.bad.map((b) => `top bar: ${b}`), ...room.bad], tools: room.tools, seen: top.seen };
+  } finally {
+    await page.close();
+  }
+}
+
 async function main() {
   const failures = [];
   console.log('device check: every screen, on a phone and a tablet\n');
@@ -546,6 +660,16 @@ async function main() {
     const r = await runBuilder(label, mode, w, h);
     const where = `builder ${label} ${w}x${h}`;
     console.log(`  ${where.padEnd(34)} ${r.bad.length ? `${r.bad.length} control(s) covered` : `all ${r.seen} controls clear`}`);
+    for (const problem of r.bad) {
+      failures.push(`${where}: ${problem}`);
+    }
+  }
+
+  console.log('\nthe whoop room, on a tablet\n');
+  for (const [label, w, h] of WHOOP_WINDOWS) {
+    const r = await runWhoop(label, w, h);
+    const where = `whoop room ${label} ${w}x${h}`;
+    console.log(`  ${where.padEnd(44)} ${r.bad.length ? `${r.bad.length} problem(s)` : `${r.tools} tools, the card, the drawer and the bar all reachable`}`);
     for (const problem of r.bad) {
       failures.push(`${where}: ${problem}`);
     }
@@ -579,7 +703,7 @@ async function main() {
     }
     return 1;
   }
-  console.log('\nPASS, every row and every note is reachable on every device, every builder bar control on a laptop, the results page clear of its menu, and the flight OSD on a phone clear of the centre third');
+  console.log('\nPASS, every row and every note is reachable on every device, every builder bar control on a laptop, the whoop room usable with fingers on a tablet, the results page clear of its menu, and the flight OSD on a phone clear of the centre third');
   return 0;
 }
 

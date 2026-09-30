@@ -425,6 +425,10 @@ const PLAN_PHI = Math.PI / 2 - 0.02;
  * metres across: 26.7 mm of PVC becomes about 8 cm to hit. */
 const PICK_PIPE = 0.055;
 const LINE_GRAB_PX = 9;
+
+/* How far from a finger's contact point, in pixels, a press still takes a thing: the
+ * pad of a finger is about a centimetre across. */
+const FINGER_SLOP_PX = 18;
 const BEND_START_PX = 4;
 /* How far a pull upward on something that stands on the ground travels before
  * it is told why nothing rose: more than a click's wobble, less than a drag. */
@@ -676,6 +680,7 @@ export class View3D {
     this.rulerNode = null;
     this.overlay = null;
     this.bubbles = [];
+    this.bubblePitch = 26;
     this.badges = [];
     this.badgeSource = null;
     this.badgeTip = null;
@@ -1107,6 +1112,21 @@ export class View3D {
      * while. */
     cv.addEventListener('pointercancel', (e) => this.onCancel(e));
     cv.addEventListener('pointerleave', () => this.editor.onLeave());
+    /*
+     * A SECOND FINGER THAT LANDS ON SOMETHING LAID OVER THE ROOM (the card, a
+     * number, a mark, the bar along the foot) is still the second finger of the
+     * hand that is on the room: it joins the gesture, and the canvas is given its
+     * moves and its lift, so the pair is not lost because one of them came down
+     * on a piece of HTML. A finger that is the first on the screen is an ordinary
+     * press on whatever it touched.
+     */
+    cv.parentElement?.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch' || e.target === cv || !this.enabled || !this.roomEditing() || this.editor.touches.size < 1) {
+        return;
+      }
+      cv.setPointerCapture(e.pointerId);
+      this.editor.onDown(e);
+    }, true);
     cv.addEventListener('wheel', (e) => {
       e.preventDefault();
       if (this.roomEditing()) {
@@ -1162,14 +1182,32 @@ export class View3D {
    * "toward the pointer" means: the floor point there is found before and after
    * and the camera is slid by the difference. */
   zoomToward(clientX, clientY, factor) {
-    const before = this.levelPoint(clientX, clientY, 0);
-    this.orbit.radius = clamp(this.orbit.radius * factor, this.nearestRadius(2), 600);
+    this.gripFloor({ x: clientX, y: clientY }, { x: clientX, y: clientY }, factor, 0);
+  }
+
+  /*
+   * A GRIP ON THE FLOOR: whatever floor point is under `from` on the screen is put
+   * under `to`, after the room has been zoomed by `factor` and turned by `twist`
+   * radians. The wheel is a grip that stays where it is; two fingers are a grip
+   * that moves, spreads and twists, so sliding, pinching and twisting are one
+   * motion and the floor stays under the fingers whichever of them the hand is
+   * doing. The camera is brought up to date before the floor point is read and
+   * after it is moved: several moves can arrive between two frames, and a point
+   * read off the last frame's camera would be off by every move since.
+   */
+  gripFloor(from, to, factor, twist) {
     this.applyCamera();
     this.camera.updateMatrixWorld(true);
-    const after = this.levelPoint(clientX, clientY, 0);
-    if (before && after) {
+    const anchor = this.levelPoint(from.x, from.y, 0);
+    this.orbit.radius = clamp(this.orbit.radius * factor, this.nearestRadius(2), 600);
+    this.orbit.theta += twist;
+    this.applyCamera();
+    this.camera.updateMatrixWorld(true);
+    const now = this.levelPoint(to.x, to.y, 0);
+    if (anchor && now) {
       const t = this.orbit.target;
-      this.orbit.target = { x: t.x + (before.x - after.x), y: t.y, z: t.z - (before.y - after.y) };
+      this.orbit.target = { x: t.x + (anchor.x - now.x), y: t.y, z: t.z - (anchor.y - now.y) };
+      this.applyCamera();
     }
     this.angled = true;
     this.cameraMoved();
@@ -1235,7 +1273,39 @@ export class View3D {
    * (a bar between two openings, a leg, a pole). `weak` marks the invisible
    * pane across an opening with no pipe, which the racing line beats.
    */
+  /*
+   * WHAT IS UNDER THE POINTER, and for a finger, what is under it or within a
+   * fingertip of it. A mouse points at a pixel; a finger covers about a
+   * centimetre, so a pipe 27 mm thick or the ring at a gate's foot would be
+   * missed by a press that was on it. What is hit dead centre still wins, as it
+   * does for the mouse; when that is only the pane across an opening the ring
+   * within reach is taken over it, and when it is nothing at all, whatever is
+   * nearest within reach. Only a press asks (a finger does not hover).
+   */
   pickHit(e) {
+    const centre = this.pickAt(e);
+    if (e.pointerType !== 'touch' || (centre && !centre.weak)) {
+      return centre;
+    }
+    const r = FINGER_SLOP_PX;
+    let ring = null;
+    let near = null;
+    for (let k = 0; k < 8; k += 1) {
+      const a = (k * Math.PI) / 4;
+      const hit = this.pickAt({ clientX: e.clientX + Math.cos(a) * r, clientY: e.clientY + Math.sin(a) * r });
+      if (!hit) {
+        continue;
+      }
+      if (hit.ring && !ring) {
+        ring = hit;
+      } else if (!hit.weak && (!near || hit.distance < near.distance)) {
+        near = hit;
+      }
+    }
+    return ring ?? (centre ?? near);
+  }
+
+  pickAt(e) {
     if (!this.camera || !THREE) {
       return null;
     }
@@ -3070,6 +3140,9 @@ export class View3D {
       this.overlay.append(node);
       this.bubbles.push({ node, spec });
     }
+    /* How far apart the numbers of a stack sit: a button's own width and a gap,
+     * which is more on a screen that is touched. */
+    this.bubblePitch = (this.bubbles[0]?.node.offsetWidth ?? 22) + 4;
   }
 
   /*
@@ -3116,7 +3189,8 @@ export class View3D {
       this.overlay.append(node);
       /* A numbered piece has its number over the top of it, so the mark goes
        * beside the number; a pole has nothing there. */
-      this.badges.push({ node, id, dx: numbered.has(id) ? -26 : 0 });
+      const beside = -((this.bubbles[0]?.node.offsetWidth ?? 22) / 2 + node.offsetWidth / 2 + 4);
+      this.badges.push({ node, id, dx: numbered.has(id) ? beside : 0 });
     }
   }
 
@@ -3222,7 +3296,7 @@ export class View3D {
       const at = el ? project({ x: el.position.x, y: el.position.y, z: el.position.z + b.spec.dz }) : null;
       b.node.style.display = at ? '' : 'none';
       if (at) {
-        b.node.style.transform = `translate(${(at.x + b.spec.slot * 26).toFixed(1)}px, ${at.y.toFixed(1)}px)`;
+        b.node.style.transform = `translate(${(at.x + b.spec.slot * this.bubblePitch).toFixed(1)}px, ${at.y.toFixed(1)}px)`;
       }
     }
     this.host.placeCard?.(project, rect);

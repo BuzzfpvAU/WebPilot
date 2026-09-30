@@ -59915,3 +59915,141 @@ the board or the schema (`schemaVersion` stays 3, no stored field is added).
                              `shots.js` (offered at the end of the turn, as CLAUDE.md asks),
                              lint:responsive (the simulator's freestyle page, nothing here
                              touches it; run at the end of Stage 3)
+
+## 2026-09-30 | builder | Whoop builder, Stage 2: help while placing, and touch
+
+Stage 2 of WHOOP-BUILDER-PLAN.md, on the same approval as Stages 0 and 1 (see the Stage 0 entry
+for what "build up to stage 3" is taken to cover; the owner sent it twice, the second time in
+the middle of this stage). Everything here is on the whoop canvas only: the 5 inch and freestyle
+canvases keep exactly the handlers and panels they had. Nothing touches the physics, the module
+ABI, the build, the board or the schema (`schemaVersion` stays 3, and no field is added to a
+stored track; the one field added anywhere is `also` on a warning, which is never stored).
+
+### What is built, against the plan's sections
+
+- **3.5.2, magnets.** `magnetFor` in `snap.js`, one pure function that the plan and the room both
+  ask, so they cannot disagree. Within 3 in of a legal spot a piece is taken to it and a guide
+  says why: 30 in centre to centre from a gate along its width (the side by side slot, which
+  also gives the new gate its neighbour's heading), 14 in off a gate for a pole, 36 in from
+  another pole, and the same x or y as a neighbour. It never takes a piece to a spot the rules
+  refuse, never to a piece being moved, Alt switches all of it off, and snapping twice changes
+  nothing more. The guides are drawn in the room and on the plan.
+- **3.5.3, the Row tool** ("Side by side", key H). A drag along the floor lays two or three gates
+  30 in apart with the row drawn faint and the 30 in between each pair on the screen before the
+  button is let go; a click lays a pair. It is one undo step. The modelling question the plan
+  left for this stage is answered the way the plan recommended: a row is ordinary gates, pinned
+  to a heading, each after the first with its shared upright taken away (`unbuiltSides`), joined
+  to the flying order along the row, each flown the way it faces. The heading is the one that
+  points the way the course is going, from the last place it has been.
+- **3.5.4, Replace with.** From the card. A gate becomes a stack, a tower or a horizontal gate, a
+  pole a cone, a bar a barrier, in place: same element, same number, same heading, the size of
+  the opening kept (every gate on a track is one size), the rest the new type's own except where
+  it had been moved off its type's default. A pass at an opening the new piece does not have is
+  dropped from the order. A gate is not offered a pole (one is passed through and the other
+  round, so "keeps its place in the order" would mean nothing). Several pieces at once, one
+  undo step.
+- **3.3, warnings on the piece.** Every warning that names a piece now puts a mark on it (and on
+  both pieces of a pair: `rg-spacing`, `rg-pole-gate` and `rg-pole-pole` carry an `also`), the
+  sentence is one hover away, a click selects the piece and its card says it again in words.
+  Only real warnings are marked, the same ones the lap bar counts. The marks follow a drag as it
+  happens: pull a gate to a legal distance and its marks go before the button is let up.
+- **The ruler** (key M). Two clicks, the distance drawn on the floor and said in inches and
+  millimetres; a click near a piece takes its middle. It is held until the next one or until the
+  tool is put away, and it is never in the track (a test compares the whole document).
+- **3.2, touch.** One finger does what the mouse does. A second finger takes over: whatever the
+  first was doing is put back, and the pair is the camera, as one grip on the floor: the floor
+  that was between the fingers stays between them whether the hand slides, spreads or twists
+  (clockwise turns the room clockwise). A second finger that lands on the card, a number or a
+  mark still joins the gesture. A finger has 18 px of reach for the ring at a gate's foot and for
+  a pipe; a mouse has none. The page does not take the touches (`touch-action: none`), and on a
+  screen that is touched the numbers and marks, the palette, the card's buttons and the
+  drawer's fields are finger sized. The card has a Turn button now, since there is no Q and E.
+- **The tablet layout.** On a touched screen the card is the small bar the plan asked for (Turn,
+  Reverse, Copy, Remove, Replace with, More), and the six fields are in the drawer that More
+  opens: six fields at finger size was a card 457 px high, over half of a 768 px tablet's room.
+  The card is placed on the first side of its piece that does not cover the piece (right, left,
+  above, below) and docks to the foot where none does, its top fixed to the piece so a sentence
+  appearing under the buttons moves nothing under a finger.
+
+### Where this departs from the plan, and why
+
+- **A laid row gets the line's "tight corner" warning, and that is the model being right.** Three
+  gates side by side all flown north, one after the other, is a hairpin between each pair. The
+  shipped tracks fly their rows the same way, one gate per pass with waypoints between (Track
+  3's row of three has a waypoint between each). So the flow check asserts that a laid row
+  breaks no rule of the sport (`tight-corner`, `rg-envelope` and `no-start` are all it says) and
+  does not assert silence. If the owner would rather a row were one station with several
+  alternative openings, that is a change to the flying order's model and belongs with Stage 4.
+- **The card's six fields are not on the card on a touched screen** (see above). The plan had
+  them on every card; on a tablet they cost the room.
+- **The tablet's palette is still a column at the left,** not a strip along the foot as the plan
+  drew it. It scrolls, every tool is reachable and finger sized (the device check asserts it),
+  and a strip would be a second palette to keep in step. Say so if a hand test on a tablet finds
+  the column in the way.
+- **Two warnings' wording is unchanged and could be better.** "Gate and Gate are 20 in apart"
+  names no numbers, because `label()` in `warnings.js` is the name or the type. With the mark
+  on the piece it is unambiguous which gates, so it is left; numbering the labels would change
+  text the selftest and the shipped presets' checks read.
+
+### What went wrong
+
+- The first run of the touch case failed thirteen assertions, and most were the check's own: a
+  card floating over the next press (the same collision as in Stage 1, now with two fingers), a
+  point off the canvas because I had read the camera's target as a document point when the
+  camera keeps y up (so z down), and the protocol's `touchEnd`, which names the fingers that LIFT
+  and lifts them all when given none (shots.js has it the other way round in a comment). What it
+  found in the product was three things: a second finger that landed on the card was lost to the
+  canvas, pan, zoom and twist were three approximations that disagreed, and the twist went the
+  wrong way round.
+- My first `movePinch` panned by a constant, zoomed toward the middle and twisted about the
+  camera's target, three approximations that disagreed by 51 px over a spread of 130. It is one
+  grip now (`gripFloor`), which also fixed the wheel: several moves can arrive between two
+  frames, and the floor point was being read off the last frame's camera.
+- The twist went the wrong way round the first time (the room followed the fingers counter
+  clockwise). The check found it, at 0.700 rad against 0.700 rad, and the sign is asserted.
+- The `settling` state I added for "a lifted pair never becomes a stray move" was not needed:
+  the second finger clears the first's gesture, so the finger that is left has nothing to
+  continue. A mutation of it was MISSED, which is how I found out. It is gone, and the checks that
+  matter (a pair with a tool armed places nothing, lifting a pair does not let go of what was
+  selected) fail if the first finger's gesture is left in place.
+- `Reverse` on the card made a sentence appear above the buttons, the card grew, and it
+  re-centred on its piece: the next press missed. The sentences are under the buttons now and the
+  card's top is fixed to the piece. (In headless Chromium a frame is 100 to 300 ms, so this
+  showed up as a card that moved after the press; on a real GPU it would have been a flicker.)
+- One mutation, an extra redraw after Replace with, was MISSED because `edit` already redraws.
+  The extra lines were dead and are gone.
+
+### RUN LOG
+
+    code                     src/trackbuilder: snap (magnets, row, ruler, replace), edit3d, view3d,
+                             view2d, ui, app, warnings (`also`), elements (tools), index.html;
+                             scripts/builder-flow-check.js (+7 cases), scripts/device-check.js
+                             (+ the whoop room at three tablet sizes). No new module.
+    self test                node src/trackbuilder/selftest.js: 1169 passed, 0 failed
+                             (1073 after Stage 1; 96 new, written before the code they check)
+    browser check            npm run check:builder: 25 cases, 224 assertions, all pass
+                             (18 cases and 125 assertions after Stage 1). New: magnets, row,
+                             ruler, replace with, warnings on the piece, touch (real touch events
+                             at 1024 by 768), and the card case waits for the card to settle
+    mutations                75 single behaviour reversions, each caught by the check that guards
+                             it: 25 against the self test (magnets 10, replace with 12, marks 3)
+                             and 50 against the browser and device checks (row and ruler 14,
+                             replace with 5, marks 9, touch 12, tablet layout 10). All re-run
+                             after the last refactor of the touch code and the card
+    micro:check              267 pass, exit 0
+    whoop:gates              21 of 21
+    lint:preload             up to date, 234 served (no new module in this stage)
+    device-check             PASS: the shell's screens on five devices, every builder bar
+                             control on a laptop, and the whoop room at 820 by 1180, 1024 by 768
+                             and 1180 by 820 with touch emulation (16 tools reachable and finger
+                             sized, the card inside the drawing and off its piece, the drawer
+                             reachable, the numbers and marks 32 px)
+    node --check             every edited file
+    dashes and non ASCII     none added (scanned over the diff)
+    not run                  `npm run verify` (no physics, plant, ABI or build change),
+                             `input-check` (nothing here reaches Fly this track; it ran green in
+                             Stage 1), `lint:responsive` (the simulator's freestyle page; run at
+                             the end of Stage 3), `shots.js` (offered at the end of the turn, as
+                             CLAUDE.md asks), and `lint:catalog`, which cannot run in this
+                             container: vendor/betaflight is not checked out here and the lint
+                             opens its headers. Nothing in this stage reads the catalog.

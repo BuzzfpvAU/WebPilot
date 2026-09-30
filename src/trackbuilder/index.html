@@ -1735,10 +1735,50 @@
       .tb-card-swap { margin: var(--s3) 0 0; }
       .tb-card-warns { margin-top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
       .tb-card-warn { margin: 0; padding: var(--s2) var(--s3); border-left: 3px solid var(--bad); background: var(--lift); font-size: var(--t-small); line-height: 1.45; }
-      .tb-card-actions { display: flex; gap: var(--s2); margin-top: var(--s4); }
-      .tb-card-actions .tb-btn { flex: 1; padding: 5px 6px; }
+      .tb-card-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
+      .tb-card-actions .tb-btn { flex: 1 1 22%; padding: 5px 6px; }
       .tb-card-fig { display: flex; flex-direction: column; gap: 3px; }
       .tb-card-fig > span { font-size: var(--t-micro); color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
+
+      /* ---------------- touch ---------------- */
+
+      /*
+       * The whoop room is worked with fingers as well as a mouse (edit3d.js has
+       * the gestures), so the browser must not take them: no page scroll, no
+       * pinch zoom of the whole page, no text selection or callout from a long
+       * press, on the drawing itself. Only the whoop canvas: the others are
+       * exactly as they were.
+       */
+      body.tb-whoop #tb-stage canvas {
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+      }
+      .tb-touch-hint { display: none; }
+      /*
+       * A finger is about a centimetre across. On a screen that is touched, the
+       * small marks laid over the room (the numbers and the warnings) and the
+       * buttons a pilot presses while building grow to a size that can be hit
+       * without looking twice; nothing else changes.
+       */
+      @media (pointer: coarse) {
+        .tb-bubble, .tb-warnbadge {
+          margin: -16px 0 0 -16px;
+          width: 32px;
+          height: 32px;
+          font-size: var(--t-body);
+          line-height: 30px;
+        }
+        .tb-bubble.editing { width: 56px; margin-left: -28px; }
+        #tb-palette .tb-tool { min-height: 44px; }
+        .tb-card-actions .tb-btn, #tb-lapbar .tb-btn { min-height: 44px; }
+        .tb-card-x { min-width: 44px; min-height: 44px; }
+        .tb-card-grid .tb-field input, .tb-card-swap select { min-height: 40px; font-size: var(--t-body); }
+        #tb-side .tb-field input, #tb-side .tb-field select, #tb-side .tb-btn, #tb-side .tb-mini { min-height: 40px; }
+        .tb-keys > span { display: none; }
+        .tb-keys > .tb-touch-hint { display: inline; }
+      }
 
       /* ---------------- reduced motion ---------------- */
 
@@ -1784,6 +1824,7 @@
               which is what a hint at the foot of a working canvas is for.
             -->
             <span class="tb-keys">
+              <span class="tb-touch-hint" data-whoop>Tap a gate to select it. Drag it to move it. Two fingers slide, pinch and twist the room.</span>
               <span><kbd>Wheel</kbd>zoom</span>
               <span><kbd>Mid</kbd>pan</span>
               <span><kbd>Click</kbd>select</span>

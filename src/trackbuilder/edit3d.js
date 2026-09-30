@@ -27,6 +27,14 @@
  * A press is not an edit. The undo step begins at the first real movement, so
  * a click that only selects leaves nothing behind.
  *
+ * TOUCH. One finger does what the mouse does: a tap places or selects, a drag on
+ * a gate moves it, a drag on the floor orbits. A second finger takes over: whatever
+ * the first was doing is put back, and two fingers are the camera, sliding with
+ * the pair's middle, zooming with the distance between them and turning with the
+ * twist. The finger left when one lifts has no gesture to go on with (a gesture
+ * begins with a press), so a lifted pair never becomes a stray move. Only fingers
+ * are tracked that way; a pen is a mouse that cannot hover.
+ *
  * This file is part of WebFPVSimulator.
  *
  * WebFPVSimulator is free software: you can redistribute it and/or modify
@@ -67,6 +75,10 @@ export class RoomEditor {
     this.drag = null;
     /* The ruler being drawn, or held after its second click: { a, b, fixed }. */
     this.ruler = null;
+    /* The fingers on the screen, by pointer id, and the two-finger gesture they
+     * are making, if any. */
+    this.touches = new Map();
+    this.pinch = null;
   }
 
   /* Whether these are the handlers: a whoop track, with the room up. */
@@ -80,6 +92,22 @@ export class RoomEditor {
     const v = this.view;
     const h = this.host;
     const at = { x: e.clientX, y: e.clientY };
+    if (e.pointerType === 'touch') {
+      /* A primary touch is the first finger of a new hand, so anything left over
+       * from an old one (a lift the page never heard about) is forgotten. */
+      if (e.isPrimary) {
+        this.touches.clear();
+        this.pinch = null;
+      }
+      this.touches.set(e.pointerId, at);
+      if (this.touches.size === 2) {
+        this.beginPinch();
+        return;
+      }
+      if (this.touches.size > 2) {
+        return;
+      }
+    }
     if (e.button === 1 || e.button === 2) {
       /* Right click puts an armed tool away, as it does on the plan; when
        * nothing is armed, right and middle drag pan. */
@@ -190,6 +218,15 @@ export class RoomEditor {
   /* ---------------- movement ---------------- */
 
   onMove(e) {
+    if (e.pointerType === 'touch') {
+      if (this.touches.has(e.pointerId)) {
+        this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      }
+      if (this.pinch) {
+        this.movePinch();
+        return;
+      }
+    }
     const d = this.drag;
     if (!d) {
       this.hover(e);
@@ -284,6 +321,9 @@ export class RoomEditor {
   /* ---------------- release ---------------- */
 
   onUp(e) {
+    if (e.pointerType === 'touch') {
+      this.letGo(e);
+    }
     const d = this.drag;
     if (!d) {
       return;
@@ -331,6 +371,9 @@ export class RoomEditor {
   /* The browser took the pointer away: a gesture half done is put back, and a
    * drag that never began has nothing to put back. */
   onCancel(e) {
+    if (e.pointerType === 'touch') {
+      this.letGo(e);
+    }
     const d = this.drag;
     if (!d) {
       return;
@@ -350,6 +393,75 @@ export class RoomEditor {
     }
     v.markDirty();
     h.requestDraw();
+  }
+
+  /* ---------------- two fingers ---------------- */
+
+  /*
+   * A SECOND FINGER: put back what the first was doing (a piece half pulled goes
+   * home, a box is dropped; a tap that had not moved had done nothing) and start
+   * reading the pair as the camera.
+   */
+  beginPinch() {
+    const v = this.view;
+    const d = this.drag;
+    if (d && (d.kind === 'move' || d.kind === 'turn') && d.began) {
+      this.host.revertEdit();
+    }
+    this.drag = null;
+    v.showBox(null);
+    v.clearMeasures();
+    v.setGuides([]);
+    v.clearGhost();
+    this.pinch = this.readPinch();
+    v.markDirty();
+    this.host.requestDraw();
+  }
+
+  /* Where the pair of fingers is: the middle, the distance and the angle of the
+   * line between them, on the screen. */
+  readPinch() {
+    const [a, b] = [...this.touches.values()];
+    return {
+      mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      dist: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)),
+      angle: Math.atan2(b.y - a.y, b.x - a.x),
+    };
+  }
+
+  movePinch() {
+    if (this.touches.size < 2) {
+      return;
+    }
+    const v = this.view;
+    const was = this.pinch;
+    const now = this.readPinch();
+    /* The angle wraps at half a turn; the step between two moves never does. */
+    let twist = now.angle - was.angle;
+    if (twist > Math.PI) {
+      twist -= 2 * Math.PI;
+    } else if (twist < -Math.PI) {
+      twist += 2 * Math.PI;
+    }
+    /* The floor that was between the fingers is between them now: slide, spread
+     * and twist are one grip (view3d gripFloor, which the wheel uses as well). A
+     * clockwise twist on the screen is the angle growing, and turns the room
+     * clockwise, which is the camera going the other way round it. */
+    v.gripFloor(was.mid, now.mid, was.dist / now.dist, -twist);
+    this.pinch = now;
+  }
+
+  /*
+   * A FINGER LIFTED OR TAKEN AWAY. The pair is over when there are fewer than two.
+   * Nothing else is undone, because there is nothing else to undo: the second
+   * finger put the first one's gesture back and cleared it (beginPinch), so the
+   * finger that is left is not doing anything until it, or another, is pressed.
+   */
+  letGo(e) {
+    this.touches.delete(e.pointerId);
+    if (this.pinch && this.touches.size < 2) {
+      this.pinch = null;
+    }
   }
 
   /* The pointer left the canvas with nothing pressed: a ghost has nowhere to be. */

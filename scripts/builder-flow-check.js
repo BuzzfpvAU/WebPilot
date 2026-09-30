@@ -70,8 +70,8 @@ function ownErrors(page) {
  * case that starts on the plan has to wait for that or the canvas changes under
  * it. `room: false` is for a page where the room is not expected to come.
  */
-async function openBuilder(query = '?class=micro', width = 1600, height = 900, { room = true, block = false } = {}) {
-  const page = await openPage({ root, width, height, url: `/src/trackbuilder/index.html${query}`, block });
+async function openBuilder(query = '?class=micro', width = 1600, height = 900, { room = true, block = false, touch = false } = {}) {
+  const page = await openPage({ root, width, height, url: `/src/trackbuilder/index.html${query}`, block, touch });
   await page.until('!!(window.trackBuilder && window.trackBuilder.doc)', 60000);
   if (room && /class=micro/.test(query)) {
     /* Not fatal when it never comes: a checkout from before the room opened by
@@ -128,6 +128,58 @@ async function drag(page, from, to, { steps = 8, hold = false, mods = 0, button 
 async function release(page, at) {
   await page.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', buttons: 0, clickCount: 1 }, page.sessionId);
   await page.sleep(120);
+}
+
+/*
+ * Fingers. Real touch events over the protocol, which the browser turns into
+ * pointer events with pointerType touch, the same as a screen does. A touch
+ * event carries every finger that is down, so a finger is named by an id and
+ * the caller says where each one is at each step.
+ */
+async function touch(page, type, fingers) {
+  await page.cdp.send('Input.dispatchTouchEvent', {
+    type, touchPoints: fingers.map((f) => ({ x: f.x, y: f.y, id: f.id })),
+  }, page.sessionId);
+}
+const at1 = (p) => [{ id: 1, x: p.x, y: p.y }];
+
+async function tap(page, p) {
+  await touch(page, 'touchStart', at1(p));
+  await page.sleep(60);
+  await touch(page, 'touchEnd', []);
+  await page.sleep(140);
+}
+
+/* One finger down here, pulled to there through `steps` points, and up, or
+ * (`hold`) left down so the page can be looked at mid gesture. */
+async function swipe(page, from, to, { steps = 8, hold = false } = {}) {
+  await touch(page, 'touchStart', at1(from));
+  for (let i = 1; i <= steps; i += 1) {
+    await touch(page, 'touchMove', at1({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }));
+    await page.sleep(25);
+  }
+  if (!hold) {
+    await touch(page, 'touchEnd', []);
+    await page.sleep(140);
+  }
+}
+
+/* Two fingers, each carried from where it is to where it goes, together. */
+async function pair(page, from, to, { steps = 8, hold = false } = {}) {
+  const at = (i) => [
+    { id: 1, x: from[0].x + ((to[0].x - from[0].x) * i) / steps, y: from[0].y + ((to[0].y - from[0].y) * i) / steps },
+    { id: 2, x: from[1].x + ((to[1].x - from[1].x) * i) / steps, y: from[1].y + ((to[1].y - from[1].y) * i) / steps },
+  ];
+  await touch(page, 'touchStart', [at(0)[0]]);
+  await touch(page, 'touchStart', at(0));
+  for (let i = 1; i <= steps; i += 1) {
+    await touch(page, 'touchMove', at(i));
+    await page.sleep(25);
+  }
+  if (!hold) {
+    await touch(page, 'touchEnd', []);
+    await page.sleep(160);
+  }
 }
 
 /* A key with modifiers, which the helper's own tap() has no way to send. */
@@ -1017,7 +1069,22 @@ kase('card', async () => {
     check('90 in Turn faces it north', Math.abs(now.yaw - Math.PI / 2) < 1e-4 && (await undoCount(page)) === steps + 1, `${now.yaw}`);
     steps = await undoCount(page);
     const before = await page.evaluate('window.trackBuilder.doc.sequence[1].entry');
-    const at = async (label) => json(page, `(() => { const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === ${JSON.stringify(label)}); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    /* The card follows its piece, and the camera settles after an edit that moves the
+     * piece, so what a press is aimed at is measured twice, a frame apart, until it
+     * has stopped. */
+    const where = (label) => json(page, `(() => { const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    const at = async (label) => {
+      let last = await where(label);
+      for (let i = 0; i < 20; i += 1) {
+        await page.sleep(150);
+        const now = await where(label);
+        if (now && last && Math.abs(now.x - last.x) < 0.5 && Math.abs(now.y - last.y) < 0.5) {
+          return now;
+        }
+        last = now;
+      }
+      return last;
+    };
     const rev = await at('Reverse');
     await click(page, rev.x, rev.y);
     check('Reverse turns the direction it is flown round', (await page.evaluate('window.trackBuilder.doc.sequence[1].entry')) === -before && (await undoCount(page)) === steps + 1);
@@ -1457,6 +1524,262 @@ kase('warnings on the piece', async () => {
     await page.evaluate('window.trackBuilder.undo(), 1');
     await page.sleep(300);
     check('undo brings the rule back, and the marks with it', (await badges()).length === 2);
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * THE ROOM WORKS WITH FINGERS. A tablet is how a track gets built standing in the
+ * hall it is for, and the room used to read a second finger as a new first one.
+ * One finger does what the mouse does: a tap places or selects, a drag on a gate
+ * moves it, a drag on the floor looks round. A second finger takes the camera,
+ * and whatever the first was doing is put back: sliding, pinching, twisting. What
+ * is asserted is what the hand sees: the floor stays under the fingers, a
+ * clockwise twist turns the room clockwise, a piece half pulled goes home, a
+ * finger left behind by a lifted pair does nothing.
+ */
+kase('touch', async () => {
+  const page = await openBuilder('?class=micro', 1024, 768, { touch: true });
+  try {
+    await trapToasts(page);
+    const orbit = () => json(page, '({ r: window.trackBuilder.view3d.orbit.radius, t: window.trackBuilder.view3d.orbit.theta, p: window.trackBuilder.view3d.orbit.phi, x: window.trackBuilder.view3d.orbit.target.x, y: window.trackBuilder.view3d.orbit.target.y, z: window.trackBuilder.view3d.orbit.target.z })');
+    const same = (a, b) => Math.abs(a.r - b.r) < 1e-9 && Math.abs(a.t - b.t) < 1e-9 && Math.abs(a.p - b.p) < 1e-9 && Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9 && Math.abs(a.z - b.z) < 1e-9;
+    const canvas = await json(page, "(() => { const c = document.getElementById('tb-3d'); const r = c.getBoundingClientRect(); const s = getComputedStyle(c); return { touchAction: s.touchAction, select: s.userSelect, w: r.width, h: r.height, l: r.left, t: r.top }; })()");
+    check('the room takes the touches itself: no page scroll or pinch on it', canvas.touchAction === 'none' && canvas.select === 'none', JSON.stringify(canvas));
+    const coarse = await page.evaluate("matchMedia('(pointer: coarse)').matches");
+    const mark = await page.evaluate(`(() => { const b = document.createElement('button'); b.className = 'tb-bubble'; document.querySelector('.tb-overlay').append(b); const w = b.getBoundingClientRect().width; b.remove(); return w; })()`);
+    check('on a screen that is touched the numbers and marks are finger sized', !coarse || mark >= 30, `coarse ${coarse}, ${mark}px`);
+
+    /* A tap with a tool armed places, and the tool stays armed. */
+    await tool(page, 'Gate');
+    for (const [x, y] of [[5, 6], [5, 7.5]]) {
+      const at = await screenOf(page, 'view3d', x, y, 0);
+      await tap(page, at);
+    }
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    let gates = (await elements(page)).filter((e) => e.type === 'gate');
+    check('a tap with a gate armed places it, and another places the next: two gates, two steps', gates.length === 2 && (await undoCount(page)) === 2, `${gates.length} gates, ${await undoCount(page)} steps`);
+    check('and the tool is still armed', await page.evaluate("window.trackBuilder.armed === 'gate'"));
+    await key(page, 'Escape');
+    /* The card floats by whatever is selected, and a tap under it is a tap on the
+     * card, so what the last placement left selected is let go of first. */
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(200);
+
+    /* A tap on a gate selects it; a tap on the empty floor lets go. */
+    const first = gates[0];
+    const on = await screenOf(page, 'view3d', first.x + 0.16, first.y, 0.35);
+    await tap(page, on);
+    check('a tap on a gate selects it and the card is up', await page.evaluate(`window.trackBuilder.selection.has('${first.id}') && !document.getElementById('tb-card').hidden`));
+    const bare = await screenOf(page, 'view3d', 6.6, 7.4, 0);
+    await tap(page, bare);
+    check('a tap on the empty floor lets go of it', (await page.evaluate('window.trackBuilder.selection.size')) === 0);
+    check('and none of that is an edit', (await undoCount(page)) === 2);
+
+    /* One finger on the floor looks round; on a gate it moves it. */
+    const before = await orbit();
+    await swipe(page, bare, { x: bare.x + 90, y: bare.y + 20 });
+    const looked = await orbit();
+    check('one finger dragged over the floor looks round the room', Math.abs(looked.t - before.t) > 0.1 && (await undoCount(page)) === 2, `${before.t} then ${looked.t}`);
+    gates = (await elements(page)).filter((e) => e.type === 'gate');
+    const start = { x: gates[1].x, y: gates[1].y };
+    const grab = await screenOf(page, 'view3d', gates[1].x + 0.16, gates[1].y, 0.35);
+    const drop = await screenOf(page, 'view3d', gates[1].x + 0.16 + 0.5, gates[1].y + 0.3, 0.35);
+    await swipe(page, grab, drop, { steps: 10 });
+    const pulled = (await elements(page)).filter((e) => e.type === 'gate')[1];
+    check('one finger dragged on a gate moves it, as one step', Math.hypot(pulled.x - start.x, pulled.y - start.y) > 0.3 && (await undoCount(page)) === 3, `${pulled.x - start.x}, ${pulled.y - start.y}; ${await undoCount(page)} steps`);
+    await page.evaluate('window.trackBuilder.undo(), 1');
+    await page.sleep(200);
+
+    /* A second finger while a gate is being pulled puts it back. */
+    const home = (await elements(page)).filter((e) => e.type === 'gate')[1];
+    const g1 = await screenOf(page, 'view3d', home.x + 0.16, home.y, 0.35);
+    await touch(page, 'touchStart', at1(g1));
+    for (let i = 1; i <= 6; i += 1) {
+      await touch(page, 'touchMove', at1({ x: g1.x + i * 8, y: g1.y + i * 3 }));
+      await page.sleep(25);
+    }
+    const midway = (await elements(page)).filter((e) => e.type === 'gate')[1];
+    check('mid pull the gate is away from where it was', Math.hypot(midway.x - home.x, midway.y - home.y) > 0.05, `${midway.x - home.x}`);
+    await touch(page, 'touchStart', [{ id: 1, x: g1.x + 48, y: g1.y + 18 }, { id: 2, x: g1.x + 200, y: g1.y - 120 }]);
+    await page.sleep(100);
+    const put = (await elements(page)).filter((e) => e.type === 'gate')[1];
+    check('a second finger puts it back where it was, and leaves no step', Math.hypot(put.x - home.x, put.y - home.y) < 1e-9 && (await undoCount(page)) === 2, `${put.x - home.x}; ${await undoCount(page)} steps`);
+    const settled = await orbit();
+    await touch(page, 'touchMove', [{ id: 1, x: g1.x + 90, y: g1.y + 40 }, { id: 2, x: g1.x + 200, y: g1.y - 120 }]);
+    await page.sleep(80);
+    await touch(page, 'touchEnd', []);
+    await page.sleep(160);
+    check('and the pair that took it is the camera, not an edit', (await undoCount(page)) === 2);
+    void settled;
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(200);
+
+    /* The pair: a floor point under the fingers stays under them. */
+    const P = { x: 5, y: 6.75 };
+    await page.evaluate('window.trackBuilder.view3d.frameTrack(), window.trackBuilder.view3d.applyCamera(), 1');
+    await page.sleep(200);
+    let s0 = await screenOf(page, 'view3d', P.x, P.y, 0);
+    let r0 = await orbit();
+    await pair(page, [{ x: s0.x - 60, y: s0.y }, { x: s0.x + 60, y: s0.y }], [{ x: s0.x - 130, y: s0.y }, { x: s0.x + 130, y: s0.y }], { steps: 10 });
+    let s1 = await screenOf(page, 'view3d', P.x, P.y, 0);
+    let r1 = await orbit();
+    check('pinching out brings the room closer, by the ratio the fingers spread', r1.r < r0.r * 0.6 && r1.r > r0.r * 0.42, `${r0.r} then ${r1.r}`);
+    check('and what was between the fingers is still between them', Math.hypot(s1.x - s0.x, s1.y - s0.y) < 6, `${Math.hypot(s1.x - s0.x, s1.y - s0.y).toFixed(1)} px`);
+    check('none of it is an edit', (await undoCount(page)) === 2);
+    s0 = await screenOf(page, 'view3d', P.x, P.y, 0);
+    r0 = await orbit();
+    await pair(page, [{ x: s0.x - 130, y: s0.y }, { x: s0.x + 130, y: s0.y }], [{ x: s0.x - 50, y: s0.y }, { x: s0.x + 50, y: s0.y }], { steps: 10 });
+    r1 = await orbit();
+    check('pinching in takes it away again', r1.r > r0.r * 1.8, `${r0.r} then ${r1.r}`);
+
+    s0 = await screenOf(page, 'view3d', P.x, P.y, 0);
+    await pair(page, [{ x: s0.x - 60, y: s0.y }, { x: s0.x + 60, y: s0.y }], [{ x: s0.x - 60 + 90, y: s0.y + 40 }, { x: s0.x + 60 + 90, y: s0.y + 40 }], { steps: 10 });
+    s1 = await screenOf(page, 'view3d', P.x, P.y, 0);
+    const slid = { x: s1.x - s0.x, y: s1.y - s0.y };
+    check('two fingers sliding take the room with them: it goes the way they went', slid.x > 60 && slid.y > 20 && Math.abs(slid.x - 90) < 25 && Math.abs(slid.y - 40) < 25, JSON.stringify(slid));
+
+    /* Twisted clockwise, the room turns clockwise, looked at from above. */
+    await page.evaluate('window.trackBuilder.showPlan(), 1');
+    await page.sleep(500);
+    /* The floor point the camera looks at: the scene's z is the document's minus y. */
+    const T = await json(page, '({ x: window.trackBuilder.view3d.orbit.target.x, y: -window.trackBuilder.view3d.orbit.target.z })');
+    const Q = { x: T.x + 1.0, y: T.y };
+    const target = await screenOf(page, 'view3d', T.x, T.y, 0);
+    const q0 = await screenOf(page, 'view3d', Q.x, Q.y, 0);
+    const angle0 = Math.atan2(q0.y - target.y, q0.x - target.x);
+    const twist = 0.7;
+    const mid = { x: target.x + 40, y: target.y + 40 };
+    const ends = (a) => [{ x: mid.x - Math.cos(a) * 80, y: mid.y - Math.sin(a) * 80 }, { x: mid.x + Math.cos(a) * 80, y: mid.y + Math.sin(a) * 80 }];
+    await pair(page, ends(0), ends(twist), { steps: 14 });
+    const target1 = await screenOf(page, 'view3d', T.x, T.y, 0);
+    const q1 = await screenOf(page, 'view3d', Q.x, Q.y, 0);
+    let turned = Math.atan2(q1.y - target1.y, q1.x - target1.x) - angle0;
+    if (turned > Math.PI) {
+      turned -= 2 * Math.PI;
+    } else if (turned < -Math.PI) {
+      turned += 2 * Math.PI;
+    }
+    check('twisting the fingers clockwise turns the room clockwise by about the same angle', Math.abs(turned - twist) < 0.15, `${turned.toFixed(3)} rad for a ${twist} rad twist`);
+
+    /* A second finger that comes down on the card is still the second finger. */
+    const cardGate = (await elements(page)).filter((e) => e.type === 'gate')[0];
+    await page.evaluate(`window.trackBuilder.setSelection(['${cardGate.id}']), 1`);
+    await page.sleep(300);
+    const cardBox = await json(page, "(() => { const r = document.getElementById('tb-card').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 20, hidden: document.getElementById('tb-card').hidden }; })()");
+    const onFloor = { x: canvas.l + 60, y: canvas.t + 120 };
+    const hand = await orbit();
+    const stepsCard = await undoCount(page);
+    await touch(page, 'touchStart', at1(onFloor));
+    await touch(page, 'touchStart', [{ id: 1, ...onFloor }, { id: 2, x: cardBox.x, y: cardBox.y }]);
+    for (let i = 1; i <= 8; i += 1) {
+      await touch(page, 'touchMove', [{ id: 1, ...onFloor }, { id: 2, x: cardBox.x + i * 6, y: cardBox.y + i * 4 }]);
+      await page.sleep(25);
+    }
+    const spread = await orbit();
+    await touch(page, 'touchEnd', []);
+    await page.sleep(200);
+    check('with the card up, the second finger on it still joins: the pair zooms', !cardBox.hidden && spread.r < hand.r * 0.95, `${hand.r} then ${spread.r}`);
+    check('and the card, which it landed on, was not pressed', (await undoCount(page)) === stepsCard);
+    check('and lifting the pair did not let go of what was selected', await page.evaluate(`window.trackBuilder.selection.has('${cardGate.id}')`));
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(200);
+
+    /* With a tool armed the first finger of a pair is a press that would place on
+     * release; the pair is the camera, and places nothing. */
+    await page.evaluate("window.trackBuilder.arm('gate'), 1");
+    const armedCount = (await elements(page)).length;
+    await pair(page, [{ x: canvas.l + 120, y: canvas.t + 140 }, { x: canvas.l + 240, y: canvas.t + 140 }], [{ x: canvas.l + 100, y: canvas.t + 140 }, { x: canvas.l + 260, y: canvas.t + 140 }], { steps: 6 });
+    check('a pair with a gate armed places nothing', (await elements(page)).length === armedCount && (await undoCount(page)) === stepsCard);
+    await page.evaluate('window.trackBuilder.disarm(), 1');
+
+    /* A finger left behind by a lifted pair does nothing until the hand is off. */
+    const keep = await orbit();
+    const steps = await undoCount(page);
+    const a = { x: 400, y: 400 };
+    const b = { x: 560, y: 400 };
+    await touch(page, 'touchStart', [{ id: 1, ...a }]);
+    await touch(page, 'touchStart', [{ id: 1, ...a }, { id: 2, ...b }]);
+    await touch(page, 'touchMove', [{ id: 1, x: a.x, y: a.y + 10 }, { id: 2, ...b }]);
+    /* A touch end names the fingers that lift: the second one goes, the first stays down. */
+    await touch(page, 'touchEnd', [{ id: 2, ...b }]);
+    await page.sleep(80);
+    const afterPair = await orbit();
+    for (let i = 1; i <= 6; i += 1) {
+      await touch(page, 'touchMove', [{ id: 1, x: a.x + i * 20, y: a.y + 10 + i * 10 }]);
+      await page.sleep(25);
+    }
+    const leftover = await orbit();
+    check('the finger that stays down after the other lifts does not go on to move the room', same(afterPair, leftover), JSON.stringify([afterPair, leftover]));
+    await touch(page, 'touchEnd', []);
+    await page.sleep(160);
+    check('and lifting it is not a tap', (await undoCount(page)) === steps && (await page.evaluate('window.trackBuilder.selection.size')) === 0);
+    void keep;
+    await swipe(page, { x: 500, y: 500 }, { x: 560, y: 520 });
+    check('the next single finger is a single finger again', !same(leftover, await orbit()));
+
+    /* A hand that never reported its lift (a finger lost to the browser) does not
+     * lock the room: the next first finger is a first finger. */
+    await page.evaluate(`(() => { const e = window.trackBuilder.view3d.editor; e.touches.set(99, { x: 0, y: 0 }); return 1; })()`);
+    const lonely = (await elements(page)).filter((e) => e.type === 'gate')[1];
+    await page.evaluate('window.trackBuilder.frameAll(), window.trackBuilder.view3d.frameTrack(), 1');
+    await page.sleep(300);
+    await tap(page, await screenOf(page, 'view3d', lonely.x + 0.16, lonely.y, 0.35));
+    check('a lost lift is forgotten by the next hand: a tap still selects', await page.evaluate(`window.trackBuilder.selection.has('${lonely.id}')`));
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(200);
+
+    /* The ring at a gate's foot: a finger a little off it still has it. */
+    await page.evaluate('window.trackBuilder.frameAll(), 1');
+    await page.evaluate('window.trackBuilder.view3d.frameTrack(), 1');
+    await page.sleep(300);
+    const gate = (await elements(page)).filter((e) => e.type === 'gate')[0];
+    await page.evaluate(`window.trackBuilder.setSelection(['${gate.id}']), 1`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const ringR = 0.7112 / 2 + 0.32;
+    /* A side of the ring where the room is what is under the finger and not the card,
+     * which floats to one side or the other of what is selected. */
+    let clear = null;
+    let edge = null;
+    for (const sgn of [-1, 1]) {
+      edge = (r) => screenOf(page, 'view3d', gate.x + sgn * r, gate.y, 0.008);
+      const p = await edge(ringR);
+      if (await page.evaluate(`document.elementFromPoint(${p.x}, ${p.y}) === document.getElementById('tb-3d')`)) {
+        clear = sgn;
+        break;
+      }
+    }
+    check('a side of the ring is clear of the card', clear !== null);
+    const e0 = await edge(ringR + 0.07);
+    const e1 = await edge(ringR + 0.12);
+    const pxPer = Math.hypot(e1.x - e0.x, e1.y - e0.y) / 0.05;
+    const off = ringR + 0.07 + 9 / pxPer;
+    const press = await edge(off);
+    const probe = (pointerType) => page.evaluate(`(() => { const h = window.trackBuilder.view3d.pickHit({ clientX: ${press.x}, clientY: ${press.y}, pointerType: '${pointerType}' }); return !!(h && h.ring); })()`);
+    check('9 px outside the ring, a mouse misses it', (await probe('mouse')) === false, JSON.stringify(press));
+    check('and a finger has it', (await probe('touch')) === true);
+    const steps2 = await undoCount(page);
+    const south = await screenOf(page, 'view3d', gate.x, gate.y - ringR, 0.008);
+    const yawWas = (await elements(page)).find((e) => e.id === gate.id).yaw;
+    await swipe(page, press, south, { steps: 14 });
+    const yawNow = (await elements(page)).find((e) => e.id === gate.id).yaw;
+    check('and pulling it round turns the gate: it faces where the finger went', Math.abs(Math.abs(yawNow) - Math.PI / 2) < 1e-3 && Math.abs(yawNow - yawWas) > 1, `${yawWas} to ${yawNow}`);
+    check('as one undo step', (await undoCount(page)) === steps2 + 1, `${steps2} then ${await undoCount(page)}`);
+
+    /* What a keyboard did, a button does. */
+    const turnBtn = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === 'Turn'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height }; })()`);
+    check('the card has a Turn button, since there is no Q or E, and it is finger sized', Boolean(turnBtn) && (!coarse || turnBtn.h >= 40), JSON.stringify(turnBtn));
+    if (turnBtn) {
+      const yaw1 = (await elements(page)).find((e) => e.id === gate.id).yaw;
+      await tap(page, turnBtn);
+      const yaw2 = (await elements(page)).find((e) => e.id === gate.id).yaw;
+      let d = Math.abs(yaw2 - yaw1);
+      d = Math.min(d, 2 * Math.PI - d);
+      check('a tap on it turns the gate a quarter', Math.abs(d - Math.PI / 2) < 1e-3, `${yaw1} to ${yaw2}`);
+    }
     check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
     check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
   } finally {

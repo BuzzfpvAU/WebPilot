@@ -1693,6 +1693,12 @@ export class Panels {
    * is where the game puts a track, so they are numbers a track that is about
    * the size of an envelope can have. It floats beside the piece in the room
    * (placeCard) and docks to the foot where there is no room for that.
+   *
+   * ON A SCREEN THAT IS TOUCHED the six fields are left to the drawer (More),
+   * where the inspector has them all: typing a length on a glass keyboard is not
+   * how a track is built on a tablet, and six fields at finger size were a card
+   * taller than half the room, covering the very track it was for. What is left is
+   * the small bar the plan asked for: Turn, Reverse, Copy, Remove, and Replace with.
    */
   renderCard() {
     const card = this.nodes.card;
@@ -1713,6 +1719,12 @@ export class Panels {
     card.classList.toggle('docked', this.host.mode !== '3d');
     const head = el('div', 'tb-card-head');
     const actions = el('div', 'tb-card-actions');
+    const touched = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    /* A quarter turn, for a screen with no Q and E. Only for what turns. */
+    const turns = ids.some((id) => [KIND.APERTURE, KIND.START, KIND.OBSTACLE].includes(kindOf(elementById(doc, id))));
+    if (turns) {
+      actions.append(button('Turn', 'tb-btn', () => this.host.nudgeYaw(-15), 'Turn it a quarter. E turns it one way and Q the other'));
+    }
     actions.append(
       button('Copy', 'tb-btn', () => this.host.copySelection(), 'A copy beside it, 30 in on. Control D'),
       button('Remove', 'tb-btn tb-danger', () => this.host.deleteSelection(), 'Delete'),
@@ -1738,6 +1750,21 @@ export class Panels {
     const number = entries.length ? numbers.get(entries[0].id) : null;
     head.append(el('strong', null, `${element.name || labelOf(element.type, 'micro')}${number != null ? `, number ${number}` : ''}`), close);
     card.append(head);
+
+    if (touched) {
+      /* The small bar: what a keyboard's Q, E and X did, as buttons. */
+      if (entries.length && (def.kind === KIND.APERTURE || def.kind === KIND.MARKER)) {
+        actions.prepend(button(def.kind === KIND.APERTURE ? 'Reverse' : 'Other side', 'tb-btn', () => this.host.flipFace(entries[0].id),
+          `${faceLabel(doc, entries[0])}. X`));
+      }
+      const swap = this.replaceField(ids);
+      if (swap) {
+        card.append(swap);
+      }
+      card.append(actions);
+      this.cardWarnings(card, element, entries);
+      return;
+    }
 
     const grid = el('div', 'tb-card-grid');
     const id = element.id;
@@ -1782,22 +1809,29 @@ export class Panels {
       grid.append(fig);
     }
     card.append(grid);
-    /* What the rules say about this piece, in the words the mark on it carries. */
-    const said = (this.host.warnings ?? []).filter((w) => w.level === 'warn'
-      && (w.elementId === element.id || (w.also ?? []).includes(element.id)
-        || (w.seqId && entries.some((q) => q.id === w.seqId))));
-    if (said.length) {
-      const list = el('div', 'tb-card-warns');
-      for (const w of said) {
-        list.append(el('p', 'tb-card-warn', w.message));
-      }
-      card.append(list);
-    }
     const swap = this.replaceField(ids);
     if (swap) {
       card.append(swap);
     }
     card.append(actions);
+    /* After the buttons, so a sentence appearing or going after a press moves
+     * nothing that is under the finger. */
+    this.cardWarnings(card, element, entries);
+  }
+
+  /* What the rules say about this piece, in the words the mark on it carries. */
+  cardWarnings(card, element, entries) {
+    const said = (this.host.warnings ?? []).filter((w) => w.level === 'warn'
+      && (w.elementId === element.id || (w.also ?? []).includes(element.id)
+        || (w.seqId && entries.some((q) => q.id === w.seqId))));
+    if (!said.length) {
+      return;
+    }
+    const list = el('div', 'tb-card-warns');
+    for (const w of said) {
+      list.append(el('p', 'tb-card-warn', w.message));
+    }
+    card.append(list);
   }
 
   /*
@@ -1846,22 +1880,37 @@ export class Panels {
     }
     const c = this.host.selectionCentroid();
     const at = c ? project({ x: c.x, y: c.y, z: c.z + 0.9 }) : null;
-    if (!at || rect.width < 640) {
-      card.classList.add('docked');
-      card.style.left = '';
-      card.style.top = '';
-      return;
-    }
-    card.classList.remove('docked');
     const w = card.offsetWidth;
     const h = card.offsetHeight;
-    let x = at.x + 44;
-    if (x + w > rect.width - 10) {
-      x = at.x - 44 - w;
-    }
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    card.style.left = `${clamp(x, 10, rect.width - w - 10).toFixed(0)}px`;
-    card.style.top = `${clamp(at.y - h / 2, 10, Math.max(10, rect.height - h - 104)).toFixed(0)}px`;
+    /* The first place that does not sit on the piece the card is about: beside
+     * it on the right, beside it on the left, above it, below it. The clear
+     * space is what the pilot is looking at, so where none is left the card is
+     * docked to the foot and the room goes on under it. */
+    const gap = 72;
+    /* Its top is fixed to the piece, not its middle: a card that grows (a
+     * sentence appears) grows downward, and nothing under the finger jumps. */
+    const top = at ? at.y - 48 : 0;
+    const tries = at ? [
+      { x: at.x + gap, y: top },
+      { x: at.x - gap - w, y: top },
+      { x: at.x - w / 2, y: at.y - gap - h },
+      { x: at.x - w / 2, y: at.y + gap },
+    ] : [];
+    for (const t of tries) {
+      const x = clamp(t.x, 10, Math.max(10, rect.width - w - 10));
+      const y = clamp(t.y, 10, Math.max(10, rect.height - h - 104));
+      const covers = at.x > x - 60 && at.x < x + w + 60 && at.y > y - 60 && at.y < y + h + 60;
+      if (!covers && this.host.mode === '3d') {
+        card.classList.remove('docked');
+        card.style.left = `${x.toFixed(0)}px`;
+        card.style.top = `${y.toFixed(0)}px`;
+        return;
+      }
+    }
+    card.classList.add('docked');
+    card.style.left = '';
+    card.style.top = '';
   }
 
   /*
