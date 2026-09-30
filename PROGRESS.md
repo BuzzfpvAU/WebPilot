@@ -60061,3 +60061,35 @@ a field in the report that says whether the drawn frame is blank (a few pixels
 read back), which would separate "drawn but not shown" from "not drawn".
 
 Nothing was written to the board. bug-2d93629e and bug-a18b2ed9 are open.
+
+### The owner's answer, 2026-09-30, and the push to main (the pause menu)
+
+"push to main", after the summary above: what was run and what was not, the
+switch on buttons 0 to 3 that the fix does not stop, and the verification scale
+asked for, which was not chosen. So no pass beyond the RUN LOG above was run,
+and nobody has yet felt the settle and the beat on a real radio. Nothing was
+written to the board: bug-2d93629e and bug-a18b2ed9 are open.
+
+A notice said padgate.js had changed on disk since it was last read. Checked
+before the push: the working tree was clean and the file's SHA-256 equalled the
+committed one. The timestamp was the mutation runs restoring it.
+
+main had not moved from d60d385, fetched and checked just before the push, so
+it went to main as a fast-forward of ccr-07e2c12d-fuvn2z (d60d385..01c00e3): no
+merge commit, no rebase and no force. The clone is still shallow, so the check
+was `git merge-base --is-ancestor origin/main HEAD`, true because d60d385 is
+the commit's own parent.
+
+### Live on webfpv.org (the pause menu)
+
+main moved d60d385..01c00e3, and webfpv.org/sim served it within about 90 s:
+src/input/padgate.js (new), src/input/input.js, src/main.js, src/ui/ui.js and
+src/fresh.js, read off the live site with a cache busting query, each hash the
+same as the commit. The polls went 0 of 5 at 3 s, 31 s and 60 s and 5 of 5 at
+89 s, so the comparison can tell old from new.
+
+That says the served files are the ones tested here. It says nothing about how
+the settle and the beat feel on a radio, which is the owner's look: what to do
+and what would count as wrong are under "For the owner" above. The live site
+was not loaded in a browser for this check, so as not to add a visit to its
+statistics.
