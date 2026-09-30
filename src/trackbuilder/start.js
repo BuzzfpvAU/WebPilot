@@ -24,6 +24,8 @@
  */
 
 import { App, docFromLocation } from './app.js';
+import { docFromHash } from './sharelink.js';
+import { duplicateTrack } from './model.js';
 import { pingVisit } from '../share/stats.js';
 
 /*
@@ -70,6 +72,22 @@ if (linked) {
   /* Kept, not asked: a link opens that track, and what it displaces goes into
      Load. See openIncoming in app.js. */
   app.openIncoming(linked, `Opened "${linked.name}" from the link.`);
+}
+/* A #track= link carries the whole track in the fragment (sharelink.js). It opens
+   as a copy, under a new id, so nothing done to it is done to the track the link
+   was made from, and the fragment is taken out of the address so that a reload
+   does not open it again over whatever was done since. */
+if (!linked && /(^#|&)track=/.test(window.location.hash)) {
+  const shared = await docFromHash(window.location.hash);
+  if (shared) {
+    app.openIncoming(duplicateTrack(shared, shared.name), 'A shared track. Editing makes your copy.');
+  } else {
+    /* A link that is not one of ours, or was cut short in a chat, or was made by
+       a browser that can deflate for one that cannot: the pilot pressed it and
+       nothing would happen, so say why. */
+    app.toast('That share link could not be opened. It looks cut short or damaged, or it was made by a browser that this one cannot read.');
+  }
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
 }
 await app.adoptIncomingShare();
 await app.adoptIncomingMap();

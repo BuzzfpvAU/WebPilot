@@ -314,6 +314,10 @@ export function animationFilename(doc) {
   return `${slugOf(doc)}.gif`;
 }
 
+export function pictureFilename(doc) {
+  return `${slugOf(doc)}.png`;
+}
+
 /* Hand the browser some bytes as a file. Shared because the track document
  * and the animation want exactly the same dance and only differ in what is
  * in the blob. */

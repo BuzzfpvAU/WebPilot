@@ -1654,7 +1654,8 @@
         right: var(--s4);
         bottom: 44px;
         align-items: center;
-        gap: var(--s4);
+        flex-wrap: wrap;
+        gap: var(--s2) var(--s4);
         padding: var(--s2) var(--s4);
         border-radius: var(--r-panel);
         background: rgba(8, 13, 20, 0.86);
@@ -1739,6 +1740,70 @@
       .tb-card-actions .tb-btn { flex: 1 1 22%; padding: 5px 6px; }
       .tb-card-fig { display: flex; flex-direction: column; gap: 3px; }
       .tb-card-fig > span { font-size: var(--t-micro); color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; }
+
+      /* ---------------- the build sheet, and pasted text ---------------- */
+
+      .tb-paste {
+        display: block;
+        width: 100%;
+        margin-top: var(--s3);
+        padding: var(--s3);
+        box-sizing: border-box;
+        border: 1px solid var(--edge);
+        border-radius: var(--r-ctl);
+        background: var(--deep);
+        color: var(--cream);
+        font: var(--t-small) / 1.4 var(--mono);
+        resize: vertical;
+      }
+      .tb-report { margin: 0 0 var(--s3); padding-left: var(--s5); font-size: var(--t-small); line-height: 1.5; }
+      /*
+       * The sheet is a page of its own laid over the builder, black on white
+       * whatever the theme, because it is for the print dialog. Printing hides
+       * everything but it and its bar.
+       */
+      #tb-sheet {
+        position: fixed;
+        inset: 0;
+        z-index: 90;
+        overflow: auto;
+        background: #fff;
+        color: #111;
+        font: 14px / 1.45 var(--ui-font);
+      }
+      #tb-sheet[hidden] { display: none; }
+      .tb-sheet-bar {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: var(--s4);
+        padding: var(--s3) var(--s5);
+        background: var(--panel);
+        color: var(--cream);
+      }
+      .tb-sheet-bar label { flex: 1; }
+      .tb-sheet-bar select { margin-left: var(--s2); }
+      .tb-sheet-page { max-width: 210mm; margin: 0 auto; padding: 12mm; box-sizing: border-box; }
+      .tb-sheet-page h1 { margin: 0 0 4px; font-size: 24px; }
+      .tb-sheet-page h2 { margin: 18px 0 4px; font-size: 16px; }
+      .tb-sheet-meta { margin: 0 0 8px; color: #333; }
+      .tb-sheet-plan { display: block; width: 100%; height: auto; max-height: 150mm; margin: 8px 0; border: 1px solid #999; background: #fff; }
+      .tb-sheet-table { border-collapse: collapse; width: 100%; margin: 6px 0 14px; font-size: 13px; }
+      .tb-sheet-table th, .tb-sheet-table td { border: 1px solid #999; padding: 3px 6px; text-align: left; vertical-align: top; }
+      .tb-sheet-table th { background: #eee; }
+      .tb-sheet-buy { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 14px; align-items: start; }
+      .tb-sheet-notes { margin: 4px 0; padding-left: 20px; font-size: 12px; color: #333; }
+      @media print {
+        body > *:not(#tb-sheet) { display: none !important; }
+        #tb-sheet { position: static; overflow: visible; }
+        .tb-sheet-bar { display: none; }
+        .tb-sheet-page { max-width: none; padding: 0; }
+        .tb-sheet-plan, .tb-sheet-table { break-inside: avoid; }
+        .tb-sheet-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        @page { margin: 12mm; }
+      }
 
       /* ---------------- touch ---------------- */
 

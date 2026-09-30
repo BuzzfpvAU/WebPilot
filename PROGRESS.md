@@ -60023,11 +60023,11 @@ stored track; the one field added anywhere is `also` on a warning, which is neve
 
     code                     src/trackbuilder: snap (magnets, row, ruler, replace), edit3d, view3d,
                              view2d, ui, app, warnings (`also`), elements (tools), index.html;
-                             scripts/builder-flow-check.js (+7 cases), scripts/device-check.js
+                             scripts/builder-flow-check.js (+6 cases), scripts/device-check.js
                              (+ the whoop room at three tablet sizes). No new module.
     self test                node src/trackbuilder/selftest.js: 1169 passed, 0 failed
                              (1073 after Stage 1; 96 new, written before the code they check)
-    browser check            npm run check:builder: 25 cases, 224 assertions, all pass
+    browser check            npm run check:builder: 24 cases, 224 assertions, all pass
                              (18 cases and 125 assertions after Stage 1). New: magnets, row,
                              ruler, replace with, warnings on the piece, touch (real touch events
                              at 1024 by 768), and the card case waits for the card to settle
@@ -60053,3 +60053,167 @@ stored track; the one field added anywhere is `also` on a warning, which is neve
                              CLAUDE.md asks), and `lint:catalog`, which cannot run in this
                              container: vendor/betaflight is not checked out here and the lint
                              opens its headers. Nothing in this stage reads the catalog.
+
+## 2026-09-30 | builder | Whoop builder, Stage 3: tools for a real room
+
+Stage 3 of WHOOP-BUILDER-PLAN.md, on the same approval as Stages 0 to 2 ("build up to stage 3";
+Stages 4 and 5 are not started, and need the owner's answers to decisions 3 to 6 and 8 first).
+Four ways in and out of the room, all on the whoop canvas only and all under More on the top
+bar: a build sheet to print, a picture, a share link, and an import of a track drawn in the FPV
+Events designer. Nothing touches the physics, the module ABI, the build, the board or the schema
+(`schemaVersion` stays 3, no field is added to a stored track). Two modules are new
+(`buildsheet.js`, `importfpv.js`), both pure, both GPLv3, and `npm run gen:preload` was run
+after `git add`.
+
+### What is built, against the plan's sections
+
+- **5.1, the build sheet.** More, Build sheet: a page laid over the whole builder, black on
+  white, for the print dialog (`@media print` hides everything but it). The plan of the track with
+  north up, the smallest rectangle that holds it dashed, a tick every 12 in from the corner you
+  choose (four corners, chosen on the sheet), every piece with the key the table gives it; a table
+  of where each piece stands (X and Y from the corner in inches and millimetres, height off the
+  floor, which way it faces and which way its frame runs); and what to buy: pipe by length,
+  fittings by kind, poles and bars by size, cones, barriers and start pads. `buildsheet.js` reads
+  the same geometry the room draws (`view3d.js buildAperture`): the four sides of every opening,
+  the ones taken away, the bars between stacked levels, the legs under a gate off the floor.
+  Every member is a run between two fitting centres; members that lie on one another are one
+  pipe; the fittings are found where members meet (two at a right angle an elbow, two in line and
+  one across a tee, and so on). Nothing is counted from a table of what a gate usually needs, so
+  a side taken away, a row that shares an upright and a stack of three each say what they need.
+- **5.2, the picture.** More, Picture: the room as it is on the screen as a PNG, the canvas with
+  the numbers, the marks and the distances painted on, because those are HTML over the canvas and
+  a canvas alone is a room with no numbers. A fresh frame is drawn in the same task so the buffer
+  is there to be copied.
+- **5.2, the share link.** More, Copy share link: `#track=z.<base64url>`, the track's compact JSON
+  deflated with the browser's own `CompressionStream` (raw deflate), or `j.` and the JSON itself
+  where a browser cannot compress. 1,610 characters for Track 1 and 2,553 for Track 6, so it fits
+  a chat message. It carries the whole track after the hash sign, where a browser never sends it.
+  It opens as a copy under a new id ("A shared track. Editing makes your copy."), takes the
+  fragment out of the address so a reload does not open it again, and a link that is not one of
+  ours opens the builder as it was and says nothing. Reading one is treated as hostile: never a
+  throw, the inflated size capped as it streams (a megabyte), the payload capped, only a version
+  this file makes accepted. The `?track=` link is untouched.
+- **5.3, import.** More, Import now takes a file or pasted text. A track from this builder is read
+  as before; one from the FPV Events designer (an arena and a list of gates, bare or in their API
+  wrapper) is recognised by its shape and mapped by `importfpv.js`: x kept and y the arena's depth
+  less their z, the arena centred in our hall; heading their `rotY` less a quarter turn, pinned;
+  height the bottom of the opening; two or three squares at one spot and even heights a stack,
+  flown in their order; `back` flown the other way; poles poles; a pass through a cube a waypoint at
+  the middle of the cube; a hoop or a hexagon a square gate of the same width. A dialog says what
+  was kept, changed and left out, by the gate's place in their list: banners, tables, chairs and
+  types it does not know are dropped by name, so are gates outside the hall and the tape
+  measurements. A gate bigger than RaceGOW allows is kept at the designer's size and left for the
+  rules to flag. The test fixture is synthetic; the real track belongs to whoever drew it and is
+  not in the repository. I read their public one once, in a scratch script, to check the mapping
+  ran on something real: 3 poles, 7 gates, a triple stack, two cube passes, a banner.
+
+### Checked against a hand count, as the plan asks
+
+Track 1 by reading its elements: five gates of which two are stacks, one pole and two bars on the
+floor. The single gate is four pipes; the built stack is seven, its two levels sharing a bar; the
+other stack is four, its upper opening being a gap in the lattice (`unbuilt`); so 15 pipes of one
+length, and 12 elbows and 2 tees, one pole 58.1 in tall, two bars 29.05 in long and one set of
+start pads. The sheet says exactly that, and it is a test. The smaller cases are counted from how
+a gate is built out of pipe (one gate 4 and 4; a side away 3 pipes, 2 elbows, 2 open ends; a double
+stack a gate and a pipe apart 7 pipes, 4 elbows, 2 tees; a row that shares an upright 7 pipes,
+4 elbows, 2 tees; a tower 4 pipes, 2 legs, 2 tees, 2 feet). The other seven presets are not
+counted by hand: a hand count of them would be the code's answers written out twice, so they are
+held to what any track must satisfy (every member end is at exactly one fitting; every member is a
+section or a cut; the fittings counted are the fittings found; no NaN).
+
+### Where this departs from the plan, and what it does not know
+
+- **The parts list is only as good as its one assumption about fittings.** A pipe is cut to the run
+  from fitting centre to fitting centre less 1.025 in at each end, which is what RaceGOW's two
+  numbers imply (a 27 in section gives a 28 in opening). Fittings differ by maker, and the sheet
+  says to dry fit one gate. Poles and bars are listed by size and not built from sections. Four
+  of the eight presets have a junction of four pipes that is not a cross and two of them (Tracks 4
+  and 6) one of five, where a stack meets the corner of a cube; the sheet calls it "a junction of 5
+  pipes" and says to build it from a cross and a tee rather than name a part that does not exist.
+- **A row at 30 in that shares an upright is not exactly buildable with 28 in openings, and I
+  have not changed it.** With one shared pipe between two gates the second is a gate and a pipe
+  (29.05 in) from the first, not 30. The Row tool lays them 30 in apart as the plan and RaceGOW's
+  diagrams have it, the sheet joins the second gate's bars to the shared upright (they are within
+  a pipe of it, as the room draws them) and prints the model's 30 in. A builder following the
+  sheet will find the second gate 0.95 in further along than a shared pipe allows. It is a
+  question for the owner: keep 30 in (RaceGOW's number), or lay a shared row at 29.05.
+- **Import assumes a designer's height is the bottom of the opening,** because it is for their
+  squares (a stack at 0, 0.8 and 1.6 m), and applies it to hoops too; their hoops' default heights
+  may be centres. Hoops and hexagons are approximated and say so. Their `start` and `start-gate`
+  types are dropped (place Start Pads). Their type table is the public list of twenty; another
+  id is read from a `types` list in the pasted text if it has one, and from its name if that says a
+  size (`square-70`), and dropped by name otherwise.
+- **The picture is of the room as it is.** It is not a render at another size or angle, and it is
+  not the card. In the 2D view it says to open Room or Plan first.
+- **The sheet is built as HTML and printed by the browser.** No PDF is made by the page: the print
+  dialog can save one. I have not printed it on paper; the print styles are checked by emulating
+  the print medium and reading what is shown.
+
+### What went wrong
+
+- The first clustering of fittings put every end within a pipe of another in one place, so two
+  gates that are both fully built and 30 in apart (their uprights 0.95 in apart, touching) came out
+  as a cross and the presets showed fittings of four, five and six arms. Two passes now: ends at
+  the same point are one fitting, and only then is a member that would otherwise be an open end
+  joined to the pipe of another piece it stops within a pipe of. That is the difference between two
+  elbows and a tee, and both are tests.
+- The build sheet's Escape did not close it after the print emulation, because emulating print
+  hides the select that had focus and focus went to the body, outside the sheet. Escape is handled at
+  the window as well now, and the builder's keys are swallowed while the sheet is open: a Delete
+  meant for the sheet would have taken a gate out from under it.
+- A test of mine passed whatever the code did (`a && b || c >= 0`), found on reading the test back,
+  and is a real assertion now. A bomb of zeros could not tell the size cap from a text that does
+  not parse, so the test that is there inflates past the cap into something that would read as a
+  track, which only the cap refuses. Pole heights were rounded to a hundredth of an inch in the
+  parts list, 0.12 mm off the document's; the sizes are kept as they are.
+- Every one of the 47 mutations below was caught the first time it was run, which is a reason to
+  be suspicious of the list rather than pleased: the ones that could not be observed (a bad base64
+  character, an unknown version whose payload was not JSON anyway) were reshaped before they were
+  run, and the two tests above are why.
+- The device probe caught, the first time I put a Build sheet button on the lap bar, that on a
+  820 px tablet held upright the bar was 611 px in a 594 px drawing and its last button stuck out.
+  The bar wraps now, and the probe asserts that no button of it is outside it or covered.
+- A correction to the Stage 2 entry, which said 25 cases and "+7 cases": it was 24 and +6. I counted
+  the header line of the check's output as a case. Corrected in place; the commit message of
+  that stage still carries the wrong number, which history rules mean it will keep.
+- The unreadable link first opened the builder in silence: a pilot who pressed a link that was cut
+  short in a chat would have seen nothing happen. It says so now ("That share link could not be
+  opened"), and removes the fragment.
+
+### RUN LOG
+
+    code                     src/trackbuilder: buildsheet and importfpv (new, pure), sharelink, view3d
+                             (snapshot), app, start, storage, ui (Build sheet on the lap bar),
+                             index.html, selftest; src/fresh.js (regenerated for the two new
+                             modules); scripts/builder-flow-check.js (+4 cases),
+                             scripts/device-check.js (the lap bar)
+    self test                node src/trackbuilder/selftest.js: 1305 passed, 0 failed
+                             (1169 after Stage 2; 136 new: the share link 28, the build sheet 65,
+                             the importer 43)
+    browser check            npm run check:builder: 28 cases, 267 assertions, all pass
+                             (24 and 224 after Stage 2). New: share link (a second browser
+                             profile opens the link), picture (a real PNG, the size of the canvas,
+                             with the number's own colour where a number is), build sheet (over the
+                             builder, four corners, print media, markup as text, Escape), import
+                             from the designer (paste, the report, refusal)
+    mutations                47 single behaviour reversions, each caught: 28 against the self test
+                             (the share link 5, the build sheet 12, the importer 11), 17 against the
+                             browser check (share link 6, picture 4, sheet 4, import 3) and 2
+                             against the device probe (the lap bar)
+    micro:check              267 pass, exit 0 (unchanged)
+    whoop:gates              21 of 21
+    lint:preload             up to date, 236 served (two new modules, `git add` then gen:preload)
+    lint:presets             4 of 4 clean
+    lint:responsive          PASS
+    input-check              170 passed (it drives the builder's Fly this track, and start.js
+                             changed in this stage)
+    device-check             PASS, the whole script, with the lap bar's new button
+    node --check             every edited file
+    dashes and non ASCII     none added (scanned over the diff and the two new files)
+    not run                  `npm run verify` (no physics, plant, ABI or build change),
+                             `shots.js` (offered at the end of the turn, as CLAUDE.md asks),
+                             and `lint:catalog`, which cannot run in this container
+                             (vendor/betaflight is not checked out here). A printed page on
+                             paper, and a share link opened in a second browser engine, were
+                             not tried: the print styles were read by emulating the print medium,
+                             and the link was opened in the one Chromium this container has.

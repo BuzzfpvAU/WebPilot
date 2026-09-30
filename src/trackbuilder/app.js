@@ -54,7 +54,9 @@ import { collectWarnings, freestyleReport, labeller, sortWarnings } from './warn
 import { hasRaised, seatFloating, seatedNote, standsOnGround } from './seat.js';
 import { seatDocument } from '../maps/built/place.js';
 import { History } from './history.js';
-import { docFromQuery } from './sharelink.js';
+import { docFromQuery, trackLink } from './sharelink.js';
+import { buildSheet, sheetHtml, CORNERS } from './buildsheet.js';
+import { importFpvEvents, looksLikeFpvEvents, reportLines } from './importfpv.js';
 /* The road tool: every rule about nodes and where a car goes is in here,
  * pure, and this file only applies them as edits. */
 import {
@@ -62,7 +64,7 @@ import {
   vehiclePlace, absNodes, OPEN_MIN, LOOP_MIN,
 } from './roadtool.js';
 import {
-  animationFilename, deleteTrack, downloadBlob, downloadTrack, keepDisplaced, listTracks,
+  animationFilename, deleteTrack, downloadBlob, downloadTrack, keepDisplaced, listTracks, pictureFilename,
   loadTrack, makeAutosaver, readAutosave, readFileText, saveTrack, shipMaps, trackExists, writeAutosave,
 } from './storage.js';
 /* The yard Your map flies while the map seat is empty, and the showpiece
@@ -3175,18 +3177,211 @@ export class App {
       return;
     }
     try {
-      const text = await readFileText(file);
-      const { doc, repairs, error } = deserialize(text);
-      if (error) {
-        this.toast(`Could not import: ${error}`);
-        return;
-      }
-      this.openIncoming(doc, repairs.length
-        ? `Imported "${doc.name}" with ${repairs.length} repair${repairs.length === 1 ? '' : 's'}: ${repairs[0]}`
-        : `Imported "${doc.name}".`);
+      this.importText(await readFileText(file));
     } catch (e) {
       this.toast(`Could not read the file: ${e.message}`);
     }
+  }
+
+  /*
+   * IMPORT, from a file or from text pasted in. A track from this builder is
+   * read by the reader every file is; one saved by the FPV Events designer is
+   * recognised by its shape (an arena and a list of gates) and mapped by
+   * importfpv.js, and what came across, what was changed and what was left out is
+   * said in a dialog after it opens, because a converted track that silently lost
+   * a banner is worse than one that says so.
+   */
+  importText(text) {
+    if (!text || !String(text).trim()) {
+      this.toast('There is nothing there to import.');
+      return;
+    }
+    if (looksLikeFpvEvents(text)) {
+      const got = importFpvEvents(text);
+      if (got.error) {
+        this.toast(got.error);
+        return;
+      }
+      if (this.openIncoming(got.doc, `Imported "${got.doc.name}".`)) {
+        this.showImportReport(got.report);
+      }
+      return;
+    }
+    const { doc, repairs, error } = deserialize(text);
+    if (error) {
+      this.toast(`Could not import: ${error}`);
+      return;
+    }
+    this.openIncoming(doc, repairs.length
+      ? `Imported "${doc.name}" with ${repairs.length} repair${repairs.length === 1 ? '' : 's'}: ${repairs[0]}`
+      : `Imported "${doc.name}".`);
+  }
+
+  /* The import dialog: choose a file, or paste the text of one. */
+  openImport() {
+    const body = document.createElement('div');
+    const help = document.createElement('p');
+    help.className = 'tb-help';
+    help.textContent = 'A .json track from this builder, or one from the FPV Events designer. Choose a file, or paste the text of one below.';
+    const choose = document.createElement('button');
+    choose.type = 'button';
+    choose.className = 'tb-btn';
+    choose.textContent = 'Choose a file';
+    choose.addEventListener('click', () => {
+      this.closeModal();
+      this.fileInput.click();
+    });
+    const area = document.createElement('textarea');
+    area.className = 'tb-paste';
+    area.rows = 8;
+    area.setAttribute('aria-label', 'A track, as text');
+    area.placeholder = 'Paste a track here';
+    body.append(help, choose, area);
+    this.modal('Import a track', body, [{ label: 'Import pasted text', run: () => this.importText(area.value) }]);
+  }
+
+  /* What an import from another designer kept, changed and left out. */
+  showImportReport(report) {
+    const body = document.createElement('div');
+    for (const [heading, list] of [['Kept', report.kept], ['Changed', report.approximated], ['Left out', report.dropped]]) {
+      if (!list.length) {
+        continue;
+      }
+      const h = document.createElement('h3');
+      h.textContent = heading;
+      const ul = document.createElement('ul');
+      ul.className = 'tb-report';
+      for (const line of list) {
+        const li = document.createElement('li');
+        li.textContent = line;
+        ul.append(li);
+      }
+      body.append(h, ul);
+    }
+    this.modal('What came across', body);
+  }
+
+  /*
+   * THE SHARE LINK: the whole track in the address, after the hash sign, where a
+   * browser never sends it anywhere. Copied to the clipboard; where the browser
+   * will not (a page not in focus, an address that is not secure) it is shown to
+   * be copied by hand. See sharelink.js for what is in it and why reading one is
+   * treated as hostile.
+   */
+  async copyShareLink() {
+    if (!this.isWhoopRace()) {
+      return;
+    }
+    let link = '';
+    try {
+      link = await trackLink(this.doc, `${window.location.origin}${window.location.pathname}`);
+    } catch (e) {
+      this.toast('Could not make a link for this track.');
+      return;
+    }
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(link);
+      copied = true;
+    } catch (e) {
+      copied = false;
+    }
+    this.lastLink = link;
+    if (copied) {
+      this.toast(`Link copied, ${link.length} characters. It carries the whole track and opens as a copy for whoever has it.`);
+      return;
+    }
+    const body = document.createElement('div');
+    const help = document.createElement('p');
+    help.className = 'tb-help';
+    help.textContent = 'Copy this link. It carries the whole track, so there is nothing to upload, and it opens as a copy for whoever has it.';
+    const area = document.createElement('textarea');
+    area.className = 'tb-paste';
+    area.readOnly = true;
+    area.rows = 6;
+    area.value = link;
+    body.append(help, area);
+    this.modal('Share link', body);
+    area.focus();
+    area.select();
+  }
+
+  /* A picture of the room, as a PNG file. */
+  async savePicture() {
+    if (!this.isWhoopRace()) {
+      return;
+    }
+    if (this.mode !== '3d') {
+      this.toast('The picture is of the room. Press Room or Plan on the bar first.');
+      return;
+    }
+    const blob = await this.view3d.snapshot();
+    if (!blob) {
+      this.toast('The room is not showing yet, so there is nothing to take a picture of.');
+      return;
+    }
+    downloadBlob(blob, pictureFilename(this.doc), 'image/png');
+    this.toast(`Saved ${pictureFilename(this.doc)}.`);
+  }
+
+  /*
+   * THE BUILD SHEET, over the whole page so the print dialog has one thing to
+   * print: where every piece stands measured from a corner of the smallest
+   * rectangle that holds the track, and what pipe and fittings to buy. The
+   * corner is chosen on the sheet. Everything on it is text from the document
+   * and passes through buildsheet.js's escaping, and the page's own styles hide
+   * the rest of the builder when printing (index.html).
+   */
+  openSheet(corner = 'sw') {
+    if (!this.isWhoopRace()) {
+      return;
+    }
+    let layer = document.getElementById('tb-sheet');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.id = 'tb-sheet';
+      layer.setAttribute('role', 'dialog');
+      layer.setAttribute('aria-modal', 'true');
+      layer.setAttribute('aria-label', 'Build sheet');
+      document.body.append(layer);
+      layer.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          layer.hidden = true;
+        }
+      });
+    }
+    layer.hidden = false;
+    layer.textContent = '';
+    const bar = document.createElement('div');
+    bar.className = 'tb-sheet-bar';
+    const label = document.createElement('label');
+    label.textContent = 'Measure from the ';
+    const pick = document.createElement('select');
+    for (const [id, c] of Object.entries(CORNERS)) {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = `${c.label} corner`;
+      o.selected = id === corner;
+      pick.append(o);
+    }
+    pick.addEventListener('change', () => this.openSheet(pick.value));
+    label.append(pick);
+    const print = document.createElement('button');
+    print.type = 'button';
+    print.className = 'tb-btn tb-primary';
+    print.textContent = 'Print';
+    print.addEventListener('click', () => window.print());
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'tb-btn';
+    close.textContent = 'Close';
+    close.addEventListener('click', () => { layer.hidden = true; });
+    bar.append(label, print, close);
+    const page = document.createElement('div');
+    page.className = 'tb-sheet-body';
+    page.innerHTML = sheetHtml(buildSheet(this.doc, { corner }));
+    layer.append(bar, page);
+    pick.focus();
   }
 
   undo() {
@@ -3505,8 +3700,12 @@ export class App {
     this.moreItems = new Map();
     for (const [id, label, fn, title, cls] of [
       ['duplicate', 'Duplicate', () => this.duplicate(), 'Copy this track under a new name', ''],
-      ['import', 'Import', () => file.click(), 'Read a .json track file', ''],
+      ['import', 'Import', () => this.openImport(), 'Read a .json track file, or paste one', ''],
       ['export', 'Export', () => this.exportFile(), 'Write a .json track file', ''],
+      /* The whoop room's three ways out: a link, a picture and a sheet to build from. */
+      ['link', 'Copy share link', () => this.copyShareLink(), 'A link that carries the whole track, for a chat message. It opens as a copy.', ''],
+      ['sheet', 'Build sheet', () => this.openSheet(), 'A page to print: where every piece stands, measured from a corner, and what pipe and fittings to buy', ''],
+      ['picture', 'Picture', () => this.savePicture(), 'Save a picture of the room as it is on the screen, numbers and all', ''],
       ['animation', 'Export animation', () => this.exportAnimation(), 'Write a looping .gif of one lap', ''],
       ['delete', 'Delete', () => this.confirmRemove(), 'Remove this track from this browser', 'tb-danger'],
     ]) {
@@ -3676,6 +3875,9 @@ export class App {
       this.moreItems.get('export').title = `Write a .json ${noun} file`;
       this.moreItems.get('delete').title = `Remove this ${noun} from this browser`;
       this.moreItems.get('animation').style.display = map ? 'none' : '';
+      for (const id of ['link', 'sheet', 'picture']) {
+        this.moreItems.get(id).style.display = whoop ? '' : 'none';
+      }
     }
     if (map && this.listingChip && this.publishBtn) {
       /* A map's listing is its own key, and there is no chip for it: the
@@ -3915,6 +4117,16 @@ export class App {
     window.addEventListener('keydown', (e) => {
       const t = e.target;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) {
+        return;
+      }
+      /* The build sheet is a page laid over the whole builder, and nothing behind it
+       * moves while it is open: a Delete meant for the sheet must not take a gate
+       * out from under it. Escape puts it away. */
+      const sheet = document.getElementById('tb-sheet');
+      if (sheet && !sheet.hidden) {
+        if (e.key === 'Escape') {
+          sheet.hidden = true;
+        }
         return;
       }
       /* The chooser is a question, and nothing behind it moves while it is

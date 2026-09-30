@@ -1,8 +1,14 @@
 # The whoop builder: build it in 3D, keep the brain
 
-A plan for the owner, 29 September 2026. Nothing has been built yet: no source
-file has moved. The plan is written to be argued with, and section 8 lists the
-decisions it is waiting on.
+A plan for the owner, 29 September 2026. The plan is written to be argued with,
+and section 8 lists the decisions it is waiting on.
+
+Status, 30 September 2026: Stages 0 to 3 are built, on the owner's "build up to
+stage 3" (the PROGRESS entries of 29 and 30 September say what each stage did, what
+departed from the plan and why, and what was run). Stages 4 and 5, the club profile,
+the new parts and the ways out to other tools, are not started: they wait on the
+owner's answers to decisions 3 to 6 and 8. The text below is the plan as it was
+written.
 
 ## 0. What was asked
 

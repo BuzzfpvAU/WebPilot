@@ -1787,6 +1787,258 @@ kase('touch', async () => {
   }
 });
 
+/* A More menu item, by the words on it, pressed with the mouse. */
+async function menu(page, label) {
+  const where = (selector, text) => json(page, `(() => {
+    const b = [...document.querySelectorAll(${JSON.stringify(selector)})].find((x) => x.textContent === ${JSON.stringify(text)});
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  const more = await where('#tb-topbar .tb-more > button', 'More');
+  await click(page, more.x, more.y);
+  await page.until("!document.querySelector('.tb-more-menu').hidden", 5000);
+  const item = await where('.tb-more-item', label);
+  if (!item) {
+    throw new Error(`no menu item called ${label}`);
+  }
+  await click(page, item.x, item.y);
+  await page.sleep(300);
+}
+
+/*
+ * THE TRACK TRAVELS IN THE ADDRESS. A pilot with a room and a tape measure wants to
+ * send a layout to a friend in a message, with no account and no upload: the link
+ * carries the whole track after the hash sign, where a browser never sends it. It is
+ * opened by a page that has never seen the track (a new browser profile), it opens as
+ * a copy under a new id, it says so, it takes itself out of the address so a reload does
+ * not open it again, and a link that is not one of ours opens nothing and breaks nothing.
+ */
+kase('share link', async () => {
+  const page = await openBuilder();
+  let hash = '';
+  let original = null;
+  try {
+    await trapToasts(page);
+    await loadPreset(page, 'racegow5-track3');
+    original = await json(page, '({ id: window.trackBuilder.doc.id, name: window.trackBuilder.doc.name, elements: window.trackBuilder.doc.elements, sequence: window.trackBuilder.doc.sequence })');
+    await menu(page, 'Copy share link');
+    const link = await page.evaluate('window.trackBuilder.lastLink || ""');
+    hash = link.slice(link.indexOf('#'));
+    check('Copy share link makes a link: the address of the builder, a hash sign and the track', /^https?:\/\/[^#]+\/src\/trackbuilder\/index\.html#track=[zj]\.[A-Za-z0-9_-]+$/.test(link), link.slice(0, 90));
+    check('that fits a chat message', link.length < 4000, `${link.length} characters`);
+    const said = (await toasts(page)).join(' | ') + await page.evaluate("document.getElementById('tb-modal').textContent");
+    check('and says it is copied, or shows it to be copied by hand', /Link copied|Copy this link/.test(said), said.slice(0, 120));
+    check('and is not an edit', (await undoCount(page)) === 0);
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+  const second = await openBuilder(`?class=micro${hash}`);
+  try {
+    const got = await json(second, `({
+      id: window.trackBuilder.doc.id, name: window.trackBuilder.doc.name, elements: window.trackBuilder.doc.elements, sequence: window.trackBuilder.doc.sequence,
+      hash: location.hash, steps: window.trackBuilder.history.past.length, toast: document.getElementById('tb-toast').textContent,
+    })`);
+    check('a browser that has never seen the track opens it from the link', got.name === original.name && got.elements.length === original.elements.length, `${got.name}, ${got.elements.length} elements`);
+    check('every piece and every pass exactly as it was', JSON.stringify(got.elements) === JSON.stringify(original.elements) && JSON.stringify(got.sequence) === JSON.stringify(original.sequence));
+    check('as a copy: under a new id, so nothing done to it is done to the original', got.id !== original.id && /^trk-/.test(got.id), got.id);
+    check('and says so', /A shared track\. Editing makes your copy\./.test(got.toast), got.toast);
+    check('and takes the fragment out of the address, so a reload does not open it again', got.hash === '', got.hash);
+    check('and opening it is not an edit', got.steps === 0);
+    check('the page reported no error of its own', ownErrors(second).length === 0, ownErrors(second).join(' | '));
+  } finally {
+    await second.close();
+  }
+  for (const [what, bad] of [['a link with a payload that is not a track', '#track=z.AAAA'], ['one with a version this does not know', '#track=q.abc'], ['one with nothing in it', '#track=']]) {
+    const third = await openBuilder(`?class=micro${bad}`);
+    try {
+      const doc = await json(third, '({ n: window.trackBuilder.doc.elements.length, toast: document.getElementById("tb-toast").textContent })');
+      check(`${what} opens the builder as it was, and says the link could not be opened`, doc.n === 0 && /share link could not be opened/.test(doc.toast) && !/A shared track/.test(doc.toast), JSON.stringify(doc));
+      check('with no error of its own', ownErrors(third).length === 0, ownErrors(third).join(' | '));
+    } finally {
+      await third.close();
+    }
+  }
+});
+
+/*
+ * A PICTURE OF THE ROOM, for a chat or a poster. The canvas alone would be a room
+ * with no numbers on the gates, because the numbers are HTML laid over it, so the
+ * picture is the canvas with them painted on. What is asserted is that a real PNG
+ * comes out, the size of the canvas, that is not blank, and that where a number
+ * sits on the screen the picture has the number's own colour.
+ */
+kase('picture', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    await loadPreset(page, 'racegow5-track1');
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    await page.sleep(500);
+    await page.evaluate(`(() => {
+      window.__downloads = [];
+      const orig = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () {
+        if (this.download) {
+          window.__downloads.push({ href: this.href, name: this.download });
+          window.__taken = fetch(this.href).then((r) => r.blob());
+          return undefined;
+        }
+        return orig.call(this);
+      };
+      return 1;
+    })()`);
+    await menu(page, 'Picture');
+    await page.until('window.__downloads && window.__downloads.length === 1', 10000);
+    const facts = JSON.parse(await page.evaluate(`(async () => {
+      const blob = await window.__taken;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const dv = new DataView(bytes.buffer);
+      const bitmap = await createImageBitmap(blob);
+      const c = document.createElement('canvas');
+      c.width = bitmap.width;
+      c.height = bitmap.height;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0);
+      const canvas = document.getElementById('tb-3d');
+      const rect = canvas.getBoundingClientRect();
+      const k = canvas.width / rect.width;
+      const seen = new Set();
+      for (let i = 0; i < 400; i += 1) {
+        const p = ctx.getImageData(Math.floor(((i * 37) % c.width)), Math.floor(((i * 91) % c.height)), 1, 1).data;
+        seen.add(p.join(','));
+      }
+      const bubble = [...document.querySelectorAll('.tb-bubble')].find((n) => n.style.display !== 'none');
+      const b = bubble.getBoundingClientRect();
+      const px = ctx.getImageData(Math.round((b.left - rect.left + b.width / 2 - 6) * k), Math.round((b.top - rect.top + b.height / 2 - 6) * k), 1, 1).data;
+      const want = getComputedStyle(bubble).backgroundColor.match(/[0-9.]+/g).map(Number);
+      return JSON.stringify({
+        name: window.__downloads[0].name, type: blob.type, size: blob.size, sig: [...bytes.slice(0, 8)].join(','),
+        w: dv.getUint32(16), h: dv.getUint32(20), cw: canvas.width, ch: canvas.height, colours: seen.size, got: [...px].slice(0, 3), want: want.slice(0, 3),
+      });
+    })()`));
+    check('a PNG is saved, named for the track', facts.name === 'racegow5-track-1.png' || /\.png$/.test(facts.name), facts.name);
+    check('a real one: the PNG signature, and the type says so', facts.sig === '137,80,78,71,13,10,26,10' && facts.type === 'image/png', `${facts.sig} ${facts.type}`);
+    check('as big as the canvas it was taken from', facts.w === facts.cw && facts.h === facts.ch && facts.w > 400, `${facts.w} by ${facts.h}, canvas ${facts.cw} by ${facts.ch}`);
+    check('and not blank', facts.colours > 12, `${facts.colours} colours in 400 samples`);
+    check('where a number is on the screen, the picture has the number\'s own colour under it', facts.got.every((v, i) => Math.abs(v - facts.want[i]) <= 24), `picture ${facts.got}, number ${facts.want}`);
+    check('and it says it saved', /Saved .*\.png/.test((await toasts(page)).join(' ')), (await toasts(page)).join(' | '));
+    await page.evaluate("window.trackBuilder.setMode('2d'), 1");
+    await page.sleep(300);
+    await menu(page, 'Picture');
+    check('in the 2D view it says to open the room first, and saves nothing', (await page.evaluate('window.__downloads.length')) === 1 && /Room or Plan/.test((await toasts(page)).join(' ')));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * THE BUILD SHEET is the page a pilot takes into the room: where every piece
+ * stands measured from a corner, and what to buy. What is asserted is what they
+ * would look at: it opens over the builder, it has Track 1's fifteen sections and
+ * twelve elbows, the measurements change when the corner does, a name that is markup
+ * is text on it, printing shows it and nothing else, and it goes away again.
+ */
+kase('build sheet', async () => {
+  const page = await openBuilder();
+  try {
+    await loadPreset(page, 'racegow5-track1');
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    await page.evaluate(`(() => { window.trackBuilder.doc.name = '<img src=x onerror="window.__pwned=1"> Track 1'; window.trackBuilder.nameInput.value = window.trackBuilder.doc.name; return 1; })()`);
+    await menu(page, 'Build sheet');
+    const sheet = () => json(page, `(() => {
+      const l = document.getElementById('tb-sheet');
+      if (!l || l.hidden) return null;
+      return { text: l.textContent, rows: [...l.querySelectorAll('.tb-sheet-table')][0].querySelectorAll('tbody tr').length, h1: l.querySelector('h1').textContent, imgs: l.querySelectorAll('img').length, svg: l.querySelectorAll('svg circle').length, firstX: l.querySelector('.tb-sheet-table tbody tr td:nth-child(3)').textContent, pwned: window.__pwned === 1 };
+    })()`);
+    const one = await sheet();
+    check('it opens over the builder', Boolean(one));
+    check('with seven rows for Track 1: the gate, two stacks, the pole, the pads and two bars', one.rows === 7, String(one.rows));
+    check('fifteen sections of 27 in, twelve elbows and two tees', /15sections, 27 in \(686 mm\)/.test(one.text) && /12elbows/.test(one.text) && /2tees/.test(one.text), one.text.replace(/\s+/g, ' ').slice(one.text.indexOf('What to buy'), one.text.indexOf('What to buy') + 200));
+    check('a track named with markup is text in the heading, and nothing ran', /<img src=x/.test(one.h1) && one.imgs === 0 && !one.pwned, one.h1);
+    check('the plan has a mark for every row and the corner', one.svg >= one.rows);
+    await page.evaluate(`(() => { const s = document.querySelector('#tb-sheet select'); s.value = 'ne'; s.dispatchEvent(new Event('change', { bubbles: true })); return 1; })()`);
+    await page.sleep(200);
+    const other = await sheet();
+    check('measured from another corner the measurements are different', other.firstX !== one.firstX && /north east/.test(other.text), `${one.firstX} then ${other.firstX}`);
+    await page.cdp.send('Emulation.setEmulatedMedia', { media: 'print' }, page.sessionId);
+    await page.sleep(200);
+    const printed = await json(page, `({
+      app: getComputedStyle(document.getElementById('tb-app')).display,
+      bar: getComputedStyle(document.querySelector('.tb-sheet-bar')).display,
+      position: getComputedStyle(document.getElementById('tb-sheet')).position,
+      sheet: getComputedStyle(document.querySelector('.tb-sheet-page')).display,
+    })`);
+    await page.cdp.send('Emulation.setEmulatedMedia', { media: '' }, page.sessionId);
+    check('printing shows the sheet and nothing else: the builder is hidden, the bar with it', printed.app === 'none' && printed.bar === 'none' && printed.position === 'static' && printed.sheet !== 'none', JSON.stringify(printed));
+    await key(page, 'Escape');
+    check('Escape closes it', (await sheet()) === null);
+    /* The lap bar has it too: a pilot in the hall does not hunt through a menu. */
+    const lap = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-lapbar button')].find((x) => x.textContent === 'Build sheet'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    check('the bar along the foot has a Build sheet button', Boolean(lap));
+    if (lap) {
+      await click(page, lap.x, lap.y);
+      check('which opens it', (await sheet()) !== null);
+      await key(page, 'Escape');
+    }
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A TRACK DRAWN IN THE FPV EVENTS DESIGNER, pasted or chosen. The fixture is synthetic
+ * with the shapes of a real one. What is asserted is what the pilot sees: it opens as a
+ * whoop track named for where it came from, a dialog says what was kept, changed and
+ * left out, and text that is not a track is refused in a sentence and changes nothing.
+ */
+kase('import from the designer', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    const fixture = {
+      id: 'synthetic', name: 'Synthetic',
+      data: {
+        arena: { w: 6, d: 6, h: 3 },
+        gates: [
+          { typeId: 'square-75', x: 1, z: 2, height: 0, rotY: 0, dir: 'forward', prop: false },
+          { typeId: 'square-75', x: 3, z: 2, height: 0, rotY: 1.571, dir: 'back', prop: false },
+          { typeId: 'tall-pole-2m', x: 4, z: 4, height: 0, rotY: 0, dir: 'forward', prop: false },
+          { typeId: 'tinywhoop-cube', x: 2, z: 5, height: 0, rotY: 0, dir: 'top>right', prop: false },
+          { typeId: 'devon-banner', x: 0, z: 1, height: 0.1, rotY: 1.571, dir: 'forward', prop: true },
+        ],
+        measurements: [[[1, 0, 2], [3, 0, 2]]],
+      },
+    };
+    await menu(page, 'Import');
+    await page.until("!!document.querySelector('#tb-modal textarea.tb-paste')", 5000);
+    check('Import offers a file and a place to paste', await page.evaluate("[...document.querySelectorAll('#tb-modal button')].some((b) => b.textContent === 'Choose a file') && !!document.querySelector('#tb-modal textarea')"));
+    await page.evaluate(`(() => { const t = document.querySelector('#tb-modal textarea.tb-paste'); t.value = ${JSON.stringify(JSON.stringify(fixture))}; return 1; })()`);
+    const go = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-modal button')].find((x) => x.textContent === 'Import pasted text'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await click(page, go.x, go.y);
+    await page.until("!!document.querySelector('#tb-modal h2') && /came across/.test(document.querySelector('#tb-modal h2').textContent)", 10000);
+    const doc = await json(page, '({ name: window.trackBuilder.doc.name, cls: window.trackBuilder.doc.trackClass, types: window.trackBuilder.doc.elements.map((e) => e.type), seq: window.trackBuilder.doc.sequence.length })');
+    check('it opens as a whoop track named for where it came from', doc.cls === 'micro' && doc.name === 'Synthetic (from the FPV Events designer)', doc.name);
+    check('two gates, a pole and a waypoint for the cube; the banner is not in it', doc.types.join() === 'gate,gate,pole,waypoint' && doc.seq === 4, `${doc.types.join()} ${doc.seq}`);
+    const said = await page.evaluate("document.getElementById('tb-modal').textContent");
+    check('the dialog says what was kept, changed and left out', /Kept/.test(said) && /Changed/.test(said) && /Left out/.test(said) && /banner/.test(said) && /cube/.test(said) && /tape measurement/.test(said), said.slice(0, 200));
+    await key(page, 'Escape');
+    await page.evaluate("window.trackBuilder.closeModal(), 1");
+    await menu(page, 'Import');
+    await page.evaluate(`(() => { const t = document.querySelector('#tb-modal textarea.tb-paste'); t.value = 'this is not a track'; return 1; })()`);
+    const go2 = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-modal button')].find((x) => x.textContent === 'Import pasted text'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    const before = await page.evaluate('window.trackBuilder.doc.name');
+    await click(page, go2.x, go2.y);
+    check('text that is not a track is refused in a sentence and changes nothing', /Could not import/.test((await toasts(page)).join(' ')) && (await page.evaluate('window.trackBuilder.doc.name')) === before, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
 /* ------------------------------------------------------------------ */
 
 async function main() {

@@ -4254,6 +4254,67 @@ export class View3D {
     this.placeOverlay();
   }
 
+  /*
+   * A PICTURE OF THE ROOM AS IT IS ON THE SCREEN, as a PNG blob: the drawing and,
+   * laid over it the way they are over the canvas, the numbers on the gates, the
+   * marks on the pieces that break a rule and the distances. The canvas alone
+   * would be a room with no numbers, because those are HTML. A fresh frame is
+   * drawn first, in this task, since a WebGL canvas that has not kept its buffer
+   * can only be copied before the browser next composites. Resolves to null when
+   * there is no room to take (Three.js has not arrived, or a map is showing).
+   */
+  async snapshot() {
+    if (!this.enabled || !this.renderer || this.isFreestyle() || !this.overlay) {
+      return null;
+    }
+    this.draw();
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const ctx = out.getContext('2d');
+    ctx.drawImage(this.canvas, 0, 0);
+    const rect = this.canvas.getBoundingClientRect();
+    const k = w / Math.max(1, rect.width);
+    const family = getComputedStyle(this.overlay).fontFamily || 'system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const n of this.overlay.querySelectorAll('.tb-bubble, .tb-warnbadge, .tb-measure')) {
+      if (n.style.display === 'none' || !n.textContent) {
+        continue;
+      }
+      const b = n.getBoundingClientRect();
+      const x = (b.left - rect.left + b.width / 2) * k;
+      const y = (b.top - rect.top + b.height / 2) * k;
+      if (x < 0 || y < 0 || x > w || y > h) {
+        continue;
+      }
+      if (n.classList.contains('tb-measure')) {
+        const text = n.textContent;
+        ctx.font = `500 ${12 * k}px ${family}`;
+        const tw = ctx.measureText(text).width + 12 * k;
+        ctx.fillStyle = 'rgba(8, 13, 20, 0.82)';
+        ctx.fillRect(x - tw / 2, y - 10 * k, tw, 20 * k);
+        ctx.fillStyle = getComputedStyle(n).color;
+        ctx.fillText(text, x, y);
+        continue;
+      }
+      const bad = n.classList.contains('tb-warnbadge');
+      ctx.beginPath();
+      ctx.arc(x, y, (b.width / 2) * k, 0, Math.PI * 2);
+      ctx.fillStyle = getComputedStyle(n).backgroundColor;
+      ctx.fill();
+      ctx.lineWidth = Math.max(1, k);
+      ctx.strokeStyle = 'rgba(15, 21, 15, 0.7)';
+      ctx.stroke();
+      ctx.fillStyle = getComputedStyle(n).color;
+      ctx.font = `${bad ? 700 : 600} ${(b.width * 0.5) * k}px ${family}`;
+      ctx.fillText(n.textContent, x, y + k);
+    }
+    return new Promise((resolve) => out.toBlob((blob) => resolve(blob), 'image/png'));
+  }
+
   dispose() {
     this.stopPlay();
     this.disposeTraffic();

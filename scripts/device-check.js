@@ -317,10 +317,17 @@ const WHOOP_PROBE = `(async () => {
   }
 
   /* The bar along the foot, the numbers and the marks. */
-  for (const b of document.querySelectorAll('#tb-lapbar button')) {
+  const lapBar = document.getElementById('tb-lapbar');
+  const lapBox = box(lapBar);
+  if (lapBar.scrollWidth > lapBar.clientWidth + 1) { bad.push('the lap bar is wider than the drawing: ' + lapBar.scrollWidth + ' px in ' + lapBar.clientWidth); }
+  for (const b of lapBar.querySelectorAll('button')) {
     const q = box(b);
-    if (q.h < 43.5) { bad.push('the lap bar button is ' + Math.round(q.h) + ' px tall'); }
+    if (q.h < 43.5) { bad.push('the lap bar button ' + (b.textContent || '').trim() + ' is ' + Math.round(q.h) + ' px tall'); }
+    if (q.r > lapBox.r + 0.5 || q.l < lapBox.l - 0.5) { bad.push('the lap bar button ' + (b.textContent || '').trim() + ' is outside the bar'); }
+    const e = document.elementFromPoint((q.l + q.r) / 2, (q.t + q.b) / 2);
+    if (!(e && (e === b || b.contains(e)))) { bad.push('the lap bar button ' + (b.textContent || '').trim() + ' is covered'); }
   }
+  if (![...lapBar.querySelectorAll('button')].some((b) => b.textContent === 'Build sheet')) { bad.push('the lap bar has no Build sheet button'); }
   for (const n of document.querySelectorAll('.tb-bubble, .tb-warnbadge')) {
     const q = box(n);
     if (n.style.display !== 'none' && q.w < 29.5) { bad.push('a number or a mark is ' + Math.round(q.w) + ' px across'); break; }

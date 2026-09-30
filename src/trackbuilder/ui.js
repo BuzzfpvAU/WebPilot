@@ -1943,6 +1943,7 @@ export class Panels {
       fig('Lap', path && path.closed ? 'closes' : 'open', path && path.closed ? 'good' : ''),
       fig('Warnings', String(bad), bad ? 'bad' : 'good'),
       el('span', 'tb-lap-gap'),
+      button('Build sheet', 'tb-btn', () => this.host.openSheet(), 'A page to print: where every piece stands, measured from a corner, and what pipe and fittings to buy'),
       button('Flying order', 'tb-btn', () => this.host.toggleDrawer(), 'The order the gates are flown in, every warning, and the elevation profile'),
     );
   }

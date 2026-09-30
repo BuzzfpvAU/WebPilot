@@ -47,13 +47,15 @@ import {
 } from './path.js';
 import { collectWarnings, freestyleReport, labeller, FREESTYLE_SOLIDS_MAX } from './warnings.js';
 import { History } from './history.js';
-import { docFromQuery } from './sharelink.js';
+import { docFromQuery, docFromHash, decodeTrack, encodeTrack, trackLink, canCompress } from './sharelink.js';
+import { buildSheet, sheetHtml, sheetSvg, membersOf, mergeMembers, nodesOf, fittingKind, CORNERS, SECTION, FITTING_ALLOWANCE, compass } from './buildsheet.js';
+import { importFpvEvents, looksLikeFpvEvents, reportLines } from './importfpv.js';
 import {
   frameRectFor, nearestQuarter, placementFor, placeOnTrack, spacingTone, snapTurn, copyElements,
   moveToPlace, measuresFor, magnetFor, sideBySideYaw, MAGNET_RADIUS, rowPlan, placeRow, ROW_MAX,
   rulerPoint, rulerReading, replacementsFor, replaceWith,
 } from './snap.js';
-import { envelopeFor, GATE_OPENING_DEFAULT } from './racegow.js';
+import { envelopeFor, GATE_OPENING_DEFAULT, inches } from './racegow.js';
 import {
   RAD, DEG, wrapAngle, gateSupportFeet, apertureFrame, GATE_POST_R_SCALE,
 } from './geometry.js';
@@ -6799,6 +6801,8 @@ function suiteWhoopRow() {
   }
 }
 
+const PIPE_OD_FOR_TEST = 1.05 * 0.0254;
+
 function suiteWhoopReplace() {
   console.log('\nthe whoop builder: replace with');
   const IN = 0.0254;
@@ -6965,6 +6969,432 @@ function suiteWhoopBadges() {
   }
 }
 
+/*
+ * THE SHARE LINK: a track in the fragment of an address, deflated and base64url
+ * encoded. What a link must do is give back exactly the track that was put in, and
+ * what it must never do is throw or grow on hostile text, because a link is
+ * somebody else's.
+ */
+async function suiteShareLink() {
+  console.log('\nthe whoop builder: the share link');
+  const whoop = PRESETS.filter((p) => p.trackClass === 'micro');
+  let lengths = [];
+  {
+    let same = 0;
+    let plain = 0;
+    for (const p of whoop) {
+      const payload = await encodeTrack(p);
+      const back = await decodeTrack(payload);
+      if (back && serialize(back) === serialize(p)) {
+        same += 1;
+      }
+      const flat = await decodeTrack(await encodeTrack(p, { compress: false }));
+      if (flat && serialize(flat) === serialize(p)) {
+        plain += 1;
+      }
+      lengths.push(payload.length);
+    }
+    check('every shipped whoop track comes back byte for byte through a link', same === whoop.length && whoop.length >= 8, `${same} of ${whoop.length}`);
+    check('and through the plain form, which is what a browser that cannot deflate makes', plain === whoop.length, `${plain} of ${whoop.length}`);
+    check('a link fits a chat message: under 4000 characters for every one', Math.max(...lengths) < 4000, `${Math.min(...lengths)} to ${Math.max(...lengths)}`);
+    check('and the deflated form is what is made where the browser can', !canCompress() || (await encodeTrack(whoop[0])).startsWith('z.'));
+  }
+  {
+    /* Through normalize: what a link carries is read by the reader every file is. */
+    const d = createTrack('link', 'micro');
+    placeRow(d, { x: 5, y: 6 }, { x: 5 + 61 * 0.0254, y: 6 });
+    const a = await decodeTrack(await encodeTrack(d));
+    check('a track that was laid by the row tool round trips too', a && serialize(a) === serialize(normalize(JSON.parse(JSON.stringify(toPlain(d)))).doc));
+    check('and one with an odd name (quotes, an angle bracket, a percent sign, an emoji) is the same name', await (async () => {
+      const e = createTrack('a "b" <c> 100% \u{1F680}', 'micro');
+      const back = await decodeTrack(await encodeTrack(e));
+      return back && back.name === e.name;
+    })());
+    const link = await trackLink(d, 'https://example.test/src/trackbuilder/index.html');
+    check('a link is the address, a hash sign and the key', link.startsWith('https://example.test/src/trackbuilder/index.html#track='));
+    const viaHash = await docFromHash(link.slice(link.indexOf('#')));
+    check('and a location hash gives the track back, with or without the hash sign', viaHash && serialize(viaHash) === serialize(a) && Boolean(await docFromHash(link.slice(link.indexOf('#') + 1))));
+    check('another key in the same hash does not stop it', Boolean(await docFromHash(`#a=1&${link.slice(link.indexOf('#') + 1)}&b=2`)));
+  }
+  {
+    /* Hostile input never throws, and comes out as nothing. */
+    const cases = {
+      'an empty payload': '',
+      'a version and no payload': 'z.',
+      'no dot': 'zAAAA',
+      'a version this does not know': `q.${Buffer.from(JSON.stringify(toPlain(createTrack('x', 'micro')))).toString('base64url')}`,
+      'characters that are not base64url': 'z.@@@@',
+      'base64url that is not deflate': `z.${'QUJD'.repeat(50)}`,
+      'a length base64 cannot have': 'z.A',
+      'the plain form of a number': `j.${Buffer.from('123').toString('base64url')}`,
+      'the plain form of an array': `j.${Buffer.from('[]').toString('base64url')}`,
+      'the plain form of null': `j.${Buffer.from('null').toString('base64url')}`,
+      'the plain form of text that is not JSON': `j.${Buffer.from('not json').toString('base64url')}`,
+      'the plain form of bytes that are not UTF-8': `j.${Buffer.from([0xff, 0xfe, 0xfd]).toString('base64url')}`,
+    };
+    for (const [what, payload] of Object.entries(cases)) {
+      let got = 'threw';
+      try {
+        got = await decodeTrack(payload);
+      } catch (e) {
+        got = 'threw';
+      }
+      check(`${what} is nothing, and not an error`, got === null, String(got));
+    }
+    const good = await encodeTrack(createTrack('x', 'micro'));
+    check('a good link cut short is nothing', (await decodeTrack(good.slice(0, Math.floor(good.length / 2)))) === null);
+    if (canCompress()) {
+      /* Eight megabytes of zeros is a few kilobytes of deflate: the size is capped as it inflates. */
+      const bomb = await (async () => {
+        const stream = new ReadableStream({ start(c) { c.enqueue(new Uint8Array(8 << 20)); c.close(); } }).pipeThrough(new CompressionStream('deflate-raw'));
+        const chunks = [];
+        const reader = stream.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          chunks.push(value);
+        }
+        return `z.${Buffer.concat(chunks).toString('base64url')}`;
+      })();
+      const t0 = Date.now();
+      check('a few kilobytes that inflate to eight megabytes are refused', bomb.length < 20000 && (await decodeTrack(bomb)) === null, `${bomb.length} characters`);
+      check('quickly, without inflating it', Date.now() - t0 < 3000, `${Date.now() - t0} ms`);
+      /* A payload that inflates past the cap to something that IS a track: only the cap can refuse it. */
+      const wide = await (async () => {
+        const text = `{${' '.repeat((1 << 20) + 4096)}}`;
+        const stream = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); } }).pipeThrough(new CompressionStream('deflate-raw'));
+        const chunks = [];
+        const reader = stream.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          chunks.push(value);
+        }
+        return `z.${Buffer.concat(chunks).toString('base64url')}`;
+      })();
+      check('and one that inflates past a megabyte into something that would read as a track is refused by the cap alone', wide.length < 4000 && (await decodeTrack(wide)) === null, `${wide.length} characters`);
+    }
+    const fine = await encodeTrack(createTrack('x', 'micro'));
+    check('a hash with no track key is nothing, even when the payload is good under another name', (await docFromHash('#other=1')) === null && (await docFromHash(`#other=${fine}`)) === null && (await docFromHash('')) === null && (await docFromHash(undefined)) === null);
+    check('and a hash far too long is nothing, at once', (await docFromHash(`#track=j.${'A'.repeat(3 << 20)}`)) === null);
+  }
+  {
+    /* The old link keeps working. */
+    const d = createTrack('old', 'micro');
+    const q = `?track=${encodeURIComponent(JSON.stringify(toPlain(d)))}`;
+    check('the ?track= link in the query still opens a track', docFromQuery(q) && docFromQuery(q).name === 'old');
+  }
+}
+
+/*
+ * THE BUILD SHEET: what to buy and where to stand it. The plan's check is the sheet
+ * for a preset against a hand count, so Track 1 is counted here by reading its
+ * elements (the rest are checked against what any track must satisfy, since a hand
+ * count of all eight would be the code's own answers written out twice), and the
+ * small cases are counted from how a gate is built out of pipe: four pipes and four
+ * elbows, a shared bar and two tees, a leg and a foot.
+ */
+function suiteBuildSheet() {
+  console.log('\nthe whoop builder: the build sheet');
+  const IN = 0.0254;
+  const near = (a, b, tol = 1e-4) => Math.abs(a - b) < tol;
+  const fit = (sheet, kind) => sheet.parts.fittings.find((f) => f.kind === kind)?.count ?? 0;
+  const gateAt = (d, x, y, type = 'gate') => placeOnTrack(d, type, { x, y });
+  check('a section is 27 in, inside RaceGOW\'s 26.5 to 27.25', near(SECTION, 27 * IN) && SECTION >= 26.5 * IN && SECTION <= 27.25 * IN);
+  check('and a fitting takes 1.025 in at each end, which is what turns a 27 in section into a 28 in opening', near(FITTING_ALLOWANCE, 1.025 * IN, 1e-6));
+
+  /* One gate is four pipes and four elbows. */
+  {
+    const d = createTrack('one', 'micro');
+    gateAt(d, 5, 6);
+    const sh = buildSheet(d);
+    check('a gate is four sections of 27 in', sh.parts.sections.count === 4 && sh.parts.cuts.length === 0, JSON.stringify(sh.parts.sections));
+    check('and four elbows and nothing else', fit(sh, 'elbow') === 4 && sh.parts.fittings.length === 1, JSON.stringify(sh.parts.fittings));
+    check('four members, and the members are what the room draws: two bars over two uprights', membersOf(d).length === 4);
+  }
+  /* Taking a side away takes the pipe and leaves an open end. */
+  {
+    const d = createTrack('side', 'micro');
+    const g = gateAt(d, 5, 6);
+    setSideBuilt(d, g.id, 'left', false);
+    const sh = buildSheet(d);
+    check('a gate with a side taken away is three pipes', sh.parts.sections.count === 3, String(sh.parts.sections.count));
+    check('two elbows where the upright still is, and two open ends where it was', fit(sh, 'elbow') === 2 && fit(sh, 'end cap') === 2, JSON.stringify(sh.parts.fittings));
+    const off = createTrack('gap', 'micro');
+    const gap = gateAt(off, 5, 6);
+    gap.unbuilt = true;
+    const so = buildSheet(off);
+    check('a gap in the lattice has no pipe, and is still a row on the sheet with its reason', so.parts.sections.count === 0 && so.pieces.length === 1 && /no frame/.test(so.pieces[0].note), JSON.stringify(so.pieces[0]?.note));
+  }
+  /* A stack: one bar between two levels when they are a gate and a pipe apart. */
+  {
+    const d = createTrack('stack', 'micro');
+    const s2 = gateAt(d, 5, 6, 'doubleStack');
+    let sh = buildSheet(d);
+    check('a double stack at the default 30 in is two frames that touch: eight pipes and eight elbows', sh.parts.sections.count === 8 && fit(sh, 'elbow') === 8, JSON.stringify([sh.parts.sections, sh.parts.fittings]));
+    s2.dims.levelPitch = 28 * IN + PIPE_OD_FOR_TEST;
+    sh = buildSheet(d);
+    check('a gate and a pipe apart they share the bar between them: seven pipes', sh.parts.sections.count === 7, String(sh.parts.sections.count));
+    check('four elbows at the ends and a tee where the shared bar meets each side', fit(sh, 'elbow') === 4 && fit(sh, 'tee') === 2, JSON.stringify(sh.parts.fittings));
+    check('and a stack of two is one row, with both heights', sh.pieces.length === 1 && sh.pieces[0].heights.length === 2 && near(sh.pieces[0].heights[1].bottom, 28 * IN + PIPE_OD_FOR_TEST, 1e-6));
+    /* Two gates at one spot, built as two elements, are the same stack. */
+    const e = createTrack('two gates', 'micro');
+    const lower = gateAt(e, 5, 6);
+    const upper = gateAt(e, 5, 6);
+    upper.position.z = 0;
+    upper.dims.sillH = 28 * IN + PIPE_OD_FOR_TEST;
+    lower.yaw = 0;
+    upper.yaw = 0;
+    const se = buildSheet(e);
+    check('two gates at one spot, one above the other a pipe apart, are seven pipes too', se.parts.sections.count === 7 && fit(se, 'tee') === 2, JSON.stringify([se.parts.sections, se.parts.fittings]));
+    check('and one row: a stack of 2', se.pieces.length === 1 && /Stack of 2/.test(se.pieces[0].label), JSON.stringify(se.pieces.map((p) => p.label)));
+  }
+  /* A row that shares an upright is seven pipes. */
+  {
+    const d = createTrack('row', 'micro');
+    placeRow(d, { x: 5, y: 6 }, { x: 5 + 31 * IN, y: 6 });
+    const sh = buildSheet(d);
+    check('two side by side gates that share an upright are seven pipes, not eight', sh.parts.sections.count === 7, String(sh.parts.sections.count));
+    check('four elbows on the outside corners and two tees where the bars meet the shared upright', fit(sh, 'elbow') === 4 && fit(sh, 'tee') === 2 && sh.parts.fittings.length === 2, JSON.stringify(sh.parts.fittings));
+    const apart = createTrack('apart', 'micro');
+    gateAt(apart, 5, 6);
+    gateAt(apart, 5 + 30 * IN, 6);
+    const sa = buildSheet(apart);
+    check('and two that are both fully built at 30 in are eight pipes and eight elbows: touching, not joined', sa.parts.sections.count === 8 && fit(sa, 'elbow') === 8 && fit(sa, 'tee') === 0, JSON.stringify([sa.parts.sections, sa.parts.fittings]));
+  }
+  /* A gate off the floor stands on legs. */
+  {
+    const d = createTrack('tower', 'micro');
+    gateAt(d, 5, 6, 'tower');
+    const sh = buildSheet(d);
+    check('a tower is a frame of four and two legs', membersOf(d).length === 6 && sh.parts.sections.count === 4);
+    check('the legs are cut to the height of the frame\'s lower corners less the fittings, and are not sections', sh.parts.cuts.length === 1 && sh.parts.cuts[0].count === 2 && near(sh.parts.cuts[0].length, (56 * IN + 14 * IN - (14 * IN + 0.5 * PIPE_OD_FOR_TEST)) - 2 * FITTING_ALLOWANCE, 0.002), JSON.stringify(sh.parts.cuts));
+    check('two elbows at the top, two tees where a leg goes down from the bar and the upright, and two feet', fit(sh, 'elbow') === 2 && fit(sh, 'tee') === 2 && fit(sh, 'foot') === 2, JSON.stringify(sh.parts.fittings));
+  }
+  /* A gate of another size is cut, not sectioned. */
+  {
+    const d = createTrack('small', 'micro');
+    const g = gateAt(d, 5, 6);
+    g.dims.clearW = 24 * IN;
+    g.dims.clearH = 24 * IN;
+    const sh = buildSheet(d);
+    check('a 24 in gate is four pieces cut to 23 in, and no section of 27', sh.parts.sections.count === 0 && sh.parts.cuts.length === 1 && sh.parts.cuts[0].count === 4 && near(sh.parts.cuts[0].length, 23 * IN, 0.001), JSON.stringify(sh.parts.cuts));
+  }
+  /* Poles, bars, cones, barriers and start pads are listed, not built from members. */
+  {
+    const d = createTrack('others', 'micro');
+    gateAt(d, 5, 6, 'pole');
+    gateAt(d, 6, 6, 'horizontalPole');
+    gateAt(d, 7, 6, 'cone');
+    gateAt(d, 8, 6, 'barrier');
+    const pads = createElement(d, 'startPads', { x: 4, y: 6, z: 0 }, 0);
+    pads.dims.pads = 3;
+    d.elements.push(pads);
+    const sh = buildSheet(d);
+    check('a pole is listed by its height, with no pipe of its own', sh.parts.poles.length === 1 && near(sh.parts.poles[0].height, 1.5) && sh.parts.sections.count === 0, JSON.stringify([sh.parts.poles, sh.parts.sections]));
+    check('a horizontal pole by its length and how high it hangs', sh.parts.bars.length === 1 && sh.parts.bars[0].count === 1);
+    check('cones, barriers and start pads as what they are', ['Cone', 'Barrier', 'Start pads'].every((l) => sh.parts.other.some((o) => o.label === l)) && sh.parts.other.find((o) => o.label === 'Start pads').count === 3, JSON.stringify(sh.parts.other));
+    check('a waypoint is a bend in a line and is not on the sheet', (() => {
+      const w = createElement(d, 'waypoint', { x: 9, y: 6, z: 0.3 }, 0);
+      d.elements.push(w);
+      return buildSheet(d).pieces.length === sh.pieces.length;
+    })());
+  }
+  /* Track 1, counted by hand from its elements: five gates and two of them
+   * stacks (el-3 with el-4, el-5 with el-6 whose frame is a gap), one pole and two
+   * bars on the floor. The single gate is four pipes; the stack that is built is
+   * seven, the two levels sharing a bar; the other is four, its upper opening being
+   * a gap; so fifteen pipes of one length, and twelve elbows and two tees. */
+  {
+    const t1 = PRESETS.find((p) => p.id === 'racegow5-track1');
+    const sh = buildSheet(t1);
+    check('Track 1 is fifteen sections of 27 in and no other pipe', sh.parts.sections.count === 15 && sh.parts.cuts.length === 0, JSON.stringify(sh.parts.sections));
+    check('twelve elbows and two tees, and no other fitting', fit(sh, 'elbow') === 12 && fit(sh, 'tee') === 2 && sh.parts.fittings.length === 2, JSON.stringify(sh.parts.fittings));
+    check('one pole 58.1 in tall and two bars 29.05 in long', sh.parts.poles.length === 1 && near(sh.parts.poles[0].height, 1.47574, 1e-5) && sh.parts.bars.length === 1 && sh.parts.bars[0].count === 2 && near(sh.parts.bars[0].length, 0.73787, 1e-5), JSON.stringify([sh.parts.poles, sh.parts.bars]));
+    check('and one set of start pads', sh.parts.other.length === 1 && sh.parts.other[0].label === 'Start pads' && sh.parts.other[0].count === 1);
+    check('seven rows: the gate, two stacks, the pole, the pads and the two bars', sh.pieces.length === 7 && sh.pieces.filter((p) => /Stack/.test(p.label)).length === 2, sh.pieces.map((p) => p.label).join(', '));
+    check('the numbers on the rows are the numbers on the gates', sh.pieces[0].key === '1' && sh.pieces.some((p) => p.key === '2, 3') && sh.pieces.some((p) => p.key === '4, 6'), sh.pieces.map((p) => p.key).join(' | '));
+  }
+  /* Every track: the parts add up, whatever they are. */
+  for (const p of PRESETS.filter((q) => q.trackClass === 'micro')) {
+    const ms = mergeMembers(membersOf(p));
+    const nodes = nodesOf(ms);
+    const ends = nodes.reduce((n, x) => n + x.ends.length, 0);
+    const sh = buildSheet(p);
+    const cutCount = sh.parts.cuts.reduce((n, c) => n + c.count, 0);
+    const finite = ms.every((m) => [m.a, m.b].every((q) => Number.isFinite(q.x) && Number.isFinite(q.y) && Number.isFinite(q.z)));
+    check(`${p.name}: every member end is at exactly one fitting, and every member is a section or a cut`, ends === 2 * ms.length && sh.parts.sections.count + cutCount === ms.length && finite, `${ends} ends, ${ms.length} members`);
+    check(`${p.name}: the fittings counted are the nodes found`, sh.parts.fittings.reduce((n, f) => n + f.count, 0) === nodes.length);
+  }
+  /* Where things are measured from. */
+  {
+    const d = createTrack('corner', 'micro');
+    const a = gateAt(d, 5, 6);
+    const b = gateAt(d, 6, 7);
+    a.yaw = Math.PI / 2;
+    b.yaw = Math.PI / 2;
+    const w = 0.3556 + PIPE_OD_FOR_TEST;
+    const t = PIPE_OD_FOR_TEST / 2;
+    const at = (corner) => buildSheet(d, { corner }).pieces.map((p) => [p.x, p.y]);
+    const sw = at('sw');
+    check('from the south west corner of the smallest rectangle that holds the track', near(sw[0][0], w) && near(sw[0][1], t) && near(sw[1][0], 1 + w) && near(sw[1][1], 1 + t), JSON.stringify(sw));
+    const ne = at('ne');
+    check('from the north east it is measured the other way, west and south', near(ne[0][0], 1 + w) && near(ne[0][1], 1 + t) && near(ne[1][0], w) && near(ne[1][1], t), JSON.stringify(ne));
+    const se = at('se');
+    const nw = at('nw');
+    check('and from the other two corners each measurement is from its own side', near(se[0][0], 1 + w) && near(se[0][1], t) && near(nw[0][0], w) && near(nw[0][1], 1 + t), JSON.stringify([se, nw]));
+    check('the four corners are all offered, and an unknown one is the south west', Object.keys(CORNERS).sort().join() === 'ne,nw,se,sw' && buildSheet(d, { corner: 'nonsense' }).corner === 'sw');
+    check('the rectangle that holds it is the gates\' outer frames', near(buildSheet(d).bounds.width, 1 + 2 * w) && near(buildSheet(d).bounds.depth, 1 + 2 * t));
+    check('a gate faces north when its heading is a quarter turn round, and its frame runs east to west', buildSheet(d).pieces[0].faces === 'north' && buildSheet(d).pieces[0].runs === 'east to west');
+    check('compass words: east, north, west, south, and degrees where a heading is not a quarter', compass(0) === 'east' && compass(Math.PI / 2) === 'north' && compass(Math.PI) === 'west' && compass(-Math.PI / 2) === 'south' && /37 degrees/.test(compass(0.6458)));
+  }
+  /* What a fitting is, from the directions of the pipes that reach it. */
+  {
+    const v = (x, y, z) => ({ x, y, z });
+    check('one pipe is an end cap, or a foot at the floor', fittingKind([v(1, 0, 0)], false) === 'end cap' && fittingKind([v(0, 0, 1)], true) === 'foot');
+    check('two at a right angle are an elbow, in line a coupler', fittingKind([v(1, 0, 0), v(0, 1, 0)]) === 'elbow' && fittingKind([v(1, 0, 0), v(-1, 0, 0)]) === 'coupler');
+    check('two in line and one across are a tee, three at right angles a 3-way corner', fittingKind([v(1, 0, 0), v(-1, 0, 0), v(0, 1, 0)]) === 'tee' && fittingKind([v(1, 0, 0), v(0, 1, 0), v(0, 0, 1)]) === '3-way corner');
+    check('two pairs in line and across are a cross; anything else is said to be a junction of so many pipes', fittingKind([v(1, 0, 0), v(-1, 0, 0), v(0, 1, 0), v(0, -1, 0)]) === 'cross' && fittingKind([v(1, 0, 0), v(-1, 0, 0), v(0, 1, 0), v(0, -1, 0), v(0, 0, 1)]) === 'junction of 5 pipes' && fittingKind([v(1, 0, 0), v(0, 1, 0), v(0, 0, 1), v(0, 0, -1)]) === 'junction of 4 pipes');
+  }
+  /* The page. */
+  {
+    const d = createTrack('<img src=x onerror=alert(1)> "quoted" & co', 'micro');
+    const g = gateAt(d, 5, 6);
+    g.name = '<b>bold</b>';
+    gateAt(d, 6, 7, 'pole');
+    const sh = buildSheet(d);
+    const html = sheetHtml(sh);
+    check('a name somebody typed is text on the sheet and never markup', !html.includes('<img') && !html.includes('<b>') && html.includes('&lt;img src=x onerror=alert(1)&gt;') && html.includes('&quot;quoted&quot; &amp; co'));
+    check('there is no undefined and no NaN anywhere in it', !/undefined|NaN|Infinity|null/.test(html));
+    check('every piece\'s measurement is on it, in inches and millimetres', sh.pieces.every((p) => html.includes(inches(p.x)) && html.includes(inches(p.y))));
+    check('and the parts: the sections, the elbows, the pole', html.includes('sections, 27 in (686 mm)') && html.includes('elbows') && html.includes('vertical pole'));
+    const svg = sheetSvg(sh);
+    check('the plan is one shape and one label for each piece, and the corner', (svg.match(/<circle/g) || []).length >= sh.pieces.length && svg.includes('viewBox='));
+    check('and every sheet says how it was measured and what it assumed', sh.notes.length >= 4 && /dry fit/.test(sh.notes.join(' ')) && /corner/.test(sh.notes[0]));
+    const empty = buildSheet(createTrack('empty', 'micro'));
+    check('an empty track is a sheet with nothing on it, not an error', empty.pieces.length === 0 && empty.parts.sections.count === 0 && sheetHtml(empty).includes('What to buy'));
+  }
+}
+
+/*
+ * IMPORTING A TRACK FROM THE FPV EVENTS DESIGNER. The fixture is synthetic and has
+ * the shapes of a real one (an arena, gates of several types, a stack at one spot,
+ * a cube, a prop, tape measurements); the real track belongs to whoever drew it and
+ * is not in the repository. What is asserted is the mapping the plan worked out, above
+ * all which way round the floor goes, and that everything that did not map is said.
+ */
+function suiteImportFpv() {
+  console.log('\nthe whoop builder: import from the FPV Events designer');
+  const near = (a, b, tol = 1e-6) => Math.abs(a - b) < tol;
+  const Q = Math.PI / 2;
+  const gate = (typeId, x, z, height, rotY, dir = 'forward', prop = false) => ({ typeId, x, z, height, rotY, dir, prop });
+  const fixture = () => ({
+    id: 'synthetic', name: 'Synthetic', updated: '2026-01-01T00:00:00Z', protected: true, private: false,
+    data: {
+      arena: { w: 6, d: 6, h: 3 },
+      gates: [
+        gate('square-75', 1, 2, 0, 0),
+        gate('square-75', 3, 2, 0, 1.571, 'back'),
+        gate('tall-pole-2m', 4, 4, 0, 0),
+        gate('square-gate-0-6m', 5, 1, 0, 0),
+        gate('square-gate-0-6m', 5, 1, 0.7, 0),
+        gate('tinywhoop-cube', 2, 5, 0, 0, 'top>right'),
+        gate('whoop-hoop-50', 3, 5, 0.25, 0),
+        gate('devon-banner', 0, 1, 0.1, 1.571, 'forward', true),
+        gate('mystery-9000', 2, 3, 0, 0),
+        gate('square-75', 40, 2, 0, 0),
+      ],
+      measurements: [[[1, 0, 2], [3, 0, 2]], [[3, 0, 2], [4, 0, 4]]],
+    },
+  });
+  const r = importFpvEvents(fixture());
+  check('their track reads, without an error', !r.error && r.doc && r.report);
+  const doc = r.doc;
+  const gates = doc.elements.filter((e) => e.type === 'gate');
+  check('it is a whoop track, named for where it came from', doc.trackClass === 'micro' && doc.name === 'Synthetic (from the FPV Events designer)', doc.name);
+
+  /* Which way round the floor goes: their z runs down the screen, our y runs up it,
+   * and the arena is centred in our 10 by 12 m hall. */
+  const first = gates[0];
+  check('x is kept, and the arena is centred in the hall: their x of 1 in a 6 m arena is 3 m from our west wall', near(first.position.x, 2 + 1));
+  check('y is the arena\'s depth less their z, so their z of 2 is 4 m up from the arena\'s near edge, 7 m in the hall', near(first.position.y, 3 + (6 - 2)));
+  const top = doc.elements.find((e) => e.type === 'doubleStack');
+  check('a gate that is higher on their screen (smaller z) is higher on ours: their z of 1 is further north than their z of 2', top && top.position.y > first.position.y, `${top && top.position.y} against ${first.position.y}`);
+  check('the heading is their rotY less a quarter turn, and pinned: a gate facing their +z (rotY 0) faces our south', near(first.yaw, -Q, 1e-4) && first.yawOverridden === true, String(first.yaw));
+  check('and a rotY of a quarter turn faces our east, their +x, which is a yaw of 0', near(gates[1].yaw, 0, 2e-3), String(gates[1].yaw));
+  check('the size is the designer\'s: 750 mm across, and the height is the bottom of the opening', near(first.dims.clearW, 0.75) && near(first.dims.clearH, 0.75) && near(first.dims.sillH, 0));
+
+  /* The stack: two 600 mm gates at one spot, 700 mm apart. */
+  check('two gates at one spot and heading, at even heights, are one double stack', Boolean(top) && top.dims.levels === 2 && near(top.dims.levelPitch, 0.7) && near(top.dims.clearW, 0.6) && near(top.dims.sillH, 0));
+  check('and it stands where they stood: x 5 in a 6 m arena, z 1', top && near(top.position.x, 2 + 5) && near(top.position.y, 3 + 5));
+
+  /* The rest. */
+  const pole = doc.elements.find((e) => e.type === 'pole');
+  check('a pole is a pole, its height the designer\'s 2 m, where it stood', pole && near(pole.dims.height, 2) && near(pole.position.x, 6) && near(pole.position.y, 5));
+  const bend = doc.elements.find((e) => e.type === 'waypoint');
+  check('a pass through a cube is a waypoint at the middle of the cube, 375 mm up', bend && near(bend.position.z, 0.375) && near(bend.position.x, 4) && near(bend.position.y, 4));
+  const hoop = gates.find((e) => near(e.dims.clearW, 0.5));
+  check('a hoop is a square gate of the same width, raised to the height it had', hoop && near(hoop.dims.sillH, 0.25) && near(hoop.position.x, 5) && near(hoop.position.y, 4));
+
+  /* The flying order: theirs, in their order, with what could be flown left in it. */
+  const order = doc.sequence.map((q) => elementById(doc, q.elementId).type);
+  check('the flying order is their order: gate, gate, pole, the stack twice, the cube, the hoop', order.join() === 'gate,gate,pole,doubleStack,doubleStack,waypoint,gate', order.join());
+  check('a gate marked back is flown the other way through, and one marked forward is not', doc.sequence[0].entry === 1 && doc.sequence[1].entry === -1 && doc.sequence[0].overridden === true && doc.sequence[1].overridden === true);
+  check('the two passes of the stack are its two openings, bottom then top', doc.sequence[3].apertureIndex === 0 && doc.sequence[4].apertureIndex === 1);
+
+  /* What did not map is said. */
+  const lines = reportLines(r.report).join(' | ');
+  check('the stack is reported as kept', /became one double stack, 700 mm/.test(lines), lines);
+  check('the cube is reported as changed, by its place in their list', /#6 is a pass through a cube/.test(lines));
+  check('the hoop is reported as changed', /#7 is a hoop, 500 mm across/.test(lines));
+  check('the banner is left out, by its place and its kind', /Left out: #8 is a banner/.test(lines));
+  check('a type it does not know is left out by name', /Left out: #9 is a "mystery-9000"/.test(lines));
+  check('a gate outside the hall is left out and says so', /Left out: #10 stands outside the 10 by 12 m hall/.test(lines));
+  check('the tape measurements are left out and the build sheet is named as where they went', /2 tape measurements were not kept/.test(lines) && /build sheet/.test(lines));
+  check('a gate bigger than RaceGOW allows is kept at its size, and the rules are named as what will say so', /Gates 750 mm across were kept at that size/.test(lines) && gates.filter((e) => near(e.dims.clearW, 0.75)).length === 2);
+  check('nothing was left out that the report does not name: 10 in their list, 7 flown, 3 named as left out', doc.sequence.length === 7 && r.report.dropped.filter((l) => /^#/.test(l)).length === 3);
+
+  /* The document is a sound one. */
+  check('it round trips through a file, and needs no repair', roundTripsCleanly(doc) && deserialize(serialize(doc)).repairs.length === 0);
+  const warned = collectWarnings(doc, buildPath(doc));
+  check('the rules run on it: the 750 mm gates are over the size RaceGOW allows, and that is a warning', warned.some((w) => w.code === 'rg-opening-max'), warned.map((w) => w.code).join());
+  check('and the racing line through it is finite', buildPath(doc).samples.every((sm) => Number.isFinite(sm.pos.x) && Number.isFinite(sm.pos.y) && Number.isFinite(sm.pos.z)));
+
+  /* Shapes of input. */
+  check('the designer\'s own wrapper and the bare data both read, and so does text', looksLikeFpvEvents(fixture()) && looksLikeFpvEvents(fixture().data) && looksLikeFpvEvents(JSON.stringify(fixture())) && !importFpvEvents(fixture().data).error);
+  check('a document of ours is not one of theirs', !looksLikeFpvEvents(toPlain(createTrack('ours', 'micro'))) && !looksLikeFpvEvents(JSON.stringify(toPlain(createTrack('ours', 'micro')))));
+  const hostile = [
+    ['text that is not JSON', 'not json'], ['a number', 5], ['null', null], ['an array', []], ['no gates', { arena: { w: 6, d: 6 } }],
+    ['gates that are not a list', { arena: { w: 6, d: 6 }, gates: 'x' }], ['no arena', { gates: [] }], ['an arena that is text', { arena: 'big', gates: [] }],
+  ];
+  for (const [what, input] of hostile) {
+    let got = 'threw';
+    try {
+      got = importFpvEvents(input);
+    } catch (e) {
+      got = 'threw';
+    }
+    check(`${what} is an error with a sentence, and not a throw`, got !== 'threw' && typeof got.error === 'string' && got.error.length > 10, String(got && got.error));
+  }
+  const rough = importFpvEvents({
+    arena: { w: 'x', d: -1 },
+    gates: [null, 5, 'a', {}, { typeId: 7, x: 1, z: 1 }, { typeId: 'square-75', x: NaN, z: 2 }, { typeId: 'square-75', x: 1, z: 1, height: 'tall', rotY: 'far', dir: 9 }, { typeId: 'square-75', x: 1e9, z: -1e9 }],
+    measurements: 'no',
+  });
+  check('a list of nonsense gates reads without a throw, and keeps the one that was a gate', !rough.error && rough.doc.elements.filter((e) => e.type === 'gate').length === 1 && rough.report.dropped.length >= 6, JSON.stringify(rough.report));
+  check('a track of a thousand gates is refused with a sentence', /more than any whoop room holds/.test(importFpvEvents({ arena: { w: 6, d: 6 }, gates: new Array(1000).fill(gate('square-75', 3, 3, 0, 0)) }).error || ''));
+  const typed = importFpvEvents({ ...fixture(), types: [{ id: 'my-gate', shape: 'square', innerSize: 0.7 }] });
+  const withOwn = importFpvEvents({ arena: { w: 6, d: 6 }, gates: [gate('my-gate', 3, 3, 0, 0)], types: [{ id: 'my-gate', shape: 'square', innerSize: 0.7 }] });
+  check('a type the designer lists with its own size is read at that size', !typed.error && withOwn.doc.elements.find((e) => e.type === 'gate') && near(withOwn.doc.elements.find((e) => e.type === 'gate').dims.clearW, 0.7));
+  check('and a name that carries a size ("square-70") is read at that size', near(importFpvEvents({ arena: { w: 6, d: 6 }, gates: [gate('square-70', 3, 3, 0, 0)] }).doc.elements.find((e) => e.type === 'gate').dims.clearW, 0.7));
+  const big = importFpvEvents({ arena: { w: 14, d: 6 }, gates: [gate('square-gate-0-6m', 1, 3, 0, 0), gate('square-gate-0-6m', 13, 3, 0, 0)] });
+  check('an arena wider than the hall drops what stands outside it, by name, and says why', big.doc.elements.filter((e) => e.type === 'gate').length === 0 && big.report.dropped.filter((l) => /stands outside the 10 by 12 m hall/.test(l)).length === 2 && /The arena is 14 by 6 m/.test(reportLines(big.report).join(' ')), JSON.stringify(big.report));
+}
+
 async function main() {
   if (process.argv.includes('--emit')) {
     process.stdout.write(serialize(demoTrack()));
@@ -7014,6 +7444,9 @@ async function main() {
   suiteWhoopRow();
   suiteWhoopReplace();
   suiteWhoopBadges();
+  await suiteShareLink();
+  suiteBuildSheet();
+  suiteImportFpv();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exitCode = failed ? 1 : 0;
 }
