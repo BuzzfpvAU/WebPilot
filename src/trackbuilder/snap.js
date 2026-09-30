@@ -22,17 +22,20 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ELEMENTS, KIND, trackClassOf, docModeOf } from './elements.js';
+import {
+  ELEMENTS, KIND, MICRO_PALETTE_ORDER, trackClassOf, docModeOf, defaultDims, defaultPitch, defaultZ,
+} from './elements.js';
 import {
   envelopeFor, GATE_OPENING_DEFAULT, GATE_SPACING_MIN, GATE_SPACING_MAX, GATE_SPACING_NOMINAL, inches,
+  POLE_FROM_GATE_MIN, POLE_FROM_POLE_MIN,
 } from './racegow.js';
 import {
   apertureCenter, aperturesOf, createElement, deepClone, elementById, entryAnchor, isSequenceable, kindOf,
-  newElementId,
+  newElementId, setSideBuilt,
 } from './model.js';
-import { addToSequence, gateNumbers, moveInSequence } from './sequence.js';
+import { addToSequence, gateNumbers, moveInSequence, removeFromSequence } from './sequence.js';
 import { applyFigure, defaultFigure } from './figures.js';
-import { defaultYawFor, lastAnchorOf } from './faces.js';
+import { applyAutoFaces, defaultYawFor, lastAnchorOf } from './faces.js';
 import { apertureFrame, wrapAngle } from './geometry.js';
 
 /* ------------------------------------------------------------------ */
@@ -173,6 +176,23 @@ export function placementFor(doc, position, type) {
   const def = ELEMENTS[type];
   if (!def || def.kind !== KIND.APERTURE || trackClassOf(doc) !== 'micro' || docModeOf(doc) === 'freestyle') {
     return plain;
+  }
+  /* A gate put exactly where a side by side pair goes faces the way the gate it
+   * stands beside faces, and keeps it: a pair is two gates in one plane, and the
+   * line from the last gate has nothing to say about that. */
+  const beside = sideBySideYaw(doc, position);
+  if (beside != null) {
+    const lastGate = lastAnchorOf(doc);
+    const prev0 = lastGate && lastGate.seq ? elementById(doc, lastGate.seq.elementId) : null;
+    const sole = doc.sequence.filter((q) => {
+      const e = elementById(doc, q.elementId);
+      return e && kindOf(e) === KIND.APERTURE;
+    }).length === 1;
+    return {
+      yaw: beside,
+      pin: true,
+      pinPrevious: prev0 && kindOf(prev0) === KIND.APERTURE && !prev0.yawOverridden && sole ? { id: prev0.id, yaw: prev0.yaw } : null,
+    };
   }
   const last = lastAnchorOf(doc);
   if (!last) {
@@ -414,4 +434,410 @@ export function measuresFor(doc, centre, id = null) {
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* Magnets                                                             */
+/* ------------------------------------------------------------------ */
+
+const IN = 0.0254;
+
+/* How near, on the floor, a piece has to be to a legal spot for the magnet to
+ * take it: a few inches, which is a few dozen pixels in the room and enough to
+ * feel it, and not so many that a gate cannot be put anywhere else. */
+export const MAGNET_RADIUS = 3 * IN;
+
+/* The direction along the width of a gate, on the floor. */
+function widthAxisOf(el) {
+  const f = apertureFrame(el.yaw, el.pitch);
+  return { x: f.widthAxis.x, y: f.widthAxis.y };
+}
+
+/*
+ * THE FACING OF A GATE PUT EXACTLY BESIDE ANOTHER, or null when it is not. A
+ * side by side pair is 30 in centre to centre along the width of a gate, which
+ * is a place a magnet takes a gate to and a place a hand can put one by typing;
+ * either way the two are in one plane and face one way. A millimetre is the
+ * width of "exactly", because a snapped position is computed and not typed.
+ */
+export function sideBySideYaw(doc, at, ignore = []) {
+  const skip = new Set(ignore);
+  for (const g of doc.elements) {
+    if (skip.has(g.id) || kindOf(g) !== KIND.APERTURE) {
+      continue;
+    }
+    const w = widthAxisOf(g);
+    for (const sign of [-1, 1]) {
+      const cx = g.position.x + sign * w.x * GATE_SPACING_NOMINAL;
+      const cy = g.position.y + sign * w.y * GATE_SPACING_NOMINAL;
+      if (Math.hypot(cx - at.x, cy - at.y) < 0.002) {
+        return g.yaw;
+      }
+    }
+  }
+  return null;
+}
+
+/* What is being moved, as far as the rules care: a gate, a pole, or something
+ * the rules have no distance for. */
+function movingKind(type) {
+  const def = ELEMENTS[type];
+  if (def && def.kind === KIND.APERTURE) {
+    return 'gate';
+  }
+  return type === 'pole' ? 'pole' : 'other';
+}
+
+/* Whether a piece of `kind` may stand at `c`: inside the room, at least 27 in
+ * from another gate, at least 14 in from a gate or a pole where one is a pole,
+ * and at least 36 in from another pole. The magnets only ever offer such a spot,
+ * which is what "never snaps to a spot the rules forbid" means. */
+function legalSpot(doc, kind, c, skip) {
+  const f = doc.field;
+  if (c.x < 0 || c.y < 0 || c.x > f.width || c.y > f.depth) {
+    return false;
+  }
+  for (const e of doc.elements) {
+    if (skip.has(e.id)) {
+      continue;
+    }
+    const gate = kindOf(e) === KIND.APERTURE;
+    const pole = e.type === 'pole';
+    const d = Math.hypot(e.position.x - c.x, e.position.y - c.y);
+    if (kind === 'gate' && ((gate && d < GATE_SPACING_MIN - 1e-6) || (pole && d < POLE_FROM_GATE_MIN - 1e-6))) {
+      return false;
+    }
+    if (kind === 'pole' && ((gate && d < POLE_FROM_GATE_MIN - 1e-6) || (pole && d < POLE_FROM_POLE_MIN - 1e-6))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/*
+ * WHERE A PIECE LANDS. `at` is where it was put, already on the grid; the answer
+ * is { x, y, snapped, guides }. Near a legal position it is that position:
+ *
+ *   a gate     30 in centre to centre from another along its width, either side
+ *              (a side by side pair, which RaceGOW names as its own element);
+ *   a pole     14 in off a gate along its width, either side, and 36 in from
+ *              another pole along an axis (the two distances the diagrams
+ *              dimension);
+ *   anything   the same x, or the same y, as another piece, which is how a track
+ *              is squared up.
+ *
+ * A slot beats a line, the nearest wins, and a candidate the rules forbid is
+ * never offered. `guides` say why it landed, each { kind, a, b, text }, for a
+ * view to draw. `off` (Alt) turns all of it off, and `ignore` names the pieces
+ * being moved, which are not things to land beside. A pure function of the
+ * document and a point, used by both views, so the plan and the room cannot
+ * disagree; snapping what it returned changes nothing more.
+ */
+export function magnetFor(doc, at, opts = {}) {
+  const none = { x: at.x, y: at.y, snapped: false, guides: [] };
+  if (opts.off) {
+    return none;
+  }
+  const radius = opts.radius ?? MAGNET_RADIUS;
+  const skip = new Set(opts.ignore ?? []);
+  const kind = movingKind(opts.type);
+  const others = doc.elements.filter((e) => !skip.has(e.id));
+
+  const slots = [];
+  for (const g of others) {
+    if (kindOf(g) !== KIND.APERTURE) {
+      continue;
+    }
+    const w = widthAxisOf(g);
+    const reach = kind === 'gate' ? GATE_SPACING_NOMINAL : POLE_FROM_GATE_MIN;
+    if (kind === 'gate' || kind === 'pole') {
+      for (const sign of [-1, 1]) {
+        slots.push({
+          kind: kind === 'gate' ? 'pair' : 'pole',
+          from: g.position,
+          x: g.position.x + sign * w.x * reach,
+          y: g.position.y + sign * w.y * reach,
+          text: kind === 'gate' ? '30 in' : '14 in',
+        });
+      }
+    }
+  }
+  if (kind === 'pole') {
+    for (const q of others) {
+      if (q.type !== 'pole') {
+        continue;
+      }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        slots.push({ kind: 'pole', from: q.position, x: q.position.x + dx * POLE_FROM_POLE_MIN, y: q.position.y + dy * POLE_FROM_POLE_MIN, text: '36 in' });
+      }
+    }
+  }
+  let best = null;
+  for (const c of slots) {
+    const d = Math.hypot(c.x - at.x, c.y - at.y);
+    if (d <= radius && legalSpot(doc, kind, c, skip) && (!best || d < best.d)) {
+      best = { ...c, d };
+    }
+  }
+  if (best) {
+    return {
+      x: best.x,
+      y: best.y,
+      snapped: true,
+      guides: [{ kind: best.kind, a: { x: best.from.x, y: best.from.y }, b: { x: best.x, y: best.y }, text: best.text }],
+    };
+  }
+
+  let bx = null;
+  let by = null;
+  for (const e of others) {
+    const dx = Math.abs(e.position.x - at.x);
+    const dy = Math.abs(e.position.y - at.y);
+    if (dx <= radius && (!bx || dx < bx.d)) {
+      bx = { d: dx, e };
+    }
+    if (dy <= radius && (!by || dy < by.d)) {
+      by = { d: dy, e };
+    }
+  }
+  for (const [ax, ay] of [[bx, by], [bx, null], [null, by]]) {
+    if (!ax && !ay) {
+      continue;
+    }
+    const c = { x: ax ? ax.e.position.x : at.x, y: ay ? ay.e.position.y : at.y };
+    if (!legalSpot(doc, kind, c, skip)) {
+      continue;
+    }
+    const guides = [];
+    if (ax) {
+      guides.push({ kind: 'align-x', a: { x: ax.e.position.x, y: ax.e.position.y }, b: { x: c.x, y: c.y }, text: '' });
+    }
+    if (ay) {
+      guides.push({ kind: 'align-y', a: { x: ay.e.position.x, y: ay.e.position.y }, b: { x: c.x, y: c.y }, text: '' });
+    }
+    return { x: c.x, y: c.y, snapped: true, guides };
+  }
+  return none;
+}
+
+/* ------------------------------------------------------------------ */
+/* The row of gates                                                    */
+/* ------------------------------------------------------------------ */
+
+/* RaceGOW's side by side gates are two or three in a row. */
+export const ROW_MAX = 3;
+
+/*
+ * WHAT A DRAG ALONG THE FLOOR MEANS AS A ROW OF GATES: from where it starts to
+ * where it ends, along the nearer axis, as many gates 30 in apart as the drag
+ * is long, two at the least and three at the most, each facing across the row
+ * the way the course is going. Returns { count, dir, items: [{ x, y, yaw }] },
+ * the first item where the drag began. Pure, so the ghost that follows the drag
+ * and the gates it places are the same answer.
+ *
+ * WHICH WAY THEY FACE. Across the row there are two ways, and the one that
+ * points the way the course is heading, from the last place it has been to the
+ * middle of the row, is taken; with nothing before it, the one that points
+ * north or east.
+ */
+export function rowPlan(doc, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const alongX = Math.abs(dx) >= Math.abs(dy);
+  const dir = alongX ? { x: dx < 0 ? -1 : 1, y: 0 } : { x: 0, y: dy < 0 ? -1 : 1 };
+  const along = alongX ? Math.abs(dx) : Math.abs(dy);
+  const count = Math.max(2, Math.min(ROW_MAX, Math.round(along / GATE_SPACING_NOMINAL) + 1));
+  const centre = {
+    x: a.x + (dir.x * GATE_SPACING_NOMINAL * (count - 1)) / 2,
+    y: a.y + (dir.y * GATE_SPACING_NOMINAL * (count - 1)) / 2,
+  };
+  const n1 = { x: -dir.y, y: dir.x };
+  const n2 = { x: dir.y, y: -dir.x };
+  const last = lastAnchorOf(doc);
+  let across = n1.x + n1.y > 0 ? n1 : n2;
+  if (last) {
+    const h = { x: centre.x - last.pos.x, y: centre.y - last.pos.y };
+    const d1 = n1.x * h.x + n1.y * h.y;
+    const d2 = n2.x * h.x + n2.y * h.y;
+    if (Math.abs(d1 - d2) > 1e-9) {
+      across = d1 > d2 ? n1 : n2;
+    }
+  }
+  const yaw = Math.atan2(across.y, across.x);
+  const items = [];
+  for (let i = 0; i < count; i += 1) {
+    items.push({ x: a.x + dir.x * GATE_SPACING_NOMINAL * i, y: a.y + dir.y * GATE_SPACING_NOMINAL * i, yaw });
+  }
+  return { count, dir, items };
+}
+
+/*
+ * LAY THE ROW: ordinary gates, pinned to their heading, joined to the flying
+ * order in the order along the row and each flown along the way it faces (the
+ * chord between two gates side by side is square to both, so the rule that
+ * reads a direction off the chord has nothing to read, and this says it). Each
+ * gate after the first gives up the side that faces the one before it, so the
+ * shared vertical is built once: `unbuiltSides` is what already means that.
+ * Returns the new ids, in row order.
+ */
+export function placeRow(doc, a, b) {
+  const plan = rowPlan(doc, a, b);
+  const ids = [];
+  for (const it of plan.items) {
+    const el = createElement(doc, 'gate', { x: it.x, y: it.y, z: 0 }, it.yaw);
+    el.yawOverridden = true;
+    doc.elements.push(el);
+    addToSequence(doc, el.id, 0);
+    ids.push(el.id);
+  }
+  for (let i = 1; i < ids.length; i += 1) {
+    const el = elementById(doc, ids[i]);
+    const w = widthAxisOf(el);
+    const towardPrevious = { x: -plan.dir.x, y: -plan.dir.y };
+    setSideBuilt(doc, el.id, w.x * towardPrevious.x + w.y * towardPrevious.y > 0 ? 'right' : 'left', false);
+  }
+  for (const id of ids) {
+    const seq = doc.sequence.find((q) => q.elementId === id);
+    if (seq && !seq.overridden) {
+      seq.entry = 1;
+    }
+  }
+  return ids;
+}
+
+/* ------------------------------------------------------------------ */
+/* The ruler                                                           */
+/* ------------------------------------------------------------------ */
+
+/* How near, on the floor, the pointer has to be to the middle of a piece for the
+ * ruler to take the middle. */
+export const RULER_REACH = 6 * IN;
+
+/*
+ * WHERE THE RULER LANDS: on the middle of the nearest piece within reach, since
+ * the question is nearly always how far one gate is from another, and otherwise
+ * on the inch. Alt takes exactly what it is given. `on` is the piece it landed
+ * on, or null. Pure: nothing is written to the track, and nothing about a ruler
+ * is ever stored in it (a layout fact belongs in the build sheet).
+ */
+export function rulerPoint(doc, at, opts = {}) {
+  if (opts.off) {
+    return { x: at.x, y: at.y, on: null };
+  }
+  let best = null;
+  for (const el of doc.elements) {
+    const kind = kindOf(el);
+    if (kind === KIND.DECAL || kind === KIND.ZONE || kind === KIND.ROAD || kind === KIND.VEHICLE || kind === KIND.ANNOTATION) {
+      continue;
+    }
+    const d = Math.hypot(el.position.x - at.x, el.position.y - at.y);
+    if (d <= RULER_REACH && (!best || d < best.d)) {
+      best = { d, el };
+    }
+  }
+  if (best) {
+    return { x: best.el.position.x, y: best.el.position.y, on: best.el.id };
+  }
+  const g = doc.field.gridSize;
+  return { x: Math.round(at.x / g) * g, y: Math.round(at.y / g) * g, on: null };
+}
+
+/* What the ruler says between two floor points: the distance and its words, in
+ * inches with the millimetres beside them. */
+export function rulerReading(a, b) {
+  const d = Math.hypot(b.x - a.x, b.y - a.y);
+  return { d, text: inches(d) };
+}
+
+/* ------------------------------------------------------------------ */
+/* Replace with                                                        */
+/* ------------------------------------------------------------------ */
+
+/*
+ * WHAT CAN STAND IN FOR WHAT. A gate can be a stack, a tower or a horizontal
+ * gate and still be flown through, so a swap keeps its place in the order; a pole
+ * can be a cone; a bar across the room can be a barrier. A gate cannot become a
+ * pole, because a pass through an opening and a pass round a marker are not the
+ * same entry in the flying order (one has a direction, the other a side and a
+ * clearance), so what would "keep its place" mean. A waypoint is not a piece.
+ */
+const SWAP_GROUPS = [
+  ['gate', 'doubleStack', 'ladder', 'tower', 'diveGate'],
+  ['pole', 'cone'],
+  ['horizontalPole', 'barrier'],
+];
+
+/*
+ * WHAT A SELECTION CAN BE REPLACED WITH, in the palette's order: the types that
+ * every selected piece can become, other than the one they all already are. A
+ * selection of pieces from different groups, or of something with no group, has
+ * no answer, so the menu is not offered.
+ */
+export function replacementsFor(doc, ids) {
+  const pieces = [...new Set(ids)].map((id) => elementById(doc, id));
+  if (!pieces.length || pieces.some((el) => !el)) {
+    return [];
+  }
+  const group = SWAP_GROUPS.find((g) => g.includes(pieces[0].type));
+  if (!group || pieces.some((el) => !group.includes(el.type))) {
+    return [];
+  }
+  const same = pieces.every((el) => el.type === pieces[0].type);
+  return MICRO_PALETTE_ORDER.filter((t) => group.includes(t) && !(same && t === pieces[0].type));
+}
+
+/*
+ * REPLACE WITH: change what a piece is and leave where it is. The id, the name,
+ * the position, the turn and whether the turn is pinned stay, so every other piece
+ * that refers to it, and the place in the flying order, are undisturbed. The size
+ * of a gate's opening stays too, because RaceGOW wants every gate on a track the
+ * same size; the rest of what a piece is (how many openings, how high off the
+ * floor, how it is tilted, how big a cone is) is the new type's own, except where
+ * the old one had been moved off its type's default, which is somebody's
+ * decision and is left alone. A pass at an opening the new piece does not have is
+ * dropped from the order (a stack of three that becomes a gate has one opening to
+ * fly through), and the faces are derived again. Returns the ids that changed.
+ * Pieces that are not in the type's group are left as they are.
+ */
+export function replaceWith(doc, ids, type) {
+  const to = ELEMENTS[type];
+  const group = SWAP_GROUPS.find((g) => g.includes(type));
+  if (!to || !group) {
+    return [];
+  }
+  const cls = trackClassOf(doc);
+  const changed = [];
+  for (const id of new Set(ids)) {
+    const el = elementById(doc, id);
+    if (!el || el.type === type || !group.includes(el.type)) {
+      continue;
+    }
+    const from = el.type;
+    const opening = kindOf(el) === KIND.APERTURE ? { clearW: el.dims.clearW, clearH: el.dims.clearH } : null;
+    const pitchIsDefault = Math.abs((el.pitch ?? 0) - defaultPitch(from, cls)) < 1e-9;
+    const zIsDefault = Math.abs((el.position.z ?? 0) - defaultZ(from, cls)) < 1e-9;
+    el.type = type;
+    el.dims = defaultDims(type, cls);
+    if (opening && opening.clearW > 0 && opening.clearH > 0) {
+      el.dims.clearW = opening.clearW;
+      el.dims.clearH = opening.clearH;
+    }
+    if (pitchIsDefault) {
+      el.pitch = defaultPitch(type, cls);
+    }
+    if (zIsDefault) {
+      el.position.z = defaultZ(type, cls);
+    }
+    if (kindOf(el) === KIND.APERTURE) {
+      const openings = aperturesOf(el).length;
+      for (const q of doc.sequence.filter((x) => x.elementId === id && (x.apertureIndex ?? 0) >= openings)) {
+        removeFromSequence(doc, q.id);
+      }
+    }
+    changed.push(id);
+  }
+  if (changed.length) {
+    applyAutoFaces(doc);
+  }
+  return changed;
 }

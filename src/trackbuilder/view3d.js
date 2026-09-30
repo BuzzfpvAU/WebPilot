@@ -671,8 +671,14 @@ export class View3D {
     this.ghost = null;
     this.ghostGroup = null;
     this.measures = [];
+    this.ruler = null;
+    this.rulerGroup = null;
+    this.rulerNode = null;
     this.overlay = null;
     this.bubbles = [];
+    this.badges = [];
+    this.badgeSource = null;
+    this.badgeTip = null;
     this.measureNodes = [];
     this.boxNode = null;
     this.angled = false;
@@ -2806,11 +2812,16 @@ export class View3D {
    * that cannot be drawn is not drawn rather than taking the room down.
    */
   setGhost(g) {
-    const key = `${g.type}|${g.position.x.toFixed(4)}|${g.position.y.toFixed(4)}|${g.yaw.toFixed(4)}`;
+    this.setGhosts([g]);
+  }
+
+  /* The ghost is a list of pieces, because a row of gates is several. */
+  setGhosts(list) {
+    const key = list.map((g) => `${g.type}|${g.position.x.toFixed(4)}|${g.position.y.toFixed(4)}|${g.yaw.toFixed(4)}`).join(';');
     if (this.ghost && this.ghost.key === key) {
       return;
     }
-    this.ghost = { ...g, key };
+    this.ghost = { items: list, key };
     this.rebuildGhost();
     this.host.requestDraw();
   }
@@ -2829,39 +2840,43 @@ export class View3D {
       this.freeGroup(this.ghostGroup);
       this.ghostGroup = null;
     }
-    const g = this.ghost;
-    if (!g || !this.root) {
+    const ghost = this.ghost;
+    if (!ghost || !this.root) {
       return;
     }
-    const def = ELEMENTS[g.type];
-    if (!def || ![KIND.APERTURE, KIND.MARKER, KIND.OBSTACLE].includes(def.kind)) {
-      return;
-    }
+    const all = new THREE.Group();
     const saved = this.pickables;
     this.pickables = [];
     try {
-      const el = createElement(this.host.doc, g.type, g.position, g.yaw);
-      el.id = '__ghost';
-      const node = this.buildElement(el, []);
-      node.traverse((o) => {
-        if (!o.material) {
-          return;
+      for (const g of ghost.items) {
+        const def = ELEMENTS[g.type];
+        if (!def || ![KIND.APERTURE, KIND.MARKER, KIND.OBSTACLE].includes(def.kind)) {
+          continue;
         }
-        for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-          if (!(m.userData && m.userData.sharedKit)) {
-            m.transparent = true;
-            m.opacity = Math.min(m.opacity ?? 1, 0.55);
+        const el = createElement(this.host.doc, g.type, g.position, g.yaw);
+        el.id = '__ghost';
+        const node = this.buildElement(el, []);
+        node.traverse((o) => {
+          if (!o.material) {
+            return;
           }
+          for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+            if (!(m.userData && m.userData.sharedKit)) {
+              m.transparent = true;
+              m.opacity = Math.min(m.opacity ?? 1, 0.55);
+            }
+          }
+        });
+        if (def.kind === KIND.APERTURE) {
+          const ap = aperturesOf(el)[0];
+          const arrow = arrowMesh({ x: Math.cos(g.yaw), y: Math.sin(g.yaw), z: 0 }, Math.max(0.3, ap.clearW * 0.85), COL.arrow, 0.7);
+          arrow.position.set(0, 0, ap.centerH);
+          node.add(arrow);
         }
-      });
-      if (def.kind === KIND.APERTURE) {
-        const ap = aperturesOf(el)[0];
-        const arrow = arrowMesh({ x: Math.cos(g.yaw), y: Math.sin(g.yaw), z: 0 }, Math.max(0.3, ap.clearW * 0.85), COL.arrow, 0.7);
-        arrow.position.set(0, 0, ap.centerH);
-        node.add(arrow);
+        all.add(node);
       }
-      this.ghostGroup = node;
-      this.root.add(node);
+      this.ghostGroup = all;
+      this.root.add(all);
     } catch (e) {
       this.ghost = null;
     } finally {
@@ -2918,6 +2933,82 @@ export class View3D {
     if (this.measures.length) {
       this.setMeasures([]);
     }
+  }
+
+  /*
+   * THE RULER: a line on the floor between two points and, laid over the canvas,
+   * the distance in inches and millimetres. Held until the next one is started or
+   * the tool is put away; it is never part of the track. `r` is
+   * { a, b, text, fixed } or null.
+   */
+  setRuler(r) {
+    this.ruler = r;
+    if (this.rulerGroup) {
+      this.freeGroup(this.rulerGroup);
+      this.rulerGroup = null;
+    }
+    if (this.rulerNode) {
+      this.rulerNode.remove();
+      this.rulerNode = null;
+    }
+    if (r && this.root) {
+      const group = new THREE.Group();
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([r.a.x, r.a.y, 0.014, r.b.x, r.b.y, 0.014], 3));
+      const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: COL.frameSel, depthTest: false }));
+      line.renderOrder = 12;
+      group.add(line);
+      for (const end of [r.a, r.b]) {
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshBasicMaterial({ color: COL.frameSel, depthTest: false }));
+        dot.position.set(end.x, end.y, 0.035);
+        dot.renderOrder = 12;
+        group.add(dot);
+      }
+      this.rulerGroup = group;
+      this.root.add(group);
+      if (r.text && (r.a.x !== r.b.x || r.a.y !== r.b.y)) {
+        const n = document.createElement('div');
+        n.className = 'tb-measure tone-ruler';
+        n.textContent = r.text;
+        this.overlay.append(n);
+        this.rulerNode = n;
+      }
+    }
+    this.host.requestDraw();
+  }
+
+  /*
+   * THE GUIDES the magnets found (magnetFor in snap.js): a line on the floor from
+   * the piece a spot is measured from to the spot, so a piece that has jumped
+   * shows what it jumped to. Redrawn only when they change.
+   */
+  setGuides(list) {
+    const key = list.map((g) => `${g.kind}:${g.a.x.toFixed(3)},${g.a.y.toFixed(3)}>${g.b.x.toFixed(3)},${g.b.y.toFixed(3)}`).join('|');
+    if (key === this.guideKey) {
+      return;
+    }
+    this.guideKey = key;
+    if (this.guideGroup) {
+      this.freeGroup(this.guideGroup);
+      this.guideGroup = null;
+    }
+    if (list.length && this.root) {
+      const group = new THREE.Group();
+      for (const g of list) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute([g.a.x, g.a.y, 0.012, g.b.x, g.b.y, 0.012], 3));
+        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: COL.measure.legal, transparent: true, opacity: 0.85, depthTest: false }));
+        line.renderOrder = 12;
+        group.add(line);
+        const dot = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), new THREE.MeshBasicMaterial({ color: COL.measure.legal, depthTest: false }));
+        dot.position.set(g.b.x, g.b.y, 0.03);
+        dot.renderOrder = 12;
+        group.add(dot);
+      }
+      this.guideGroup = group;
+      this.root.add(group);
+    }
+    this.host.requestDraw();
   }
 
   /* The box a Shift drag is drawing, in screen pixels of the page; null puts it away. */
@@ -2981,6 +3072,84 @@ export class View3D {
     }
   }
 
+  /*
+   * WARNINGS ON THE PIECE. Every rule a track breaks names a piece (warnings.js
+   * gives each one an elementId or a seqId), so a small mark sits by it and the
+   * sentence is one hover away. A click selects the piece, and its card says it
+   * again in words, which is also how a screen with no hover reads it. Only real
+   * warnings are marked: the notes the lap bar does not count are not. It is
+   * rebuilt when the host's list of warnings is a new list (every edit and every
+   * step of a drag makes one), never per frame.
+   */
+  syncBadges() {
+    for (const b of this.badges) {
+      b.node.remove();
+    }
+    this.badges = [];
+    this.badgeSource = this.host.warnings;
+    this.hideBadgeTip();
+    const doc = this.host.doc;
+    const by = new Map();
+    for (const w of this.host.warnings ?? []) {
+      if (w.level !== 'warn') {
+        continue;
+      }
+      const own = w.elementId ?? (w.seqId ? doc.sequence.find((q) => q.id === w.seqId)?.elementId : null);
+      for (const id of new Set([own, ...(w.also ?? [])])) {
+        if (id && elementById(doc, id)) {
+          by.set(id, [...(by.get(id) ?? []), w.message]);
+        }
+      }
+    }
+    const numbered = new Set(this.bubbleSpecs.map((b) => b.id));
+    for (const [id, messages] of by) {
+      const node = document.createElement('button');
+      node.type = 'button';
+      node.className = 'tb-warnbadge';
+      node.textContent = '!';
+      node.setAttribute('aria-label', messages.join(' '));
+      node.addEventListener('pointerenter', () => this.showBadgeTip(node, messages));
+      node.addEventListener('pointerleave', () => this.hideBadgeTip());
+      node.addEventListener('focus', () => this.showBadgeTip(node, messages));
+      node.addEventListener('blur', () => this.hideBadgeTip());
+      node.addEventListener('click', () => this.host.setSelection([id]));
+      this.overlay.append(node);
+      /* A numbered piece has its number over the top of it, so the mark goes
+       * beside the number; a pole has nothing there. */
+      this.badges.push({ node, id, dx: numbered.has(id) ? -26 : 0 });
+    }
+  }
+
+  showBadgeTip(node, messages) {
+    if (!this.badgeTip) {
+      this.badgeTip = document.createElement('div');
+      this.badgeTip.className = 'tb-warn-tip';
+      this.badgeTip.setAttribute('role', 'tooltip');
+      this.overlay.append(this.badgeTip);
+    }
+    const tip = this.badgeTip;
+    tip.replaceChildren(...messages.map((m) => {
+      const p = document.createElement('p');
+      p.textContent = m;
+      return p;
+    }));
+    tip.hidden = false;
+    const over = this.overlay.getBoundingClientRect();
+    const at = node.getBoundingClientRect();
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    const x = Math.max(6, Math.min(over.width - w - 6, at.left - over.left + at.width / 2 - w / 2));
+    const above = at.top - over.top - h - 8;
+    const y = above >= 6 ? above : at.bottom - over.top + 8;
+    tip.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px)`;
+  }
+
+  hideBadgeTip() {
+    if (this.badgeTip) {
+      this.badgeTip.hidden = true;
+    }
+  }
+
   renumberInline(node, spec) {
     const input = document.createElement('input');
     input.type = 'number';
@@ -3037,6 +3206,17 @@ export class View3D {
       return { x: ((v.x + 1) / 2) * rect.width, y: ((1 - v.y) / 2) * rect.height };
     };
     const doc = this.host.doc;
+    if (this.badgeSource !== this.host.warnings) {
+      this.syncBadges();
+    }
+    for (const b of this.badges) {
+      const el = elementById(doc, b.id);
+      const at = el ? project({ x: el.position.x, y: el.position.y, z: topOf(el) + 0.1 }) : null;
+      b.node.style.display = at ? '' : 'none';
+      if (at) {
+        b.node.style.transform = `translate(${(at.x + b.dx).toFixed(1)}px, ${(at.y - 2).toFixed(1)}px)`;
+      }
+    }
     for (const b of this.bubbles) {
       const el = elementById(doc, b.spec.id);
       const at = el ? project({ x: el.position.x, y: el.position.y, z: el.position.z + b.spec.dz }) : null;
@@ -3046,6 +3226,13 @@ export class View3D {
       }
     }
     this.host.placeCard?.(project, rect);
+    if (this.ruler && this.rulerNode) {
+      const mid = project({ x: (this.ruler.a.x + this.ruler.b.x) / 2, y: (this.ruler.a.y + this.ruler.b.y) / 2, z: 0.02 });
+      this.rulerNode.style.display = mid ? '' : 'none';
+      if (mid) {
+        this.rulerNode.style.transform = `translate(${mid.x.toFixed(1)}px, ${mid.y.toFixed(1)}px)`;
+      }
+    }
     this.measures.forEach((m, i) => {
       const n = this.measureNodes[i];
       const at = n ? project({ x: (m.from.x + m.to.x) / 2, y: (m.from.y + m.to.y) / 2, z: (m.from.z + m.to.z) / 2 }) : null;

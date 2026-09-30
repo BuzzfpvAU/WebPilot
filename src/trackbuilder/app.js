@@ -30,7 +30,7 @@
  * along with WebFPVSimulator. If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ELEMENTS, KIND, elementByKey, trackClassOf, docModeOf } from './elements.js';
+import { ELEMENTS, KIND, elementByKey, labelOf, toolByKey, trackClassOf, docModeOf } from './elements.js';
 import {
   createTrack, createElement, deepClone, deserialize, duplicateTrack,
   elementById, kindOf, normalize, startPadsOf, touch,
@@ -44,7 +44,8 @@ import {
 } from './sequence.js';
 import { applyFigure, upgradeStackedFigures } from './figures.js';
 import {
-  QUARTER, copyElements, moveToPlace, nearestQuarter, placeOnTrack, turnStepFor,
+  QUARTER, copyElements, magnetFor, moveToPlace, nearestQuarter, placeOnTrack, placeRow as layRow, replaceWith,
+  rowPlan, turnStepFor,
 } from './snap.js';
 import { buildPath, passYawOf } from './path.js';
 import { collectWarnings, freestyleReport, labeller, sortWarnings } from './warnings.js';
@@ -428,6 +429,8 @@ export class App {
     this.autoRoom = false;
     /* The side column, which a whoop canvas keeps in a drawer. */
     this.drawerOpen = false;
+    /* What the magnets found at the last snap, for the views to draw. */
+    this.guides = [];
     /* Flying-order numbers, on by default. A view choice, like the line:
      * it is not stored in the track, and turning it off does not change
      * what gets flown or published. */
@@ -1130,6 +1133,9 @@ export class App {
     this.panels.renderPalette();
     this.clearGhost();
     this.requestDraw();
+    if (this.armed === 'ruler' && this.mode === '2d') {
+      this.sayOnce('ruler in 2d', 'The ruler measures in the room and in the plan camera. Press V, or Room or Plan on the bar.');
+    }
     if (this.armed === 'road') {
       this.sayOnce('arm road', 'Click to lay the road’s nodes: it bends through them the way a car can drive. Click the first node to close a loop, press Enter or double click to finish it open, Escape to stop.');
     } else if (this.armed === 'vehicle') {
@@ -1181,6 +1187,8 @@ export class App {
   clearGhost() {
     this.view3d.clearGhost();
     this.view3d.clearMeasures();
+    this.view3d.setGuides([]);
+    this.view3d.editor.clearRuler();
   }
 
   /* ---------------- the road tool ---------------- */
@@ -1412,17 +1420,42 @@ export class App {
     this.panels.renderInspector();
   }
 
-  snap(world, offGrid) {
+  /*
+   * WHERE A POINT LANDS: on the grid, and on a whoop canvas near what the rules
+   * say a piece should be beside, which `ctx` says what is being put down or
+   * pulled ({ type, ignore }): see magnetFor in snap.js. Alt (`offGrid`) is off
+   * grid and off magnets. What the magnets found, to be drawn as guides, is
+   * `this.guides`, and it is what the last call with a `ctx` found.
+   */
+  snap(world, offGrid, ctx = null) {
+    this.guides = [];
+    let base;
     if (offGrid) {
-      return { x: world.x, y: world.y, z: 0 };
+      base = { x: world.x, y: world.y, z: 0 };
+    } else {
+      const g = this.doc.field.gridSize;
+      base = { x: Math.round(world.x / g) * g, y: Math.round(world.y / g) * g, z: 0 };
     }
-    const g = this.doc.field.gridSize;
-    return { x: Math.round(world.x / g) * g, y: Math.round(world.y / g) * g, z: 0 };
+    if (!ctx || !this.isWhoopRace()) {
+      return base;
+    }
+    const m = magnetFor(this.doc, base, { type: ctx.type, ignore: ctx.ignore, off: offGrid });
+    this.guides = m.guides;
+    return { x: m.x, y: m.y, z: 0 };
   }
 
   placeAt(world) {
     const type = this.armed;
     if (!type) {
+      return;
+    }
+    /* The whoop canvas's two tools that are not pieces. A click with the row
+     * tool lays a pair; the ruler places nothing. */
+    if (type === 'row') {
+      this.placeRow(world, world);
+      return;
+    }
+    if (type === 'ruler') {
       return;
     }
     const def = ELEMENTS[type];
@@ -1497,6 +1530,32 @@ export class App {
         }
         this.toast(`Each hole is its own gate. This stack is a spiral up: bottom, wrap around, then the top. Change it under ${this.panels.say('How it is flown')}.`);
       }
+    }
+  }
+
+  /*
+   * A ROW OF GATES, from where a drag began to where it ended: two or three
+   * ordinary gates 30 in apart, one undo step, and what is selected after. The
+   * rule is layRow in snap.js.
+   */
+  /* Replace with: what is selected becomes another piece of its own kind, in place,
+   * as one undo step (snap.js replaceWith says what stays and what does not). */
+  replaceSelection(type) {
+    if (!this.isWhoopRace() || !this.selection.size) {
+      return;
+    }
+    const ids = [...this.selection];
+    this.edit(`replace with ${labelOf(type, 'micro').toLowerCase()}`, (d) => { replaceWith(d, ids, type); });
+  }
+
+  placeRow(a, b) {
+    if (!this.isWhoopRace()) {
+      return;
+    }
+    let ids = [];
+    this.edit(`place a row of ${rowPlan(this.doc, a, b).count} gates`, (d) => { ids = layRow(d, a, b); });
+    if (ids.length) {
+      this.setSelection(ids);
     }
   }
 
@@ -3983,6 +4042,13 @@ export class App {
       }
       if (e.key === 'p' || e.key === 'P') {
         this.togglePath();
+        return;
+      }
+
+      /* A whoop canvas's tools that are not pieces: H lays a row, M is the ruler. */
+      const tool = this.isWhoopRace() ? toolByKey(e.key) : undefined;
+      if (tool) {
+        this.arm(tool.id);
         return;
       }
 

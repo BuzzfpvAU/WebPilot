@@ -68,6 +68,8 @@ import {
   footprint, laneClashes, lineShapeDist, roadReach, startOverlaps,
 } from './roadtool.js';
 
+/* A warning names the piece it is about (`elementId`) and, when the sentence is
+ * about two, the other one too (`also`, a list of ids): the room marks both. */
 function warn(code, message, extra = {}) {
   return { level: 'warn', code, message, ...extra };
 }
@@ -678,11 +680,11 @@ function collectRaceGowWarnings(doc, out, legs) {
       if (d < GATE_SPACING_MIN - 1e-6) {
         out.push(warn('rg-spacing',
           `${label(a)} and ${label(b)} are ${inches(d)} apart. Two gates that close are adjacent, and adjacent gates are 27 to 33 in centre to centre.`,
-          { elementId: a.id }));
+          { elementId: a.id, also: [b.id] }));
       } else if (aligned && d > GATE_SPACING_MAX + 1e-6 && d < GATE_SPACING_MAX * 1.25) {
         out.push(note('rg-spacing-near',
           `${label(a)} and ${label(b)} are ${inches(d)} apart. If they are meant to be a side by side pair, adjacent gates are 27 to 33 in centre to centre, nominally 30.`,
-          { elementId: a.id }));
+          { elementId: a.id, also: [b.id] }));
       }
     }
   }
@@ -697,7 +699,7 @@ function collectRaceGowWarnings(doc, out, legs) {
       if (d < POLE_FROM_GATE_MIN - 1e-6) {
         out.push(warn('rg-pole-gate',
           `${label(p)} is ${inches(d)} from ${label(g)}. A pole sits at least 14 in from the centre of a gate.`,
-          { elementId: p.id }));
+          { elementId: p.id, also: [g.id] }));
       }
     }
   }
@@ -711,7 +713,7 @@ function collectRaceGowWarnings(doc, out, legs) {
       if (d < POLE_FROM_POLE_MIN - 1e-6) {
         out.push(warn('rg-pole-pole',
           `${label(poles[i])} and ${label(poles[j])} are ${inches(d)} apart. Two poles sit at least 36 in apart.`,
-          { elementId: poles[i].id }));
+          { elementId: poles[i].id, also: [poles[j].id] }));
       }
     }
   }

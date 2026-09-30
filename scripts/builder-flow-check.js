@@ -91,9 +91,9 @@ const json = async (page, expression) => JSON.parse(await page.evaluate(`JSON.st
 
 /* A real mouse click: the pointer moves there, presses and lets go, which is
  * three pointer events in the page, the same as a hand. */
-async function mouse(page, type, x, y, buttons) {
+async function mouse(page, type, x, y, buttons, mods = 0) {
   await page.cdp.send('Input.dispatchMouseEvent', {
-    type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1,
+    type, x, y, button: type === 'mouseMoved' ? 'none' : 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1, modifiers: mods,
   }, page.sessionId);
 }
 
@@ -1116,6 +1116,348 @@ kase('ghost', async () => {
     await hover(5, 6 + 30 * 0.0254);
     await key(page, 'Escape');
     check('and when the tool is put away', !(await ghost()) && (await measures()).length === 0);
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A PIECE LANDS WHERE THE RULES SAY IT GOES. Near a legal spot the magnet takes
+ * it there and shows a guide: 30 in centre to centre along the width of a gate is
+ * a side by side pair, 14 in off a gate is where a pole stands. A gate that lands
+ * beside another faces the way it does. Alt turns all of it off. What is asserted
+ * is what the pilot sees: the distance beside the ghost reads exactly 30 in while
+ * the pointer is a few centimetres off it, and what a click puts down is where
+ * the ghost was.
+ */
+kase('magnets', async () => {
+  const page = await openBuilder();
+  try {
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('gate');
+      app.placeAt({ x: 5, y: 6, z: 0 });
+      app.placeAt({ x: 5, y: 7.5, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const measures = () => json(page, `[...document.querySelectorAll('.tb-measure')].filter((n) => n.style.display !== 'none').map((n) => n.textContent)`);
+    const hover = async (x, y, mods = 0) => {
+      const at = await screenOf(page, 'view3d', x, y, 0);
+      await mouse(page, 'mouseMoved', at.x, at.y, 0, mods);
+      await page.sleep(400);
+      return at;
+    };
+    const steps = await undoCount(page);
+    await tool(page, 'Gate');
+    const slotX = 5 + 30 * 0.0254;
+
+    await hover(slotX + 0.03, 6.02);
+    check('a few centimetres from 30 in beside a gate, the ghost reads 30 in', (await measures()).includes('30 in (762 mm)'), (await measures()).join(' | '));
+    check('and the guide is there', (await page.evaluate('window.trackBuilder.guides.length')) === 1 && (await page.evaluate('window.trackBuilder.view3d.guideGroup !== null')));
+    await hover(slotX + 0.03, 6.02, 1);
+    const free = await measures();
+    check('with Alt held it does not: the distance is what it is, and there is no guide', !free.includes('30 in (762 mm)') && (await page.evaluate('window.trackBuilder.guides.length')) === 0, free.join(' | '));
+
+    const at = await hover(slotX + 0.03, 6.02);
+    await click(page, at.x, at.y);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const gates = (await elements(page)).filter((e) => e.type === 'gate');
+    const beside = gates[2];
+    check('the click puts the gate exactly there', Math.abs(beside.x - slotX) < 1e-3 && Math.abs(beside.y - 6) < 1e-3, `${beside.x}, ${beside.y}`);
+    check('facing the way its neighbour faces, north', Math.abs(beside.yaw - Math.PI / 2) < 1e-4 && beside.pinned, `${beside.yaw}`);
+    check('as one undo step', (await undoCount(page)) === steps + 1, `${steps} then ${await undoCount(page)}`);
+
+    await tool(page, 'Pole');
+    await hover(5 - 14 * 0.0254 - 0.02, 6.03);
+    check('a pole a few centimetres from 14 in beside a gate is guided to 14 in', await page.evaluate('window.trackBuilder.guides.some((g) => g.kind === "pole" && g.text === "14 in")'));
+    await key(page, 'Escape');
+
+    /* Pulled away and back, a gate lands beside its neighbour again. */
+    await key(page, 'Escape');
+    const pulled = (await elements(page)).filter((e) => e.type === 'gate')[2];
+    const from = await screenOf(page, 'view3d', pulled.x, pulled.y, 0.355);
+    const away = await screenOf(page, 'view3d', pulled.x + 0.6, pulled.y + 0.35, 0.355);
+    const backNear = await screenOf(page, 'view3d', slotX + 0.03, 6.02, 0.355);
+    await drag(page, from, away, { steps: 8 });
+    const moved = (await elements(page)).filter((e) => e.type === 'gate')[2];
+    check('a gate pulled 0.6 m away is where it was pulled to, on the grid', Math.hypot(moved.x - pulled.x, moved.y - pulled.y) > 0.5);
+    await drag(page, await screenOf(page, 'view3d', moved.x, moved.y, 0.355), backNear, { steps: 8 });
+    const home = (await elements(page)).filter((e) => e.type === 'gate')[2];
+    check('and pulled back near the spot it lands there again, exactly', Math.abs(home.x - slotX) < 1e-3 && Math.abs(home.y - 6) < 1e-3, `${home.x}, ${home.y}`);
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A ROW IS ONE DRAG. Two or three gates side by side, 30 in apart, is the most
+ * common thing on a RaceGOW course, and building it as three placements and a
+ * heading each was the hardest part of the plan view. With the row tool a drag
+ * along the floor lays them, faint, with the 30 in between them, before the
+ * button is let go; a click lays a pair. The result is one undo step, gates that
+ * are pinned to a heading, the shared upright built once, and nothing to warn about.
+ */
+kase('row', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    await tool(page, 'Side by side');
+    check('the tool is on the palette and armed', await page.evaluate("window.trackBuilder.armed === 'row'"));
+    const a = await screenOf(page, 'view3d', 4, 6, 0);
+    const b = await screenOf(page, 'view3d', 5.5, 6, 0);
+    await drag(page, a, b, { steps: 10, hold: true });
+    await page.sleep(300);
+    const live = await json(page, `({
+      ghosts: window.trackBuilder.view3d.ghostGroup ? window.trackBuilder.view3d.ghostGroup.children.length : 0,
+      measures: [...document.querySelectorAll('.tb-measure')].filter((n) => n.style.display !== 'none').map((n) => n.textContent),
+      placed: window.trackBuilder.doc.elements.length,
+    })`);
+    check('mid drag, the three gates are drawn faint and nothing is placed yet', live.ghosts === 3 && live.placed === 0, JSON.stringify(live));
+    check('with the 30 in between each pair of them', live.measures.length === 2 && live.measures.every((m) => m === '30 in (762 mm)'), live.measures.join(' | '));
+    await release(page, b);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const gates = (await elements(page)).filter((e) => e.type === 'gate');
+    check('letting go lays them as one undo step', gates.length === 3 && (await undoCount(page)) === 1, `${gates.length} gates, ${await undoCount(page)} steps`);
+    const spacing = gates.slice(1).map((g, i) => Math.hypot(g.x - gates[i].x, g.y - gates[i].y));
+    check('30 in apart, centre to centre', spacing.every((d) => Math.abs(d - 0.762) < 1e-6), spacing.join(', '));
+    check('all facing the same way, north with nothing before them, and pinned there', gates.every((g) => Math.abs(g.yaw - Math.PI / 2) < 1e-6 && g.pinned), gates.map((g) => g.yaw).join(', '));
+    const unbuilt = await json(page, "window.trackBuilder.doc.elements.filter((e) => e.type === 'gate').map((e) => (e.unbuiltSides || []).length)");
+    check('each gate after the first shares its upright with the one before, built once', unbuilt.join() === '0,1,1', unbuilt.join());
+    const selected = await page.evaluate('window.trackBuilder.selection.size');
+    check('the row is what is selected', selected === 3, String(selected));
+    check('the ghost is gone', await page.evaluate('window.trackBuilder.view3d.ghostGroup === null'));
+    /* What the track says about it is what is true of it: no rule about spacing,
+     * pairs or poles is broken, the line is only short of a way from one gate to the
+     * next (three gates side by side all flown north is a hairpin between each, which
+     * is what waypoints are for), the track is not finished, and a row of three is
+     * wider than the frame. Any other code here is a rule the row does not keep. */
+    const warned = await json(page, 'window.trackBuilder.warnings.map((w) => ({ code: w.code, message: w.message }))');
+    const unexpected = warned.filter((w) => !['tight-corner', 'rg-envelope', 'no-start'].includes(w.code));
+    check('the row breaks no rule of the sport', unexpected.length === 0, unexpected.map((w) => w.message).join(' | ') || warned.map((w) => w.code).join(', '));
+
+    /* A second row, south of the first, faces away from it: the course is heading south. */
+    await page.evaluate('window.trackBuilder.view3d.zoomToward(800, 450, 3), 1');
+    const a2 = await screenOf(page, 'view3d', 4, 3, 0);
+    const b2 = await screenOf(page, 'view3d', 5.5, 3, 0);
+    const room = await json(page, "(() => { const r = window.trackBuilder.view3d.canvas.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; })()");
+    const inside = (p) => p && p.x > room.l && p.x < room.r && p.y > room.t && p.y < room.b;
+    check('with the room pulled back, the spot for it is on the screen', inside(a2) && inside(b2), JSON.stringify([a2, b2, room]));
+    await drag(page, a2, b2, { steps: 10 });
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const next = (await elements(page)).filter((e) => e.type === 'gate').slice(3);
+    check('a row laid south of the last one faces south, the way the course is going', next.length === 3 && next.every((g) => Math.abs(g.yaw + Math.PI / 2) < 1e-6), next.map((g) => g.yaw).join(', '));
+    check('as another single undo step', (await undoCount(page)) === 2, String(await undoCount(page)));
+
+    /* A click without a drag lays a pair. */
+    const at = await screenOf(page, 'view3d', 8, 6, 0);
+    check('with the spot for it on the screen', inside(at), JSON.stringify([at, room]));
+    await click(page, at.x, at.y);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const all = (await elements(page)).filter((e) => e.type === 'gate');
+    check('a click lays a pair', all.length === 8 && (await undoCount(page)) === 3, `${all.length} gates, ${await undoCount(page)} steps`);
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * THE RULER ANSWERS "HOW FAR" AND LEAVES NO MARK. Two clicks: the distance is
+ * drawn on the floor between them and said in inches with the millimetres beside
+ * it. A click near a piece takes its middle, since the question is nearly always
+ * how far one gate is from another. The ruler is not part of the track: nothing
+ * is stored, it is not an undo step, and putting the tool away takes it off.
+ */
+kase('ruler', async () => {
+  const page = await openBuilder();
+  try {
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.placeRow({ x: 4, y: 6, z: 0 }, { x: 5.5, y: 6, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const stored = await page.evaluate('JSON.stringify(window.trackBuilder.doc)');
+    const steps = await undoCount(page);
+    await tool(page, 'Ruler');
+    check('the ruler is armed', await page.evaluate("window.trackBuilder.armed === 'ruler'"));
+    const gates = (await elements(page)).filter((e) => e.type === 'gate');
+    const first = await screenOf(page, 'view3d', gates[0].x + 0.03, gates[0].y - 0.02, 0);
+    const last = await screenOf(page, 'view3d', gates[2].x - 0.03, gates[2].y + 0.02, 0);
+    const label = () => json(page, `[...document.querySelectorAll('.tb-measure.tone-ruler')].filter((n) => n.style.display !== 'none').map((n) => n.textContent)`);
+    await click(page, first.x, first.y);
+    await mouse(page, 'mouseMoved', last.x, last.y, 0);
+    await page.sleep(300);
+    check('between the clicks the line follows the pointer and says how far', (await label()).join() === '60 in (1524 mm)', (await label()).join());
+    await click(page, last.x, last.y);
+    check('the second click holds it: from middle to middle of two gates 60 in apart', (await label()).join() === '60 in (1524 mm)', (await label()).join());
+    check('and the line is in the room', await page.evaluate('window.trackBuilder.view3d.rulerGroup !== null'));
+    await mouse(page, 'mouseMoved', last.x + 60, last.y + 40, 0);
+    await page.sleep(200);
+    check('a held ruler does not follow the pointer', (await label()).join() === '60 in (1524 mm)', (await label()).join());
+    check('it is not an undo step', (await undoCount(page)) === steps, `${steps} then ${await undoCount(page)}`);
+    check('and nothing about it is in the track', (await page.evaluate('JSON.stringify(window.trackBuilder.doc)')) === stored);
+    await key(page, 'Escape');
+    check('putting the tool away takes it off', (await label()).length === 0 && (await page.evaluate('window.trackBuilder.view3d.rulerGroup === null')));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * REPLACE WITH SWAPS WHAT A PIECE IS AND LEAVES WHERE IT IS. A gate that ought to
+ * have been a stack is changed where it stands, from the card, and keeps its
+ * number and its heading, so it does not have to be deleted, placed again and
+ * renumbered. It is one undo step, and the card offers only what the piece can
+ * become: a gate is not offered a pole.
+ */
+kase('replace with', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('gate');
+      app.placeAt({ x: 4, y: 6, z: 0 });
+      app.placeAt({ x: 5, y: 7, z: 0 });
+      app.placeAt({ x: 6, y: 6, z: 0 });
+      app.arm('pole');
+      app.placeAt({ x: 7, y: 6.5, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const list = await elements(page);
+    const middle = list.filter((e) => e.type === 'gate')[1];
+    const before = await json(page, 'window.trackBuilder.doc.sequence.map((q) => q.elementId)');
+    const at = await screenOf(page, 'view3d', middle.x + 0.16, middle.y, 0.35);
+    await click(page, at.x, at.y);
+    await page.until(`window.trackBuilder.selection.has('${middle.id}')`, 5000);
+    const offered = () => json(page, `[...document.querySelectorAll('#tb-card [data-tbkey="card-replace"] option')].map((o) => o.value).filter(Boolean)`);
+    check('a selected gate offers the other four openings, and not a pole', (await offered()).join() === 'doubleStack,ladder,tower,diveGate', (await offered()).join());
+    const steps = await undoCount(page);
+    const drawn = () => page.evaluate(`window.trackBuilder.view3d.pickables.filter((m) => m.userData.elementId === '${middle.id}').length`);
+    const pieces = await drawn();
+    const choose = async (value) => {
+      await page.evaluate(`(() => {
+        const s = document.querySelector('#tb-card [data-tbkey="card-replace"]');
+        s.value = ${JSON.stringify(value)};
+        s.dispatchEvent(new Event('change', { bubbles: true }));
+        return 1;
+      })()`);
+      await page.sleep(200);
+      await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    };
+    await choose('doubleStack');
+    const now = (await elements(page)).find((e) => e.id === middle.id);
+    check('choosing a double stack changes it where it stands', now.type === 'doubleStack' && Math.abs(now.x - middle.x) < 1e-9 && Math.abs(now.y - middle.y) < 1e-9 && Math.abs(now.yaw - middle.yaw) < 1e-9, JSON.stringify(now));
+    check('in the same place in the flying order', (await json(page, 'window.trackBuilder.doc.sequence.map((q) => q.elementId)')).join() === before.join());
+    check('as one undo step', (await undoCount(page)) === steps + 1, `${steps} then ${await undoCount(page)}`);
+    check('the piece stays selected and the card now says what it is', await page.evaluate(`window.trackBuilder.selection.has('${middle.id}') && /Double stack/i.test(document.getElementById('tb-card').textContent)`), await page.evaluate("document.getElementById('tb-card').textContent.slice(0, 80)"));
+    const stacked = await drawn();
+    check('and the room draws it as a stack: more frame than the one gate had', pieces > 0 && stacked > pieces, `${pieces} pieces then ${stacked}`);
+    check('it can be turned back into a gate from the card', (await offered()).includes('gate'));
+    await choose('gate');
+    check('and is a gate again, one more step', (await elements(page)).find((e) => e.id === middle.id).type === 'gate' && (await undoCount(page)) === steps + 2);
+    await page.evaluate('window.trackBuilder.undo(), window.trackBuilder.undo(), 1');
+    await page.sleep(200);
+    check('undo takes it back, one step at a time', (await elements(page)).find((e) => e.id === middle.id).type === 'gate' && (await undoCount(page)) === steps);
+
+    /* A pole offers a cone and nothing else, and a mixed selection offers nothing. */
+    const pole = list.find((e) => e.type === 'pole');
+    await page.evaluate(`window.trackBuilder.setSelection(['${pole.id}']), 1`);
+    await page.sleep(200);
+    check('a pole offers a cone, and only that', (await offered()).join() === 'cone', (await offered()).join());
+    await page.evaluate(`window.trackBuilder.setSelection(['${pole.id}', '${middle.id}']), 1`);
+    await page.sleep(200);
+    check('a gate and a pole together offer nothing', (await offered()).length === 0 && (await page.evaluate("!document.getElementById('tb-card').hidden")));
+    await page.evaluate(`window.trackBuilder.setSelection(['${middle.id}', '${list.filter((e) => e.type === 'gate')[0].id}']), 1`);
+    await page.sleep(200);
+    await choose('tower');
+    const towers = (await elements(page)).filter((e) => e.type === 'tower').length;
+    check('two gates selected are changed together, in one undo step', towers === 2 && (await undoCount(page)) === steps + 1, `${towers} towers, ${await undoCount(page)} steps`);
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * A WARNING IS ON THE PIECE IT IS ABOUT. The list of warnings in the drawer is
+ * where a pilot has to go to find out what is wrong, and then has to find the gate
+ * it means. A red mark sits by every piece that breaks a rule; the sentence is one
+ * hover away, a click selects the piece and the card says it again in words, and
+ * the mark goes the moment the rule is kept, even in the middle of a drag.
+ */
+kase('warnings on the piece', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      app.arm('gate');
+      app.placeAt({ x: 5, y: 6, z: 0 });
+      app.placeAt({ x: 5 + 20 * 0.0254, y: 6, z: 0 });
+      app.placeAt({ x: 7.5, y: 8, z: 0 });
+      app.disarm();
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    await page.sleep(300);
+    const badges = () => json(page, `[...document.querySelectorAll('.tb-warnbadge')].filter((n) => n.style.display !== 'none').map((n) => { const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, label: n.getAttribute('aria-label') }; })`);
+    const shown = await badges();
+    check('two gates 20 in apart carry a mark each', shown.length === 2 && shown.every((b) => /20 in/.test(b.label)), JSON.stringify(shown.map((b) => b.label)));
+    const gates = (await elements(page)).filter((e) => e.type === 'gate');
+    const far = await screenOf(page, 'view3d', gates[2].x, gates[2].y, 0.8);
+    check('and the gate that breaks nothing does not', shown.every((b) => Math.hypot(b.x - far.x, b.y - far.y) > 40), JSON.stringify([far, shown]));
+    check('the notes the lap bar does not count are not marked: two warnings, not three', (await page.evaluate('window.trackBuilder.warnings.filter((w) => w.level === "info").length')) >= 1);
+
+    const tip = () => json(page, `(() => { const t = document.querySelector('.tb-warn-tip'); return t && !t.hidden ? t.textContent : null; })()`);
+    check('no sentence is on the screen until it is asked for', (await tip()) === null);
+    await mouse(page, 'mouseMoved', shown[0].x, shown[0].y, 0);
+    await page.sleep(250);
+    const said = await tip();
+    check('hovering a mark says what is wrong, in the rule\'s own words', Boolean(said) && /20 in \(508 mm\) apart/.test(said) && /27 to 33 in/.test(said), String(said));
+    await mouse(page, 'mouseMoved', shown[0].x + 200, shown[0].y + 150, 0);
+    await page.sleep(250);
+    check('and takes it away again when the pointer leaves', (await tip()) === null);
+
+    const steps = await undoCount(page);
+    await click(page, shown[0].x, shown[0].y);
+    await page.until('window.trackBuilder.selection.size === 1', 5000);
+    const sel = await json(page, '[...window.trackBuilder.selection]');
+    check('a click on a mark selects that gate', gates.some((g) => g.id === sel[0]) && (await undoCount(page)) === steps);
+    const card = await page.evaluate("document.getElementById('tb-card').hidden ? '' : [...document.querySelectorAll('#tb-card .tb-card-warn')].map((n) => n.textContent).join(' | ')");
+    check('and its card says it again in words', /20 in \(508 mm\) apart/.test(card), card);
+
+    /* Pulled apart, the mark goes while the button is still down. */
+    const other = gates.find((g) => g.id !== sel[0] && Math.hypot(g.x - gates[0].x, g.y - gates[0].y) < 1);
+    const mine = gates.find((g) => g.id === sel[0]);
+    const from = await screenOf(page, 'view3d', mine.x + (mine.x > other.x ? 0.16 : -0.16), mine.y, 0.35);
+    const to = await screenOf(page, 'view3d', mine.x + (mine.x > other.x ? 0.16 : -0.16) + (mine.x > other.x ? 0.5 : -0.5), mine.y, 0.35);
+    await drag(page, from, to, { steps: 10, hold: true });
+    await page.sleep(200);
+    check('pulled to a legal distance, the marks go before the button is let up', (await badges()).length === 0, JSON.stringify(await badges()));
+    check('even though the pair is now "nearly a pair", which is a note and not a warning, and is not marked', await page.evaluate('window.trackBuilder.warnings.some((w) => w.code === "rg-spacing-near" && w.level === "info")'));
+    await release(page, to);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    check('and stay gone after', (await badges()).length === 0);
+    await page.evaluate('window.trackBuilder.undo(), 1');
+    await page.sleep(300);
+    check('undo brings the rule back, and the marks with it', (await badges()).length === 2);
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
     check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
   } finally {
     await page.close();

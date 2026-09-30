@@ -50,7 +50,8 @@ import { History } from './history.js';
 import { docFromQuery } from './sharelink.js';
 import {
   frameRectFor, nearestQuarter, placementFor, placeOnTrack, spacingTone, snapTurn, copyElements,
-  moveToPlace, measuresFor,
+  moveToPlace, measuresFor, magnetFor, sideBySideYaw, MAGNET_RADIUS, rowPlan, placeRow, ROW_MAX,
+  rulerPoint, rulerReading, replacementsFor, replaceWith,
 } from './snap.js';
 import { envelopeFor, GATE_OPENING_DEFAULT } from './racegow.js';
 import {
@@ -62,7 +63,7 @@ import { ELEMENTS, PALETTE_ORDER, GATE_FLAG_H, flagSideOf, flagSideSigns, elemen
   virtualApertureDims, countElementsByType, formatElementCounts,
   GATE_PRESETS, applyGatePreset, matchingGatePreset, levelPitchFor, FRAME_TUBE_OD,
   KIND, FREESTYLE_PALETTE_ORDER, PALETTE_EXTRA, paletteItems, docModeOf, isTrafficType,
-  TUNING, tuningFor, ROAD_NODES_MAX, defaultDims,
+  TUNING, tuningFor, ROAD_NODES_MAX, defaultDims, defaultPitch,
 } from './elements.js';
 import {
   boardPlanOf, planShapeOf, snapYaw, turnsOf,
@@ -6552,6 +6553,418 @@ function suiteWhoopPlacement() {
   }
 }
 
+function suiteWhoopMagnets() {
+  console.log('\nthe whoop builder: magnets');
+  const IN = 0.0254;
+  const near = (a, b, tol = 1e-6) => Math.abs(a - b) < tol;
+  const stored = (a, b) => Math.abs(a - b) < 1e-5;
+  const Q = Math.PI / 2;
+
+  /* A PIECE LANDS ON WHAT THE RULES SAY WHERE IT GOES. Near a legal position it
+   * snaps there and says why: 30 in centre to centre from a gate along its
+   * width (a side by side pair), 14 in off a gate for a pole, the same x or y
+   * as another piece. Alt turns it off. It is one function of the document and
+   * a point, so the plan and the room cannot disagree. */
+  {
+    const d = createTrack('magnets', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    a.yaw = Q;
+    a.yawOverridden = true;
+    const at = (x, y) => ({ x, y });
+
+    let m = magnetFor(d, at(5 + 30 * IN + 0.03, 6.02), { type: 'gate' });
+    check('a gate put 30 in along the width of another one snaps to exactly that', m.snapped && near(m.x, 5 + 30 * IN) && near(m.y, 6), JSON.stringify(m));
+    check('and says it is a side by side pair, 30 in from it', m.guides.some((g) => g.kind === 'pair' && g.text === '30 in'), JSON.stringify(m.guides));
+    m = magnetFor(d, at(5 - 30 * IN - 0.03, 5.98), { type: 'gate' });
+    check('on either side', m.snapped && near(m.x, 5 - 30 * IN) && near(m.y, 6));
+    m = magnetFor(d, at(5 + 30 * IN + 0.03, 6.02), { type: 'gate', off: true });
+    check('Alt turns it off: what is given comes back, no guide', !m.snapped && m.guides.length === 0 && near(m.x, 5 + 30 * IN + 0.03) && near(m.y, 6.02));
+    m = magnetFor(d, at(5 + 30 * IN + 0.2, 6.2), { type: 'gate' });
+    check('out of reach it does not snap', !m.snapped && m.guides.length === 0, JSON.stringify(m));
+    check('and the reach is a few inches, not a metre', MAGNET_RADIUS > 1 * IN && MAGNET_RADIUS < 8 * IN, String(MAGNET_RADIUS / IN));
+
+    m = magnetFor(d, at(5 + 14 * IN + 0.02, 6.03), { type: 'pole' });
+    check('a pole lands 14 in off a gate, beside it', m.snapped && near(m.x, 5 + 14 * IN) && near(m.y, 6) && m.guides.some((g) => g.kind === 'pole' && g.text === '14 in'), JSON.stringify(m));
+    m = magnetFor(d, at(5 + 14 * IN + 0.02, 6.03), { type: 'cone' });
+    check('a cone is not a pole and is not pulled to one', !m.snapped || !m.guides.some((g) => g.kind === 'pole'));
+
+    /* Yaw: a gate that lands beside another one faces the way it does. */
+    check('a gate placed 30 in along the width of another takes its facing, not the direction of the line', sideBySideYaw(d, at(5 + 30 * IN, 6)) !== null
+      && stored(sideBySideYaw(d, at(5 + 30 * IN, 6)), Q));
+    check('and one anywhere else takes nothing', sideBySideYaw(d, at(5 + 33 * IN, 6.2)) === null);
+    const p = placementFor(d, at(5 + 30 * IN, 6), 'gate');
+    check('so placementFor faces it along the first gate, and pins it', stored(p.yaw, Q) && p.pin === true, JSON.stringify(p));
+
+    /* The piece being moved is not a thing to snap to. */
+    m = magnetFor(d, at(5.02, 6.03), { type: 'gate', ignore: [a.id] });
+    check('a gate being pulled is not pulled to where it was', !m.snapped, JSON.stringify(m));
+
+    /* A gate pulled away from its neighbour and back lands beside it again, which
+     * it can only do if it is not in its own way. */
+    const pair = createTrack('pair', 'micro');
+    const pa = placeOnTrack(pair, 'gate', { x: 5, y: 6 });
+    pa.yaw = Q;
+    pa.yawOverridden = true;
+    const pb = placeOnTrack(pair, 'gate', { x: 5 + 30 * IN, y: 6 });
+    pb.yaw = Q;
+    pb.yawOverridden = true;
+    const back = magnetFor(pair, at(5 + 30 * IN + 0.03, 6.02), { type: 'gate', ignore: [pb.id] });
+    check('a gate pulled away from its neighbour and back lands beside it again', back.snapped && near(back.x, 5 + 30 * IN) && near(back.y, 6), JSON.stringify(back));
+    check('which it could not if it were in its own way', !magnetFor(pair, at(5 + 30 * IN + 0.03, 6.02), { type: 'gate' }).snapped);
+
+    /* Two spots in reach: the nearer one. */
+    const two = createTrack('two', 'micro');
+    const ta = placeOnTrack(two, 'gate', { x: 5, y: 6 });
+    ta.yaw = Q;
+    ta.yawOverridden = true;
+    const te = placeOnTrack(two, 'gate', { x: 6.5, y: 6.06 });
+    te.yaw = Q;
+    te.yawOverridden = true;
+    const nearest = magnetFor(two, at(5.745, 6.05), { type: 'gate' });
+    check('with two spots in reach it takes the nearer', nearest.snapped && near(nearest.x, 6.5 - 30 * IN) && near(nearest.y, 6.06), JSON.stringify(nearest));
+
+    /* Lining up. */
+    const b = placeOnTrack(d, 'gate', { x: 7, y: 8.5 });
+    b.yaw = 0;
+    b.yawOverridden = true;
+    m = magnetFor(d, at(5.03, 9.5), { type: 'gate' });
+    check('the same x as another gate is a line the gate snaps to, and it says so', m.snapped && near(m.x, 5) && near(m.y, 9.5) && m.guides.some((g) => g.kind === 'align-x'), JSON.stringify(m));
+    m = magnetFor(d, at(4.2, 8.53), { type: 'gate' });
+    check('so is the same y', m.snapped && near(m.y, 8.5) && near(m.x, 4.2) && m.guides.some((g) => g.kind === 'align-y'), JSON.stringify(m));
+    m = magnetFor(d, at(5.03, 6.4), { type: 'gate' });
+    check('but never onto a line that puts it on top of another gate', !m.guides.some((g) => g.kind === 'align-x') && near(m.x, 5.03), JSON.stringify(m));
+
+    const once = magnetFor(d, at(5 + 30 * IN + 0.03, 6.02), { type: 'gate' });
+    const twice = magnetFor(d, at(once.x, once.y), { type: 'gate' });
+    check('snapping twice changes nothing more', near(twice.x, once.x) && near(twice.y, once.y) && twice.guides.length === once.guides.length);
+    const once2 = magnetFor(d, at(5.03, 9.5), { type: 'gate' });
+    const twice2 = magnetFor(d, at(once2.x, once2.y), { type: 'gate' });
+    check('nor a line up', near(twice2.x, once2.x) && near(twice2.y, once2.y));
+  }
+
+  /* IT NEVER SNAPS TO A SPOT THE RULES FORBID. Over every shipped whoop track and
+   * a thousand pointer positions on and round each, a snapped gate is never
+   * closer than 27 in to another gate and a snapped pole never closer than 14
+   * in to a gate or 36 in to another pole, whatever it was pulled from. */
+  {
+    let seed = 20260929;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed / 4294967296;
+    };
+    let snaps = 0;
+    let trials = 0;
+    const bad = [];
+    for (const preset of PRESETS.filter((x) => x.trackClass === 'micro')) {
+      const doc = deepClone(preset);
+      const gates = doc.elements.filter((e) => ELEMENTS[e.type]?.kind === KIND.APERTURE);
+      const poles = doc.elements.filter((e) => e.type === 'pole');
+      const xs = doc.elements.map((e) => e.position.x);
+      const ys = doc.elements.map((e) => e.position.y);
+      for (let i = 0; i < 400; i += 1) {
+        const x = Math.min(...xs) - 0.5 + rand() * (Math.max(...xs) - Math.min(...xs) + 1);
+        const y = Math.min(...ys) - 0.5 + rand() * (Math.max(...ys) - Math.min(...ys) + 1);
+        for (const type of ['gate', 'pole']) {
+          trials += 1;
+          const m = magnetFor(doc, { x, y }, { type });
+          if (!m.snapped) {
+            continue;
+          }
+          snaps += 1;
+          for (const g of gates) {
+            const dd = Math.hypot(g.position.x - m.x, g.position.y - m.y);
+            if (type === 'gate' && dd < 27 * IN - 1e-6) {
+              bad.push(`${preset.id} gate ${dd / IN} in from ${g.id}`);
+            }
+            if (type === 'pole' && dd < 14 * IN - 1e-6) {
+              bad.push(`${preset.id} pole ${dd / IN} in from ${g.id}`);
+            }
+          }
+          if (type === 'pole') {
+            for (const q of poles) {
+              const dd = Math.hypot(q.position.x - m.x, q.position.y - m.y);
+              if (dd < 36 * IN - 1e-6) {
+                bad.push(`${preset.id} pole ${dd / IN} in from pole ${q.id}`);
+              }
+            }
+          }
+        }
+      }
+    }
+    check('a snapped piece is never on a spot the rules forbid', bad.length === 0, bad.slice(0, 3).join(' | '));
+    check('and the property was tried where it snaps', snaps > 200, `${snaps} snaps in ${trials} tries`);
+  }
+}
+
+function suiteWhoopRow() {
+  console.log('\nthe whoop builder: the row of gates');
+  const IN = 0.0254;
+  const near = (a, b, tol = 1e-6) => Math.abs(a - b) < tol;
+  const stored = (a, b) => Math.abs(a - b) < 1e-5;
+  const Q = Math.PI / 2;
+
+  /* A ROW IS RACEGOW'S SIDE BY SIDE GATES: two or three gates in a line, 30 in
+   * centre to centre, sharing their verticals. The tool is a drag along the
+   * floor; this is what the drag means, from where it starts to where it ends. */
+  {
+    const d = createTrack('rows', 'micro');
+    const a = { x: 5, y: 6 };
+    let r = rowPlan(d, a, { x: 5 + 61 * IN, y: 6.02 });
+    check('a drag of 61 in along the floor lays three gates', r.count === 3 && r.items.length === 3, String(r.count));
+    check('30 in apart, centre to centre, from where the drag started',
+      near(r.items[0].x, 5) && near(r.items[1].x, 5 + 30 * IN) && near(r.items[2].x, 5 + 60 * IN) && r.items.every((i) => near(i.y, 6)),
+      JSON.stringify(r.items.map((i) => [i.x, i.y])));
+    check('the row runs along the nearer axis, and the gates face across it', near(r.dir.x, 1) && near(r.dir.y, 0) && r.items.every((i) => stored(i.yaw, Q)), JSON.stringify([r.dir, r.items[0].yaw]));
+    check('a drag of 10 in still lays a pair, which is the least a row is', rowPlan(d, a, { x: 5 + 10 * IN, y: 6 }).count === 2);
+    check('and a drag that goes nowhere lays a pair running east', rowPlan(d, a, a).count === 2 && near(rowPlan(d, a, a).dir.x, 1));
+    check('and a long one lays three, which is the most', rowPlan(d, a, { x: 5 + 200 * IN, y: 6 }).count === 3 && ROW_MAX === 3);
+    r = rowPlan(d, a, { x: 5.05, y: 6 + 32 * IN });
+    check('a drag mostly along y runs north, and the gates face east', r.count === 2 && near(r.dir.y, 1) && near(r.dir.x, 0) && stored(r.items[0].yaw, 0), JSON.stringify([r.dir, r.items.map((i) => i.yaw)]));
+    r = rowPlan(d, a, { x: 5 - 31 * IN, y: 6 });
+    check('a drag westward runs west, from where it started', r.count === 2 && near(r.dir.x, -1) && near(r.items[1].x, 5 - 30 * IN), JSON.stringify(r.items.map((i) => i.x)));
+
+    const south = createTrack('south', 'micro');
+    const g0 = placeOnTrack(south, 'gate', { x: 5, y: 3 });
+    const heading = rowPlan(south, a, { x: 5 + 31 * IN, y: 6 });
+    check('the gates face the way the course is going: a row north of the last gate faces north', stored(heading.items[0].yaw, Q), String(heading.items[0].yaw));
+    const north = createTrack('north', 'micro');
+    placeOnTrack(north, 'gate', { x: 5, y: 9 });
+    const back = rowPlan(north, a, { x: 5 + 31 * IN, y: 6 });
+    check('and one south of it faces south', stored(back.items[0].yaw, -Q), String(back.items[0].yaw));
+    void g0;
+  }
+
+  /* PLACING IT: ordinary gates, one edit. */
+  {
+    const d = createTrack('placed', 'micro');
+    const first = placeOnTrack(d, 'gate', { x: 5, y: 4 });
+    first.yaw = Q;
+    first.yawOverridden = true;
+    const before = d.elements.length;
+    const ids = placeRow(d, { x: 5, y: 6 }, { x: 5 + 61 * IN, y: 6 });
+    const row = ids.map((id) => elementById(d, id));
+    check('a row is three ordinary gates, added to the document', ids.length === 3 && d.elements.length === before + 3 && row.every((e) => e.type === 'gate'));
+    check('every one pinned to its heading, so nothing turns them', row.every((e) => e.yawOverridden === true && stored(e.yaw, Q)));
+    check('joined to the flying order in the order along the row, after what was there',
+      d.sequence.slice(-3).map((q) => q.elementId).join() === ids.join() && d.sequence.length === 4);
+    check('30 in between each', near(row[1].position.x - row[0].position.x, 30 * IN) && near(row[2].position.x - row[1].position.x, 30 * IN));
+    check('none of the passes is pinned: the direction comes from the flying order', d.sequence.every((q) => !q.overridden));
+    check('each flown along the way it faces, which nothing else could tell it', d.sequence.slice(-3).every((qq) => qq.entry === 1));
+    const sides = row.map((e) => frameSidesOf(e));
+    check('the first gate keeps all four sides', sides[0].left && sides[0].right && sides[0].top && sides[0].bottom);
+    check('and each next one gives up the side that faces the one before, so a vertical is built once',
+      sides[1].right === false && sides[1].left && sides[2].right === false && sides[2].left && sides[1].top && sides[2].bottom,
+      JSON.stringify(sides));
+    check('a row along y drops the same side, the one facing the last gate', (() => {
+      const e = createTrack('along y', 'micro');
+      const rid = placeRow(e, { x: 5, y: 6 }, { x: 5, y: 6 + 31 * IN });
+      const r2 = rid.map((id) => elementById(e, id));
+      const facing = frameSidesOf(r2[1]);
+      const w = { x: -Math.sin(r2[1].yaw), y: Math.cos(r2[1].yaw) };
+      const toPrev = { x: r2[0].position.x - r2[1].position.x, y: r2[0].position.y - r2[1].position.y };
+      const wantRight = w.x * toPrev.x + w.y * toPrev.y > 0;
+      return wantRight ? facing.right === false && facing.left : facing.left === false && facing.right;
+    })());
+    const warn = collectWarnings(d, buildPath(d)).filter((w) => w.id === 'rg-spacing' || w.id === 'rg-square-headings');
+    check('RaceGOW has nothing to say about the spacing or the headings of a row', warn.length === 0, warn.map((w) => w.message).join(' | '));
+    check('and the racing line through it is finite', buildPath(d).samples.every((sm) => Number.isFinite(sm.pos.x) && Number.isFinite(sm.pos.y) && Number.isFinite(sm.pos.z)));
+    const back = deserialize(serialize(d)).doc;
+    check('a row survives a write and a read', serialize(back) === serialize(d));
+    check('and needs no repair', deserialize(serialize(d)).repairs.length === 0);
+  }
+  /* THE RULER measures between two points on the floor, and it lands on the
+   * middle of a piece when the pointer is near one, because the question is nearly
+   * always "how far is this gate from that one". It says the distance in the units
+   * the rules and the tape measure use, and it writes nothing to the track. */
+  {
+    const d = createTrack('ruler', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const b = placeOnTrack(d, 'pole', { x: 5 + 60 * IN, y: 6.4 });
+    let p = rulerPoint(d, { x: 5.05, y: 6.04 });
+    check('near the middle of a gate the ruler takes the middle', p.on === a.id && near(p.x, 5) && near(p.y, 6), JSON.stringify(p));
+    p = rulerPoint(d, { x: 5 + 60 * IN + 0.03, y: 6.4 - 0.02 });
+    check('and of a pole', p.on === b.id && near(p.x, 5 + 60 * IN) && near(p.y, 6.4), JSON.stringify(p));
+    p = rulerPoint(d, { x: 8.03, y: 9.02 });
+    check('away from anything it takes the inch', p.on === null && near(p.x, Math.round(8.03 / IN) * IN) && near(p.y, Math.round(9.02 / IN) * IN), JSON.stringify(p));
+    p = rulerPoint(d, { x: 5.05, y: 6.04 }, { off: true });
+    check('with Alt it takes exactly what it is given', p.on === null && near(p.x, 5.05) && near(p.y, 6.04));
+    const before = serialize(d);
+    rulerPoint(d, { x: 5.05, y: 6.04 });
+    check('and reading the floor changes nothing in the track', serialize(d) === before);
+    let r = rulerReading({ x: 5, y: 6 }, { x: 5 + 30 * IN, y: 6 });
+    check('30 in along the floor reads 30 in and 762 mm', r.text === '30 in (762 mm)' && near(r.d, 30 * IN), JSON.stringify(r));
+    r = rulerReading({ x: 5, y: 6 }, { x: 5 + 3 * IN, y: 6 + 4 * IN });
+    check('a 3 by 4 in diagonal is 5 in', r.text === '5 in (127 mm)', r.text);
+    check('nothing to measure is nothing', rulerReading({ x: 1, y: 1 }, { x: 1, y: 1 }).d === 0);
+  }
+}
+
+function suiteWhoopReplace() {
+  console.log('\nthe whoop builder: replace with');
+  const IN = 0.0254;
+  const near = (a, b, tol = 1e-9) => Math.abs(a - b) < tol;
+
+  /* REPLACE WITH swaps what a piece is and leaves where it is: the same element,
+   * so everything that refers to it, and its place in the flying order, are
+   * undisturbed. */
+  {
+    const d = createTrack('swap', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 4, y: 6 });
+    const b = placeOnTrack(d, 'gate', { x: 5, y: 6.5 });
+    const c = placeOnTrack(d, 'gate', { x: 6, y: 7 });
+    b.yaw = 0.7;
+    b.yawOverridden = true;
+    b.name = 'the big one';
+    b.dims.clearW = 0.65;
+    b.dims.clearH = 0.65;
+    const order = d.sequence.map((q) => q.elementId).join();
+    const ids = replaceWith(d, [b.id], 'doubleStack');
+    const now = elementById(d, b.id);
+    check('a gate becomes a double stack, and says which piece it did', ids.join() === b.id && now.type === 'doubleStack');
+    check('the same element: id, name, position, turn and its pin are what they were',
+      now === b && now.name === 'the big one' && near(now.position.x, 5) && near(now.position.y, 6.5) && near(now.yaw, 0.7) && now.yawOverridden === true);
+    check('and its place in the flying order', d.sequence.map((q) => q.elementId).join() === order && d.sequence.length === 3);
+    check('the size of its opening is kept, since every gate on a track is meant to be one size',
+      near(now.dims.clearW, 0.65) && near(now.dims.clearH, 0.65));
+    check('and the rest of it is the new type\'s own: two openings, a pitch between them', now.dims.levels === 2 && near(now.dims.levelPitch, 30 * IN), JSON.stringify(now.dims));
+    check('the ones beside it were not touched', a.type === 'gate' && c.type === 'gate');
+    check('and the track still reads back as it was written', roundTripsCleanly(d) && deserialize(serialize(d)).repairs.length === 0);
+  }
+
+  /* A PASS AT AN OPENING THE NEW PIECE DOES NOT HAVE goes; the rest stay put. */
+  {
+    const d = createTrack('stack down', 'micro');
+    const before = placeOnTrack(d, 'gate', { x: 4, y: 6 });
+    const stack = placeOnTrack(d, 'ladder', { x: 5, y: 6.5 });
+    const after = placeOnTrack(d, 'gate', { x: 6, y: 7 });
+    const n = d.sequence.filter((q) => q.elementId === stack.id).length;
+    check('a ladder is flown at more than one of its heights', n >= 2, String(n));
+    replaceWith(d, [stack.id], 'gate');
+    const left = d.sequence.filter((q) => q.elementId === stack.id);
+    check('a ladder that becomes a gate keeps the pass through its one opening and loses the others', left.length === 1 && left[0].apertureIndex === 0, `${n} then ${left.length}`);
+    check('so the gates round it keep their places', d.sequence.filter((q) => q.elementId === before.id || q.elementId === after.id).length === 2);
+    check('no entry points at an opening that is not there', d.sequence.every((q) => {
+      const el = elementById(d, q.elementId);
+      return !isSequenceable(el) || elementById(d, q.elementId).type !== 'gate' || (q.apertureIndex ?? 0) === 0;
+    }));
+  }
+
+  /* WHAT WAS SET BY HAND STAYS, and what was only the old type's default goes. */
+  {
+    const d = createTrack('defaults', 'micro');
+    const g = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    replaceWith(d, [g.id], 'tower');
+    check('a gate that becomes a tower stands at the tower\'s height', near(elementById(d, g.id).dims.sillH, 56 * IN, 1e-6), String(elementById(d, g.id).dims.sillH));
+    replaceWith(d, [g.id], 'gate');
+    check('and back to a gate it stands on the floor again', near(elementById(d, g.id).dims.sillH, 0));
+    replaceWith(d, [g.id], 'diveGate');
+    check('a horizontal gate lies flat', near(elementById(d, g.id).pitch, defaultPitch('diveGate', 'micro')) && !near(elementById(d, g.id).pitch, 0), String(elementById(d, g.id).pitch));
+    replaceWith(d, [g.id], 'gate');
+    check('and a gate stands upright again', near(elementById(d, g.id).pitch, 0));
+    const tilted = placeOnTrack(d, 'gate', { x: 6, y: 6 });
+    tilted.pitch = 0.3;
+    replaceWith(d, [tilted.id], 'doubleStack');
+    check('a tilt somebody set is theirs and is kept', near(elementById(d, tilted.id).pitch, 0.3));
+    const p = placeOnTrack(d, 'pole', { x: 7, y: 6 });
+    const before = d.sequence.find((q) => q.elementId === p.id);
+    before.passSide = 'right';
+    before.clearance = 0.5;
+    before.overridden = true;
+    replaceWith(d, [p.id], 'cone');
+    const entry = d.sequence.find((q) => q.elementId === p.id);
+    check('a pole becomes a cone and is passed on the side and at the clearance it had',
+      elementById(d, p.id).type === 'cone' && entry.passSide === 'right' && near(entry.clearance, 0.5) && entry.overridden === true);
+    check('and it is the cone\'s own size', near(elementById(d, p.id).dims.height, 0.1));
+    const bar = placeOnTrack(d, 'horizontalPole', { x: 8, y: 6 });
+    const barZ = bar.position.z;
+    replaceWith(d, [bar.id], 'barrier');
+    check('a bar across the room becomes a barrier, on the floor', elementById(d, bar.id).type === 'barrier' && near(elementById(d, bar.id).position.z, 0) && barZ > 0, `${barZ} then ${elementById(d, bar.id).position.z}`);
+    replaceWith(d, [bar.id], 'horizontalPole');
+    check('and back to a bar it is up in the air again', near(elementById(d, bar.id).position.z, barZ));
+    const lifted = placeOnTrack(d, 'horizontalPole', { x: 9, y: 6 });
+    lifted.position.z = 0.9;
+    replaceWith(d, [lifted.id], 'barrier');
+    check('a bar that was hung at a height by hand keeps that height', near(elementById(d, lifted.id).position.z, 0.9));
+  }
+
+  /* WHAT IT WILL NOT DO. */
+  {
+    const d = createTrack('refuse', 'micro');
+    const g = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const p = placeOnTrack(d, 'pole', { x: 6, y: 6 });
+    const w = createElement(d, 'waypoint', { x: 7, y: 6, z: 0 }, 0);
+    d.elements.push(w);
+    const before = serialize(d);
+    check('a gate is not turned into a pole: one is passed through and the other round', replaceWith(d, [g.id], 'pole').length === 0 && serialize(d) === before);
+    check('nor a pole into a barrier', replaceWith(d, [p.id], 'barrier').length === 0 && serialize(d) === before);
+    check('nor anything into a waypoint, which is not a piece', replaceWith(d, [g.id, p.id], 'waypoint').length === 0 && serialize(d) === before);
+    check('a waypoint is not replaced either', replaceWith(d, [w.id], 'gate').length === 0 && serialize(d) === before);
+    check('with the type it already is, nothing happens', replaceWith(d, [g.id], 'gate').length === 0 && serialize(d) === before);
+    check('and a type that does not exist is nothing', replaceWith(d, [g.id], 'nonsense').length === 0 && serialize(d) === before);
+    check('and neither does an id that is not there', replaceWith(d, ['el-999'], 'doubleStack').length === 0 && serialize(d) === before);
+  }
+
+  /* SEVERAL AT ONCE, and what the menu offers. */
+  {
+    const d = createTrack('several', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 4, y: 6 });
+    const b = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const t = placeOnTrack(d, 'tower', { x: 6, y: 6 });
+    const p = placeOnTrack(d, 'pole', { x: 7, y: 6 });
+    check('a gate can become any of the other four openings, in the palette\'s order', replacementsFor(d, [a.id]).join() === 'doubleStack,ladder,tower,diveGate', replacementsFor(d, [a.id]).join());
+    check('two of the same kind offer the same', replacementsFor(d, [a.id, b.id]).join() === 'doubleStack,ladder,tower,diveGate');
+    check('a gate and a tower can each become anything, the gate included', replacementsFor(d, [a.id, t.id]).join() === 'gate,doubleStack,ladder,tower,diveGate', replacementsFor(d, [a.id, t.id]).join());
+    check('a pole offers a cone, and only that', replacementsFor(d, [p.id]).join() === 'cone');
+    check('a gate and a pole together offer nothing', replacementsFor(d, [a.id, p.id]).length === 0);
+    check('and nothing selected, or something gone, offers nothing', replacementsFor(d, []).length === 0 && replacementsFor(d, ['el-999']).length === 0);
+    const done = replaceWith(d, [a.id, b.id, t.id], 'doubleStack');
+    check('a selection is replaced together, and each piece says it changed', done.join() === [a.id, b.id, t.id].join() && [a, b, t].every((e) => e.type === 'doubleStack'));
+    check('a piece outside the type\'s group is left alone by a mixed selection', replaceWith(d, [a.id, p.id], 'ladder').join() === a.id && p.type === 'pole');
+    check('and the track reads back clean after all of it', roundTripsCleanly(d) && deserialize(serialize(d)).repairs.length === 0);
+    const line = buildPath(d);
+    check('the racing line through what it made is finite', line.samples.every((sm) => Number.isFinite(sm.pos.x) && Number.isFinite(sm.pos.y) && Number.isFinite(sm.pos.z)));
+  }
+}
+
+function suiteWhoopBadges() {
+  console.log('\nthe whoop builder: warnings name their pieces');
+  const IN = 0.0254;
+
+  /* A warning about two pieces names both, so the room can mark both: the mark
+   * on one gate of a pair that is too close is no use to somebody looking at the
+   * other. */
+  {
+    const d = createTrack('pair', 'micro');
+    const a = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const b = placeOnTrack(d, 'gate', { x: 5 + 20 * IN, y: 6 });
+    const line = buildPath(d);
+    const w = collectWarnings(d, line).find((x) => x.code === 'rg-spacing');
+    check('two gates 20 in apart are a warning', Boolean(w) && w.level === 'warn');
+    check('which names both of them', w && new Set([w.elementId, ...(w.also ?? [])]).size === 2 && [w.elementId, ...(w.also ?? [])].sort().join() === [a.id, b.id].sort().join(), JSON.stringify([w?.elementId, w?.also]));
+  }
+  {
+    const d = createTrack('pole near', 'micro');
+    const g = placeOnTrack(d, 'gate', { x: 5, y: 6 });
+    const p = placeOnTrack(d, 'pole', { x: 5 + 8 * IN, y: 6 });
+    const w = collectWarnings(d, buildPath(d)).find((x) => x.code === 'rg-pole-gate');
+    check('a pole 8 in from a gate names the pole and the gate', w && w.elementId === p.id && (w.also ?? []).join() === g.id, JSON.stringify([w?.elementId, w?.also]));
+  }
+  {
+    const d = createTrack('poles', 'micro');
+    const p1 = placeOnTrack(d, 'pole', { x: 5, y: 6 });
+    const p2 = placeOnTrack(d, 'pole', { x: 5 + 20 * IN, y: 6 });
+    const w = collectWarnings(d, buildPath(d)).find((x) => x.code === 'rg-pole-pole');
+    check('two poles 20 in apart name both', w && [w.elementId, ...(w.also ?? [])].sort().join() === [p1.id, p2.id].sort().join(), JSON.stringify([w?.elementId, w?.also]));
+  }
+  {
+    const d = createTrack('stack', 'micro');
+    const s2 = placeOnTrack(d, 'doubleStack', { x: 5, y: 6 });
+    s2.dims.levelPitch = 20 * IN;
+    const w = collectWarnings(d, buildPath(d)).find((x) => x.code === 'rg-stack-pitch');
+    check('a warning about one piece names one and has no also', w && w.elementId === s2.id && w.also === undefined, JSON.stringify(w));
+  }
+}
+
 async function main() {
   if (process.argv.includes('--emit')) {
     process.stdout.write(serialize(demoTrack()));
@@ -6597,6 +7010,10 @@ async function main() {
   suiteClubhouseShell();
   suiteWhoopRepairs();
   suiteWhoopPlacement();
+  suiteWhoopMagnets();
+  suiteWhoopRow();
+  suiteWhoopReplace();
+  suiteWhoopBadges();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exitCode = failed ? 1 : 0;
 }

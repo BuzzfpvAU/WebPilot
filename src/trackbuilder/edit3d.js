@@ -45,7 +45,10 @@
 
 import { ELEMENTS, KIND, defaultDims, trackClassOf } from './elements.js';
 import { elementById, kindOf, apertureCenter, aperturesOf } from './model.js';
-import { measuresFor, placementFor, snapTurn } from './snap.js';
+import {
+  measuresFor, placementFor, rowPlan, rulerPoint, rulerReading, snapTurn, spacingTone,
+} from './snap.js';
+import { inches, GATE_SPACING_NOMINAL } from './racegow.js';
 
 /* How far a press travels, in pixels, before it is a drag and not a click. */
 const CLICK_PX = 4;
@@ -62,6 +65,8 @@ export class RoomEditor {
     this.host = host;
     /* The gesture in progress, or null. */
     this.drag = null;
+    /* The ruler being drawn, or held after its second click: { a, b, fixed }. */
+    this.ruler = null;
   }
 
   /* Whether these are the handlers: a whoop track, with the room up. */
@@ -90,6 +95,17 @@ export class RoomEditor {
       return;
     }
     v.canvas.setPointerCapture(e.pointerId);
+
+    /* The row tool: a drag along the floor is the row. */
+    if (h.armed === 'row') {
+      this.beginRow(e, at);
+      return;
+    }
+    /* The ruler: a click is a point, and a drag looks round, as a tool does. */
+    if (h.armed === 'ruler') {
+      this.drag = { kind: 'ruler', start: at, last: at, moved: false };
+      return;
+    }
 
     /* A tool: a click places, a drag looks round. Whatever is under the
      * pointer, a gate included, because a tool armed is a tool armed. */
@@ -187,7 +203,16 @@ export class RoomEditor {
       d.last = at;
       return;
     }
-    if (d.kind === 'floor' || d.kind === 'place') {
+    if (d.kind === 'row') {
+      const p = v.levelPoint(e.clientX, e.clientY, 0);
+      if (!p) {
+        return;
+      }
+      d.b = h.snap(p, e.altKey);
+      this.showRow(d);
+      return;
+    }
+    if (d.kind === 'floor' || d.kind === 'place' || d.kind === 'ruler') {
       if (!d.moved && dist(at, d.start) < CLICK_PX) {
         return;
       }
@@ -213,9 +238,12 @@ export class RoomEditor {
         return;
       }
       const anchor = d.origin.get(d.id);
-      const snapped = h.snap({ x: g.x + d.offset.x, y: g.y + d.offset.y, z: 0 }, e.altKey);
+      const pulled = elementById(h.doc, d.id);
+      const snapped = h.snap({ x: g.x + d.offset.x, y: g.y + d.offset.y, z: 0 }, e.altKey,
+        { type: pulled.type, ignore: [...d.origin.keys()] });
       h.moveSelected(d.origin, { x: snapped.x - anchor.x, y: snapped.y - anchor.y, z: 0 });
       v.movePieces([...d.origin.keys()]);
+      v.setGuides(h.guides);
       this.measureDragged(d.id);
       return;
     }
@@ -269,8 +297,13 @@ export class RoomEditor {
     } else if (d.kind === 'place' && !d.moved) {
       const p = v.levelPoint(e.clientX, e.clientY, 0);
       if (p) {
-        h.placeAt(h.snap(p, e.altKey));
+        h.placeAt(h.snap(p, e.altKey, { type: h.armed }));
       }
+    } else if (d.kind === 'row') {
+      v.clearGhost();
+      h.placeRow(d.a, d.b);
+    } else if (d.kind === 'ruler' && !d.moved) {
+      this.rulerClick(e);
     } else if (d.kind === 'box') {
       h.setSelection(this.idsInBox(d, e), true);
       v.showBox(null);
@@ -284,6 +317,7 @@ export class RoomEditor {
       h.endEdit();
     }
     v.clearMeasures();
+    v.setGuides([]);
     v.canvas.style.cursor = '';
     if (e && v.canvas.hasPointerCapture?.(e.pointerId)) {
       v.canvas.releasePointerCapture(e.pointerId);
@@ -309,6 +343,7 @@ export class RoomEditor {
     }
     v.showBox(null);
     v.clearMeasures();
+    v.setGuides([]);
     v.canvas.style.cursor = '';
     if (e && v.canvas.hasPointerCapture?.(e.pointerId)) {
       v.canvas.releasePointerCapture(e.pointerId);
@@ -322,6 +357,7 @@ export class RoomEditor {
     if (!this.drag) {
       this.view.clearGhost();
       this.view.clearMeasures();
+      this.view.setGuides([]);
       this.view.setHover(null);
     }
   }
@@ -336,6 +372,12 @@ export class RoomEditor {
   hover(e) {
     const v = this.view;
     const h = this.host;
+    if (h.armed === 'ruler') {
+      this.rulerHover(e);
+      v.setHover(null);
+      v.canvas.style.cursor = 'crosshair';
+      return;
+    }
     if (h.armed && !NOT_PLACED.has(h.armed)) {
       this.showGhost(e);
       v.setHover(null);
@@ -360,7 +402,8 @@ export class RoomEditor {
   showGhost(e) {
     const v = this.view;
     const h = this.host;
-    const type = h.armed;
+    /* The row tool's ghost, before the drag, is one gate: where the row would begin. */
+    const type = h.armed === 'row' ? 'gate' : h.armed;
     const def = ELEMENTS[type];
     const p = v.levelPoint(e.clientX, e.clientY, 0);
     if (!def || !p) {
@@ -368,7 +411,8 @@ export class RoomEditor {
       v.clearMeasures();
       return;
     }
-    const at = h.snap(p, e.altKey);
+    const at = h.snap(p, e.altKey, { type });
+    v.setGuides(h.guides);
     const plan = placementFor(h.doc, at, type);
     v.setGhost({ type, position: { x: at.x, y: at.y, z: 0 }, yaw: plan.yaw });
     if (def.kind === KIND.APERTURE) {
@@ -388,6 +432,81 @@ export class RoomEditor {
     }
     const c = apertureCenter(el, 0);
     this.view.setMeasures(measuresFor(this.host.doc, c, id));
+  }
+
+  /* ---------------- the row ---------------- */
+
+  /* A press with the row tool: where the row begins, magnets and all, as a gate's
+   * position would be. */
+  beginRow(e, at) {
+    const v = this.view;
+    const h = this.host;
+    const p = v.levelPoint(e.clientX, e.clientY, 0);
+    if (!p) {
+      return;
+    }
+    const a = h.snap(p, e.altKey, { type: 'gate' });
+    v.setGuides([]);
+    this.drag = { kind: 'row', start: at, last: at, a: { x: a.x, y: a.y }, b: { x: a.x, y: a.y } };
+    this.showRow(this.drag);
+  }
+
+  /* The row as it would be laid, drawn faint, and the 30 in between the gates. */
+  showRow(d) {
+    const v = this.view;
+    const h = this.host;
+    const plan = rowPlan(h.doc, d.a, d.b);
+    v.setGhosts(plan.items.map((it) => ({ type: 'gate', position: { x: it.x, y: it.y, z: 0 }, yaw: it.yaw })));
+    const centre = 0.3556;
+    v.setMeasures(plan.items.slice(1).map((it, i) => {
+      const before = plan.items[i];
+      return {
+        from: { x: before.x, y: before.y, z: centre },
+        to: { x: it.x, y: it.y, z: centre },
+        d: GATE_SPACING_NOMINAL,
+        tone: spacingTone(GATE_SPACING_NOMINAL),
+        text: inches(GATE_SPACING_NOMINAL),
+      };
+    }));
+  }
+
+  /* ---------------- the ruler ---------------- */
+
+  /* A click with the ruler: the first point starts one, the second ends it, and
+   * the next click starts another. What it says is not in the track. */
+  rulerClick(e) {
+    const p = this.view.levelPoint(e.clientX, e.clientY, 0);
+    if (!p) {
+      return;
+    }
+    const at = rulerPoint(this.host.doc, p, { off: e.altKey });
+    this.ruler = !this.ruler || this.ruler.fixed
+      ? { a: at, b: at, fixed: false }
+      : { a: this.ruler.a, b: at, fixed: true };
+    this.showRuler();
+  }
+
+  /* Between the two clicks, the line follows the pointer. */
+  rulerHover(e) {
+    if (!this.ruler || this.ruler.fixed) {
+      return;
+    }
+    const p = this.view.levelPoint(e.clientX, e.clientY, 0);
+    if (!p) {
+      return;
+    }
+    this.ruler = { a: this.ruler.a, b: rulerPoint(this.host.doc, p, { off: e.altKey }), fixed: false };
+    this.showRuler();
+  }
+
+  showRuler() {
+    const r = this.ruler;
+    this.view.setRuler(r ? { a: r.a, b: r.b, text: rulerReading(r.a, r.b).text, fixed: r.fixed } : null);
+  }
+
+  clearRuler() {
+    this.ruler = null;
+    this.view.setRuler(null);
   }
 
   /* ---------------- box select ---------------- */

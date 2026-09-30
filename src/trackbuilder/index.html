@@ -743,6 +743,42 @@
         font: inherit;
         text-align: center;
       }
+      /* A rule the track breaks, on the piece that breaks it. */
+      .tb-warnbadge {
+        position: absolute;
+        left: 0;
+        top: 0;
+        margin: -10px 0 0 -10px;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border-radius: 50%;
+        border: 1px solid rgba(15, 21, 15, 0.7);
+        background: var(--bad);
+        color: var(--deep);
+        font: 700 var(--t-label) / 18px var(--ui-font);
+        text-align: center;
+        pointer-events: auto;
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+      }
+      .tb-warnbadge:hover, .tb-warnbadge:focus-visible { background: #ffffff; }
+      .tb-warn-tip {
+        position: absolute;
+        left: 0;
+        top: 0;
+        max-width: 280px;
+        padding: var(--s2) var(--s3);
+        border: 1px solid var(--edge);
+        border-radius: var(--r-ctl);
+        background: rgba(8, 13, 20, 0.94);
+        color: var(--cream);
+        font: 400 var(--t-small) / 1.45 var(--ui-font);
+        pointer-events: none;
+      }
+      .tb-warn-tip[hidden] { display: none; }
+      .tb-warn-tip p { margin: 0; }
+      .tb-warn-tip p + p { margin-top: var(--s2); }
       .tb-measure {
         position: absolute;
         left: 0;
@@ -757,6 +793,7 @@
       }
       .tb-measure.tone-legal { color: var(--mint); }
       .tb-measure.tone-close, .tb-measure.tone-near { color: #ffb347; }
+      .tb-measure.tone-ruler { color: var(--amber); }
       .tb-box {
         position: absolute;
         border: 1px solid var(--pick-edge);
@@ -1695,6 +1732,9 @@
         color: var(--dim);
         font: var(--t-micro) / 1.2 var(--mono);
       }
+      .tb-card-swap { margin: var(--s3) 0 0; }
+      .tb-card-warns { margin-top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
+      .tb-card-warn { margin: 0; padding: var(--s2) var(--s3); border-left: 3px solid var(--bad); background: var(--lift); font-size: var(--t-small); line-height: 1.45; }
       .tb-card-actions { display: flex; gap: var(--s2); margin-top: var(--s4); }
       .tb-card-actions .tb-btn { flex: 1; padding: 5px 6px; }
       .tb-card-fig { display: flex; flex-direction: column; gap: 3px; }

@@ -1376,6 +1376,32 @@ export function labelOf(type, cls = TRACK_CLASS_DEFAULT) {
   return (cls === 'micro' && WHOOP_LABELS[type]) || ELEMENTS[type]?.label || type;
 }
 
+/*
+ * THE WHOOP CANVAS'S TOOLS THAT ARE NOT PIECES. A row of gates is RaceGOW's Side
+ * by Side Gates, dragged out along the floor, and the ruler measures between two
+ * points. Neither is an element, so they are not in ELEMENTS and not in a
+ * document; they are on the palette under their own heading, with keys.
+ */
+export const WHOOP_TOOLS = [
+  {
+    id: 'row',
+    label: 'Side by side',
+    key: 'H',
+    note: 'Drag along the floor to lay two or three gates in a row, 30 in apart, sharing their verticals. One click lays a pair.',
+  },
+  {
+    id: 'ruler',
+    label: 'Ruler',
+    key: 'M',
+    note: 'Click two points to measure between them, in inches and millimetres. A click near a gate or a pole takes its middle. Nothing is saved with the track.',
+  },
+];
+
+export function toolByKey(letter) {
+  const up = String(letter || '').toUpperCase();
+  return up ? WHOOP_TOOLS.find((t) => t.key === up) : undefined;
+}
+
 /* Convenience: every element definition in palette order, extras last. */
 export function paletteItems(cls = TRACK_CLASS_DEFAULT, mode = 'race') {
   return [

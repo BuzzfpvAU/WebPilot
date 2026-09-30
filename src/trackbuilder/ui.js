@@ -41,7 +41,8 @@ import {
   SCENE_TIMES, SCENE_GROUNDS, sceneOf,
 } from './model.js';
 import { gateNumbers, gateNumberOf, sequenceLabel, faceLabel, unsequencedElements } from './sequence.js';
-import { labelOf } from './elements.js';
+import { labelOf, WHOOP_TOOLS } from './elements.js';
+import { replacementsFor } from './snap.js';
 import { standsOnGround } from './seat.js';
 import { figuresFor, matchingFigure, figureBlurb, levelName } from './figures.js';
 import { elevationProfile } from './path.js';
@@ -363,6 +364,22 @@ export class Panels {
       (def.group === 'track' ? track : extra).append(b);
     }
 
+    /* A whoop canvas's tools that are not pieces: a row of gates, and the ruler. */
+    let tools = null;
+    if (cls === 'micro') {
+      tools = el('div', 'tb-group');
+      tools.append(el('h3', null, 'Tools'));
+      for (const t of WHOOP_TOOLS) {
+        const b = el('button', 'tb-tool');
+        b.type = 'button';
+        b.title = t.note;
+        b.append(el('span', 'tb-tool-key', t.key), el('span', 'tb-tool-label', t.label));
+        b.addEventListener('click', () => this.host.arm(t.id));
+        this.paletteButtons.set(t.id, b);
+        tools.append(b);
+      }
+    }
+
     const pathBtn = el('button', 'tb-tool');
     pathBtn.type = 'button';
     pathBtn.title = PATH_TOGGLE.note;
@@ -371,7 +388,7 @@ export class Panels {
     this.pathButton = pathBtn;
     extra.append(pathBtn);
 
-    host.append(track, extra);
+    host.append(...(tools ? [track, tools, extra] : [track, extra]));
     host.append(el('p', 'tb-help', 'Press a key or click a tool, then click the field. The tool stays armed, so ten gates are ten clicks. Escape or right click puts it away.'));
   }
 
@@ -1706,7 +1723,12 @@ export class Panels {
 
     if (ids.length > 1) {
       head.append(el('strong', null, `${ids.length} selected`), close);
-      card.append(head, el('p', 'tb-help', 'Drag one to move them together. Q and E turn them. Arrow keys nudge them.'), actions);
+      card.append(head, el('p', 'tb-help', 'Drag one to move them together. Q and E turn them. Arrow keys nudge them.'));
+      const swap = this.replaceField(ids);
+      if (swap) {
+        card.append(swap);
+      }
+      card.append(actions);
       return;
     }
     const element = elementById(doc, ids[0]);
@@ -1759,7 +1781,56 @@ export class Panels {
         button(def.kind === KIND.APERTURE ? 'Reverse' : 'Other side', 'tb-btn', () => this.host.flipFace(entries[0].id), `${faceLabel(doc, entries[0])}. X`));
       grid.append(fig);
     }
-    card.append(grid, actions);
+    card.append(grid);
+    /* What the rules say about this piece, in the words the mark on it carries. */
+    const said = (this.host.warnings ?? []).filter((w) => w.level === 'warn'
+      && (w.elementId === element.id || (w.also ?? []).includes(element.id)
+        || (w.seqId && entries.some((q) => q.id === w.seqId))));
+    if (said.length) {
+      const list = el('div', 'tb-card-warns');
+      for (const w of said) {
+        list.append(el('p', 'tb-card-warn', w.message));
+      }
+      card.append(list);
+    }
+    const swap = this.replaceField(ids);
+    if (swap) {
+      card.append(swap);
+    }
+    card.append(actions);
+  }
+
+  /*
+   * REPLACE WITH: a gate that ought to have been a stack, or a pole a cone, is
+   * changed where it stands and keeps its place in the order, so the piece does
+   * not have to be deleted, placed again and renumbered. Only what every selected
+   * piece can become is offered (snap.js replacementsFor); nothing at all, and so
+   * no field, when what is selected has no such answer.
+   */
+  replaceField(ids) {
+    const types = replacementsFor(this.host.doc, ids);
+    if (!types.length) {
+      return null;
+    }
+    const row = el('label', 'tb-field tb-card-swap');
+    row.append(el('span', 'tb-field-label', 'Replace with'));
+    const sel = el('select');
+    sel.dataset.tbkey = 'card-replace';
+    const none = el('option', null, 'Choose a piece');
+    none.value = '';
+    sel.append(none);
+    for (const type of types) {
+      const opt = el('option', null, labelOf(type, 'micro'));
+      opt.value = type;
+      sel.append(opt);
+    }
+    sel.addEventListener('change', () => {
+      if (sel.value) {
+        this.host.replaceSelection(sel.value);
+      }
+    });
+    row.append(sel);
+    return row;
   }
 
   /*
@@ -1838,7 +1909,11 @@ export class Panels {
     const doc = this.host.doc;
     const gates = doc.elements.filter((e) => kindOf(e) === KIND.APERTURE).length;
     let text = '';
-    if (this.host.isWhoopRace() && (doc.elements.length || this.host.armed) && gates < 3) {
+    if (this.host.isWhoopRace() && (this.host.armed === 'row' || this.host.armed === 'ruler')) {
+      text = this.host.armed === 'row'
+        ? 'Drag along the floor to lay a row of two or three gates, 30 in apart. One click lays a pair. Right click or Esc puts the tool away.'
+        : 'Click two points to measure between them. A click near a gate or a pole takes its middle. Right click or Esc puts the ruler away.';
+    } else if (this.host.isWhoopRace() && (doc.elements.length || this.host.armed) && gates < 3) {
       if (this.host.armed) {
         text = 'Click the floor to place it. The tool stays armed, so a second click places another. Right click or Esc puts it away.';
       } else if (this.host.selection.size) {

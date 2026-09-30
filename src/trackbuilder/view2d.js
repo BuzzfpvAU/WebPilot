@@ -694,7 +694,7 @@ export class View2D {
     /* An armed palette tool places on click and stays armed, so ten gates
      * are ten clicks. */
     if (this.host.armed) {
-      this.host.placeAt(this.host.snap(world, e.altKey));
+      this.host.placeAt(this.host.snap(world, e.altKey, { type: this.host.armed }));
       return;
     }
 
@@ -851,7 +851,8 @@ export class View2D {
     if (this.drag.kind === 'move') {
       const anchorOrigin = this.drag.origin.get(this.drag.anchorId);
       const wanted = add(this.pointer, this.drag.grabOffset);
-      const snapped = this.host.snap(wanted, e.altKey);
+      const pulled = elementById(this.host.doc, this.drag.anchorId);
+      const snapped = this.host.snap(wanted, e.altKey, { type: pulled ? pulled.type : undefined, ignore: [...this.drag.origin.keys()] });
       const delta = { x: snapped.x - anchorOrigin.x, y: snapped.y - anchorOrigin.y, z: 0 };
       if (Math.abs(delta.x) > 1e-9 || Math.abs(delta.y) > 1e-9) {
         this.drag.moved = true;
@@ -984,6 +985,7 @@ export class View2D {
     this.drawHandle(ctx);
     this.drawBand(ctx);
     this.drawGhost(ctx);
+    this.drawGuides(ctx);
     this.drawRulers(ctx, doc);
     ctx.restore();
   }
@@ -2351,13 +2353,53 @@ export class View2D {
   }
 
   /* The armed palette tool, drawn under the cursor before it is placed. */
+  /* The lines the magnets found, from the piece a spot is measured from to the
+   * spot, while a piece is being placed or pulled. */
+  drawGuides(ctx) {
+    const guides = this.host.guides ?? [];
+    if (!guides.length || !(this.host.armed || (this.drag && this.drag.kind === 'move'))) {
+      return;
+    }
+    ctx.save();
+    ctx.strokeStyle = C.ghost;
+    ctx.fillStyle = C.ghost;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+    for (const g of guides) {
+      const a = this.toScreen(g.a);
+      const b = this.toScreen(g.b);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.setLineDash([5, 4]);
+    }
+    ctx.restore();
+  }
+
   drawGhost(ctx) {
     if (!this.host.armed || !this.pointer) {
       return;
     }
-    const at = this.host.snap(this.pointer, false);
+    const at = this.host.snap(this.pointer, false, { type: this.host.armed });
     const p = this.toScreen(at);
     const def = ELEMENTS[this.host.armed];
+    /* A tool that is not a piece (the whoop canvas's row and ruler) is a ring
+     * under the cursor and nothing more. */
+    if (!def) {
+      ctx.strokeStyle = C.ghost;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 13, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      return;
+    }
     if (def.kind === KIND.ROAD || def.kind === KIND.VEHICLE) {
       this.drawTrafficGhost(ctx, def, at, p);
       return;
