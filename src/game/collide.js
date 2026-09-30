@@ -3379,6 +3379,46 @@ const SEAT_CLEAR = 0.001;
  * table, a deck or a room's ceiling is not. */
 const TAKEOFF_ROOM_SPAN = 2;
 
+/*
+ * HOW MUCH ROOM A SET DOWN PREFERS ROUND THE PARKED HULL, sideways, in
+ * metres: the same swept diameter the takeoff room above is, 0.347 m.
+ * bug-fe9215c0, on a built map (measured here on Hibari Yard): "partially
+ * clipping on to walls when crashing on them and stutters until it can
+ * finally get away from the wall", expecting "respawn further from objects
+ * and walls after a crash".
+ *
+ * The rule before this took the NEAREST spot whose parked hull, prop discs
+ * included, was clear, and "touching is not overlap". Measured on 1434
+ * crashes at the foot of the yard's 104 wall boxes, 0.12 m off each face at
+ * three heights, through the shell's own search: every one was set down, the
+ * least room round the parked hull was 1 cm, 5 percent had under 5 cm and 16
+ * percent under 10, the median 15 cm. A craft parked a centimetre off a wall
+ * leans a centimetre into it on the first touch of the sticks, and what a
+ * pilot sees is a quad kissing the brick and being pushed off it again.
+ *
+ * So a spot with REST_MARGIN of open room on every side (eight directions,
+ * see restRoomAt) is preferred to a nearer one without it, and when there is
+ * none in reach the nearest clear spot is taken as before, so nothing that
+ * was set down is now sent to the line. Measured on the same crashes: 1420
+ * of 1434 had a spot with it, none was left with under 5 cm (70 were), the
+ * median set down moved from 0.25 m to 0.50 m from the crash, the 90th
+ * percentile did not move, and the room round the parked hull rose from 15
+ * cm at the median to 47 cm. It is a preference, not a rule: the owner's "as
+ * near as possible to where the accident happened" (24 September) still
+ * picks among the spots that have room, and still wins when none has.
+ *
+ * AND THE PREFERENCE IS BOUNDED. A spot with room is taken only if it is
+ * within REST_MARGIN_DRAG of the nearest clear spot, so that the wish for
+ * room can never drag a craft far from where it crashed: in a narrow gap or a
+ * tunnel the nearest clear spot is in the crash's own cell and a roomy one may
+ * be at the far end of the search. With the bound at 0.75 m and above the
+ * outcome on the 1434 crashes is the same as with none; at 0.5 m, 14 were
+ * still left under 5 cm. One metre leaves the rings' widest step of 0.75 m
+ * room to be crossed.
+ */
+const REST_MARGIN = CRAFT_WORLD_R * TAKEOFF_ROOM_SPAN;
+const REST_MARGIN_DRAG = 1.0;
+
 /* Can a craft be set down on the surface under (px, pz), seen from fromY?
  * Writes the parked centre and the surface to `out` when it can. */
 export function restSpotAt(colliders, surfaceAt, restHeight, px, pz, fromY, out) {
@@ -3419,10 +3459,36 @@ export function restSpotAt(colliders, surfaceAt, restHeight, px, pz, fromY, out)
   return true;
 }
 
+/*
+ * Is there `margin` of open room on every side of a craft parked with its
+ * centre at (x, y, z)? The parked hull, prop discs included, moved that far
+ * in each of eight directions, meets nothing. Sideways only: the room over
+ * it is restSpotAt's own rule. With no colliders there is nothing to be near.
+ */
+export function restRoomAt(colliders, x, y, z, margin = REST_MARGIN) {
+  if (!colliders) {
+    return true;
+  }
+  for (let i = 0; i < FOOTPRINT.length; i += 1) {
+    const px = x + FOOTPRINT[i][0] * margin;
+    const pz = z + FOOTPRINT[i][1] * margin;
+    if (colliders.hit(px, y, pz, px, y, pz, craftVerticalHalf(0), 0, 0, 0, 1, craftVerticalOffset()) >= 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const restProbe = { x: 0, y: 0, z: 0, surface: 0 };
+const restNear = { x: 0, y: 0, z: 0, surface: 0 };
 
 export function findRestSpot(colliders, surfaceAt, restHeight, x, y, z, from, out, keepOut = null) {
+  /* The nearest spot that is clear, and the nearest that is clear AND has
+   * REST_MARGIN of room: see REST_MARGIN. `out` takes the second as it is
+   * found, and the first when there is no second or the second is more than
+   * REST_MARGIN_DRAG farther from the crash. */
   let best = Infinity;
+  let roomy = Infinity;
   const consider = (px, pz) => {
     if (!restSpotAt(colliders, surfaceAt, restHeight, px, pz, y, restProbe)) {
       return;
@@ -3440,6 +3506,13 @@ export function findRestSpot(colliders, surfaceAt, restHeight, x, y, z, from, ou
     const d = dx * dx + dy * dy + dz * dz;
     if (d < best) {
       best = d;
+      restNear.x = restProbe.x;
+      restNear.y = restProbe.y;
+      restNear.z = restProbe.z;
+      restNear.surface = restProbe.surface;
+    }
+    if (d < roomy && restRoomAt(colliders, restProbe.x, restProbe.y, restProbe.z)) {
+      roomy = d;
       out.x = restProbe.x;
       out.y = restProbe.y;
       out.z = restProbe.z;
@@ -3459,7 +3532,17 @@ export function findRestSpot(colliders, surfaceAt, restHeight, x, y, z, from, ou
   if (keepOut) {
     keepOut.verges(x, z, CRAFT_WORLD_R, consider);
   }
-  return best < Infinity;
+  if (roomy < Infinity && Math.sqrt(roomy) <= Math.sqrt(best) + REST_MARGIN_DRAG) {
+    return true;
+  }
+  if (best < Infinity) {
+    out.x = restNear.x;
+    out.y = restNear.y;
+    out.z = restNear.z;
+    out.surface = restNear.surface;
+    return true;
+  }
+  return false;
 }
 
 export function makeClipWatch() {
