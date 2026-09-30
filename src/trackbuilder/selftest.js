@@ -31,7 +31,7 @@
  */
 
 import {
-  createTrack, createElement, createSequenceEntry, deserialize, elementById, normalize, isSequenceable,
+  createTrack, createElement, createSequenceEntry, deserialize, elementById, normalize, isSequenceable, kindOf,
   roundTripsCleanly, serialize, aperturesOf, toPlain, startPadsOf, newElementId,
   logoForDecal, dressOrder, LOGO_SLOTS, SCHEMA_VERSION,
   SCENE_TIMES, SCENE_GROUNDS, SCENE_DEFAULT, sceneOf, deepClone, setSideBuilt,
@@ -52,7 +52,7 @@ import { buildSheet, sheetHtml, sheetSvg, membersOf, mergeMembers, nodesOf, fitt
 import { importFpvEvents, looksLikeFpvEvents, reportLines } from './importfpv.js';
 import {
   passList, tagsOf, reuseOf, lanesOf, focusFor, aroundPass, stretchOf, flyAgain, apertureAt,
-  removeLastPass, MAX_PASSES, spreadTags,
+  removeLastPass, MAX_PASSES, spreadTags, arrowLanes,
 } from './passes.js';
 import {
   frameRectFor, nearestQuarter, placementFor, placeOnTrack, spacingTone, snapTurn, copyElements,
@@ -7702,6 +7702,39 @@ function suiteWhoopPasses() {
       threw = e.message;
     }
     check('nothing here throws on a document with entries that point at nothing', threw === '', threw);
+  }
+
+  /* ONE ARROW FOR EACH WAY AN OPENING IS FLOWN: the lanes the room and the plan draw. */
+  {
+    const q = (id, entry, ap = 0) => ({ apertureIndex: ap, number: 1, seq: { id, entry } });
+    const one = arrowLanes([q('a', 1), q('b', 1), q('c', 1)]);
+    check('three passes the same way through one opening are one lane', one.length === 1 && one[0].seqIds.join() === 'a,b,c'
+      && one[0].lane === 0 && one[0].lanes === 1, JSON.stringify(one));
+    const two = arrowLanes([q('a', 1), q('b', -1), q('c', 1)]);
+    check('and both ways is two lanes, the backward one first, side by side',
+      two.length === 2 && two[0].entry === -1 && two[1].entry === 1 && two[0].lane === 0 && two[1].lane === 1
+      && two.every((l) => l.lanes === 2) && two[1].seqIds.join() === 'a,c', JSON.stringify(two));
+    const stack = arrowLanes([q('a', 1, 0), q('b', -1, 1), q('c', 1, 1)]);
+    check('the openings of a stack have lanes of their own',
+      stack.filter((l) => l.apertureIndex === 0).length === 1 && stack.filter((l) => l.apertureIndex === 1).length === 2
+      && stack.find((l) => l.apertureIndex === 0).lanes === 1 && stack.find((l) => l.apertureIndex === 1).lanes === 2);
+    check('a pass whose face is not decided, and a pass with no face at all, have no lane',
+      arrowLanes([q('a', 0), { apertureIndex: 0, number: 2, seq: { id: 'z', entry: null } }]).length === 0);
+    check('a piece flown nowhere has none, and a hostile list is nothing, not a throw',
+      arrowLanes([]).length === 0 && arrowLanes(null).length === 0 && arrowLanes([null, {}, { seq: null }]).length === 0);
+    const clamped = arrowLanes([q('a', 1, 5), q('b', 1, 0), q('c', 1, 1)], 2);
+    check('an opening index past the last is the last, so a stack that lost a level loses no arrow, and shares that opening\'s lane',
+      clamped.length === 2 && clamped.find((l) => l.apertureIndex === 1).seqIds.join() === 'a,c'
+      && clamped.find((l) => l.apertureIndex === 0).seqIds.join() === 'b', JSON.stringify(clamped));
+    /* And on a real track: the lanes add up to the ways each opening is flown. */
+    const t8lanes = new Map();
+    for (const [elId, list] of sequenceNumbers(t8)) {
+      const el = elementById(t8, elId);
+      t8lanes.set(elId, arrowLanes(list, kindOf(el) === KIND.APERTURE ? aperturesOf(el).length : 1));
+    }
+    const top = t8lanes.get('el-6');
+    check('Track 8\'s gate flown backwards, forwards, forwards has two lanes of one and two passes',
+      top.length === 2 && top[0].seqIds.length === 1 && top[1].seqIds.length === 2, JSON.stringify(top));
   }
 
   /* TAGS THAT DO NOT LIE ON ONE ANOTHER: the arithmetic that spreads them. */

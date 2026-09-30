@@ -43,6 +43,7 @@ import {
 import { gateNumbers, gateNumberOf, sequenceLabel, faceLabel, unsequencedElements } from './sequence.js';
 import { labelOf, WHOOP_TOOLS } from './elements.js';
 import { replacementsFor } from './snap.js';
+import { passList, reuseOf } from './passes.js';
 import { standsOnGround } from './seat.js';
 import { figuresFor, matchingFigure, figureBlurb, levelName } from './figures.js';
 import { elevationProfile } from './path.js';
@@ -56,6 +57,12 @@ import {
  * inspectors: the same answers the plan draws and the physics is handed. */
 import { roadOf } from '../maps/built/road.js';
 import { DRIFT } from '../maps/built/traffic.js';
+
+/* The small mark a chip on the lap strip wears for the piece it is a pass of. */
+const CHIP_KINDS = {
+  gate: 'gate', doubleStack: 'tall', ladder: 'tall', tower: 'tall', diveGate: 'flat',
+  pole: 'pole', horizontalPole: 'pole', cone: 'cone', flag: 'pole',
+};
 
 /* Metres a second in kilometres an hour. A vehicle's speed is m/s in the
  * document and km/h in its inspector, the unit a driver reads: this is the
@@ -326,6 +333,26 @@ export class Panels {
     this.host = host;
     this.nodes = nodes;
     this.buildPalette();
+    /* The lap bar is as tall as what is in it: a chip is a finger on a touched screen
+     * and the figures wrap on a narrow one. The coach and a card docked to the foot sit
+     * just above it, so its height is measured and handed to the stylesheet, and again
+     * whenever it changes. */
+    this.barH = 0;
+    if (nodes.lapbar && typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => this.measureBar()).observe(nodes.lapbar);
+    }
+  }
+
+  measureBar() {
+    const bar = this.nodes.lapbar;
+    if (!bar || !bar.offsetHeight) {
+      return;
+    }
+    const h = bar.offsetHeight;
+    if (h !== this.barH) {
+      this.barH = h;
+      bar.parentElement?.style.setProperty('--tb-bar-h', `${h}px`);
+    }
   }
 
   /* ---------------- palette ---------------- */
@@ -453,6 +480,7 @@ export class Panels {
     this.renderCoach();
     this.renderCard();
     this.renderEmpty();
+    this.renderLapBar();
   }
 
   /* ---------------- render entry point ---------------- */
@@ -1725,9 +1753,11 @@ export class Panels {
     if (turns) {
       actions.append(button('Turn', 'tb-btn', () => this.host.nudgeYaw(-15), 'Turn it a quarter. E turns it one way and Q the other'));
     }
+    const copyBtn = button('Copy', 'tb-btn', () => this.host.copySelection(), 'A copy beside it, 30 in on. Control D');
+    const removeBtn = button('Remove', 'tb-btn tb-danger', () => this.host.deleteSelection(), 'Delete');
     actions.append(
-      button('Copy', 'tb-btn', () => this.host.copySelection(), 'A copy beside it, 30 in on. Control D'),
-      button('Remove', 'tb-btn tb-danger', () => this.host.deleteSelection(), 'Delete'),
+      copyBtn,
+      removeBtn,
       button('More', 'tb-btn', () => this.host.toggleDrawer(true), 'Everything else about it: the frame, the flag, how a stack is flown'),
     );
     const close = button('\u00d7', 'tb-btn tb-mini tb-card-x', () => this.host.setSelection([]), 'Let go of it. Escape');
@@ -1747,15 +1777,53 @@ export class Panels {
     const def = ELEMENTS[element.type];
     const entries = doc.sequence.filter((q) => q.elementId === element.id);
     const numbers = gateNumbers(doc);
-    const number = entries.length ? numbers.get(entries[0].id) : null;
-    head.append(el('strong', null, `${element.name || labelOf(element.type, 'micro')}${number != null ? `, number ${number}` : ''}`), close);
+    /*
+     * THE PASS THE CARD IS ABOUT. A piece flown more than once has a pass for each
+     * time, and Place in order, Reverse and Remove this pass are about one of them:
+     * the one in focus when it is this piece's, else the first. The card said only
+     * the first's number and acted on the first whichever the pilot meant.
+     */
+    const focusId = this.host.focusedPass?.(false) ?? null;
+    const at = entries.find((q) => q.id === focusId) ?? entries[0] ?? null;
+    const number = at ? numbers.get(at.id) : null;
+    const flown = entries.length;
+    const called = element.name || labelOf(element.type, 'micro');
+    if (flown > 1 && touched) {
+      /* On a touched screen the strip along the foot is the way to another pass (a chip
+       * is a finger there, and the passes of this piece are ringed on it): a row of
+       * chips here would be another 100 px of card on a tablet whose room is 580. The
+       * pass the card is about is named under the piece. */
+      const title = el('div', 'tb-card-title');
+      title.append(el('strong', null, called), el('span', 'tb-card-sub', `Flown ${flown} times${number != null ? `, this is pass ${number}` : ''}`));
+      head.append(title, close);
+    } else {
+      head.append(el('strong', null, flown > 1 ? `${called}, flown ${flown} times` : `${called}${number != null ? `, number ${number}` : ''}`), close);
+    }
     card.append(head);
+    if (flown > 1 && !touched) {
+      card.append(this.passChips(entries, numbers, at));
+    }
+    /* Fly again, and for a piece that is flown more than once Remove says how much
+     * it takes with it. */
+    if (isSequenceable(element)) {
+      actions.insertBefore(button(flown ? 'Fly again' : 'Fly it', 'tb-btn', () => this.host.flyPieceAgain(element.id, at ? at.apertureIndex ?? 0 : 0),
+        'Another pass through it, at the end of the lap'), copyBtn);
+    }
+    if (flown > 1) {
+      removeBtn.textContent = 'Remove piece';
+      removeBtn.title = `Takes the piece and its ${flown} passes out of the track. Delete`;
+      if (touched && at) {
+        /* The chips that carry this button on a fine pointer are not on this card. */
+        actions.insertBefore(button('Remove pass', 'tb-btn', () => this.host.removeSequenceEntry(at.id),
+          'Takes this one pass out of the lap and leaves the piece where it stands'), removeBtn);
+      }
+    }
 
     if (touched) {
       /* The small bar: what a keyboard's Q, E and X did, as buttons. */
-      if (entries.length && (def.kind === KIND.APERTURE || def.kind === KIND.MARKER)) {
-        actions.prepend(button(def.kind === KIND.APERTURE ? 'Reverse' : 'Other side', 'tb-btn', () => this.host.flipFace(entries[0].id),
-          `${faceLabel(doc, entries[0])}. X`));
+      if (at && (def.kind === KIND.APERTURE || def.kind === KIND.MARKER)) {
+        actions.prepend(button(def.kind === KIND.APERTURE ? 'Reverse' : 'Other side', 'tb-btn', () => this.host.flipFace(at.id),
+          `${faceLabel(doc, at)}. X`));
       }
       const swap = this.replaceField(ids);
       if (swap) {
@@ -1771,7 +1839,7 @@ export class Panels {
     const mid = { x: doc.field.width / 2, y: doc.field.depth / 2 };
     const mm = (m) => `${Math.round(m * 1000)} mm`;
     if (number != null) {
-      grid.append(this.field(`card-order-${id}`, 'Place in order', number, (val) => this.host.renumber(entries[0].id, val),
+      grid.append(this.field(`card-order-${id}`, 'Place in order', number, (val) => this.host.renumber(at.id, val),
         { step: 1, places: 0, min: 1 }));
     }
     const dx = element.position.x - mid.x;
@@ -1802,10 +1870,10 @@ export class Panels {
         this.host.setElementYaw(id, val * RAD);
       }, { step: 90, places: 0 }));
     }
-    if (entries.length && (def.kind === KIND.APERTURE || def.kind === KIND.MARKER)) {
+    if (at && (def.kind === KIND.APERTURE || def.kind === KIND.MARKER)) {
       const fig = el('div', 'tb-card-fig');
       fig.append(el('span', null, def.kind === KIND.APERTURE ? 'Direction' : 'Pass side'),
-        button(def.kind === KIND.APERTURE ? 'Reverse' : 'Other side', 'tb-btn', () => this.host.flipFace(entries[0].id), `${faceLabel(doc, entries[0])}. X`));
+        button(def.kind === KIND.APERTURE ? 'Reverse' : 'Other side', 'tb-btn', () => this.host.flipFace(at.id), `${faceLabel(doc, at)}. X`));
       grid.append(fig);
     }
     card.append(grid);
@@ -1817,6 +1885,35 @@ export class Panels {
     /* After the buttons, so a sentence appearing or going after a press moves
      * nothing that is under the finger. */
     this.cardWarnings(card, element, entries);
+  }
+
+  /*
+   * A piece's passes as a row of chips on its card, the pass the card is about
+   * filled. A click pins that pass (and the card, the room and the strip all turn to
+   * it), and the pointer over one lights it in the room and changes nothing else:
+   * the card stays about the pass that was chosen. Under the row, the card's own
+   * controls are about that pass alone, and a button there takes just that pass out
+   * of the lap.
+   */
+  passChips(entries, numbers, at) {
+    const row = el('div', 'tb-card-passes');
+    row.append(el('span', 'tb-card-passes-label', 'Pass'));
+    for (const q of entries) {
+      const n = numbers.get(q.id);
+      const chip = el('button', q.id === at?.id ? 'tb-chip on' : 'tb-chip', n == null ? '\u00b7' : String(n));
+      chip.type = 'button';
+      chip.dataset.seq = q.id;
+      chip.title = n == null ? 'A waypoint pass' : `Pass ${n} in the flying order`;
+      chip.addEventListener('pointerenter', () => this.host.setPassHover(q.id));
+      chip.addEventListener('pointerleave', () => this.host.setPassHover(null));
+      chip.addEventListener('click', () => this.host.setPassPinned(q.id));
+      row.append(chip);
+    }
+    if (at) {
+      row.append(button('Remove this pass', 'tb-btn tb-mini', () => this.host.removeSequenceEntry(at.id),
+        'Takes this one pass out of the lap and leaves the piece where it stands'));
+    }
+    return row;
   }
 
   /* What the rules say about this piece, in the words the mark on it carries. */
@@ -1899,7 +1996,8 @@ export class Panels {
     ] : [];
     for (const t of tries) {
       const x = clamp(t.x, 10, Math.max(10, rect.width - w - 10));
-      const y = clamp(t.y, 10, Math.max(10, rect.height - h - 104));
+      /* The bar stands 44 px off the foot, and a card keeps 8 px clear of it. */
+      const y = clamp(t.y, 10, Math.max(10, rect.height - h - (this.barH || 90) - 52));
       const covers = at.x > x - 60 && at.x < x + w + 60 && at.y > y - 60 && at.y < y + h + 60;
       if (!covers && this.host.mode === '3d') {
         card.classList.remove('docked');
@@ -1914,6 +2012,163 @@ export class Panels {
   }
 
   /*
+   * THE LAP STRIP, along the foot of the room above the lap bar: one chip for each
+   * pass in flying order, its number and a small mark for what kind of piece it
+   * is, a waypoint as a dot. It is the same lap the tags in the room number, laid
+   * out in time, and the two point at each other: a pass under the pointer here
+   * is the pass in focus there (host.setPassHover), a click pins it and selects its
+   * piece, and while one is in focus every other chip of the same piece is ringed,
+   * which is how a piece flown four times is found on a strip with no colour to
+   * remember. A drag moves a pass in the order; Delete takes that pass out and
+   * only that pass. The last chip is the Fly order tool.
+   *
+   * The chips are kept while the lap says the same thing. Hover and focus are only
+   * classes (renderPassFocus), because a button the pointer is on must not be
+   * rebuilt from under it: a click that lands on the new one is a click that never
+   * happened.
+   */
+  lapStrip() {
+    const doc = this.host.doc;
+    const list = passList(doc);
+    const warned = new Set((this.host.warnings ?? []).filter((w) => w.level === 'warn' && w.seqId).map((w) => w.seqId));
+    const armed = this.host.armed === 'route';
+    const sig = `${armed ? '+' : '-'}${list.map((p) => `${p.seq.id}:${p.number ?? '.'}:${p.element.type}:${faceLabel(doc, p.seq)}:${warned.has(p.seq.id) ? 'w' : ''}`).join('|')}`;
+    if (this.stripNode && sig === this.stripSig) {
+      return this.stripNode;
+    }
+    this.stripSig = sig;
+    const strip = el('div', 'tb-strip');
+    /* A toolbar: buttons that are one stop for Tab and are walked with the arrow keys,
+     * which is what the strip is. (A list item would take the chip's button role away.) */
+    strip.setAttribute('role', 'toolbar');
+    strip.setAttribute('aria-label', 'The lap, pass by pass');
+    const host = this.host;
+    /* One tab stop for the whole strip: thirty chips are thirty presses of Tab to get
+     * past, and the arrow keys walk them. The stop is the chip that last had the
+     * keyboard, else the pass in focus, else the first. */
+    const ids = list.map((p) => p.seq.id);
+    const focus = host.focusedPass?.() ?? null;
+    const stop = ids.includes(this.stripTab) || this.stripTab === 'add' ? this.stripTab : ids.includes(focus) ? focus : (ids[0] ?? 'add');
+    const allChips = () => [...strip.querySelectorAll('.tb-chip')];
+    const takeStop = (chip) => {
+      this.stripTab = chip.dataset.seq ?? 'add';
+      for (const c of allChips()) {
+        c.tabIndex = c === chip ? 0 : -1;
+      }
+    };
+    /* Left, Right, Home and End walk the strip; true when the key was one of them. */
+    const walk = (e, chip) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
+        return false;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      const chips = allChips();
+      const at = chips.indexOf(chip);
+      const to = e.key === 'Home' ? 0 : e.key === 'End' ? chips.length - 1 : at + (e.key === 'ArrowRight' ? 1 : -1);
+      chips[Math.max(0, Math.min(chips.length - 1, to))]?.focus();
+      return true;
+    };
+    list.forEach((p, i) => {
+      const bend = p.number == null;
+      const chip = el('button', bend ? 'tb-chip tb-chip-bend' : 'tb-chip', bend ? '' : String(p.number));
+      chip.type = 'button';
+      chip.dataset.seq = p.seq.id;
+      chip.dataset.el = p.element.id;
+      chip.dataset.kind = CHIP_KINDS[p.element.type] ?? 'gate';
+      if (warned.has(p.seq.id)) {
+        chip.classList.add('warn');
+      }
+      const said = bend
+        ? 'A waypoint: the line bends here'
+        : `Pass ${p.number}: ${sequenceLabel(doc, p.seq)}, ${faceLabel(doc, p.seq)}`;
+      chip.setAttribute('aria-label', said);
+      chip.title = `${said}. Click to look at it, drag to move it, Delete takes it out of the lap.`;
+      chip.draggable = true;
+      chip.tabIndex = p.seq.id === stop ? 0 : -1;
+      chip.addEventListener('focus', () => takeStop(chip));
+      chip.addEventListener('pointerenter', () => host.setPassHover(p.seq.id));
+      chip.addEventListener('pointerleave', () => host.setPassHover(null));
+      chip.addEventListener('click', () => host.setPassPinned(p.seq.id));
+      chip.addEventListener('dblclick', () => host.focusSelection());
+      chip.addEventListener('keydown', (e) => {
+        /* The keys a chip owns are not the room's: Delete would take the piece
+         * out from under the pass, and the arrows would nudge it. */
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault();
+          e.stopPropagation();
+          const next = list[i + 1] ?? list[i - 1];
+          if (next) {
+            requestAnimationFrame(() => this.stripNode?.querySelector(`[data-seq="${next.seq.id}"]`)?.focus());
+          }
+          host.removeSequenceEntry(p.seq.id);
+        } else {
+          walk(e, chip);
+        }
+      });
+      chip.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', String(p.index));
+        e.dataTransfer.effectAllowed = 'move';
+        chip.classList.add('dragging');
+      });
+      chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
+      chip.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        chip.classList.add('over');
+      });
+      chip.addEventListener('dragleave', () => chip.classList.remove('over'));
+      chip.addEventListener('drop', (e) => {
+        e.preventDefault();
+        chip.classList.remove('over');
+        const from = Number(e.dataTransfer.getData('text/plain'));
+        if (Number.isFinite(from) && from !== p.index) {
+          host.reorder(from, p.index);
+        }
+      });
+      strip.append(chip);
+    });
+    const add = el('button', armed ? 'tb-chip tb-chip-add on' : 'tb-chip tb-chip-add', '+');
+    add.type = 'button';
+    add.setAttribute('aria-label', 'Fly order: click the pieces in the order you fly them');
+    add.title = 'Fly order (O). Click the pieces in the order you fly them: a click on a piece again is another pass through it.';
+    add.tabIndex = stop === 'add' ? 0 : -1;
+    add.addEventListener('focus', () => takeStop(add));
+    add.addEventListener('keydown', (e) => { walk(e, add); });
+    add.addEventListener('click', () => host.arm('route'));
+    strip.append(add);
+    this.stripNode = strip;
+    return strip;
+  }
+
+  /*
+   * The strip and the card say which pass is in focus by a class, and this puts
+   * them right without building anything: the chip of the pass in focus is lit, the
+   * other chips of its piece are ringed, and the chip is scrolled into view when the
+   * focus moved by a click and not by the pointer passing over.
+   */
+  renderPassFocus() {
+    const focus = this.host.focusedPass?.() ?? null;
+    const strip = this.stripNode;
+    if (strip) {
+      const owner = focus ? this.host.doc.sequence.find((q) => q.id === focus)?.elementId ?? null : null;
+      for (const chip of strip.querySelectorAll('.tb-chip[data-seq]')) {
+        if (chip.dataset.seq === focus) {
+          chip.setAttribute('aria-current', 'true');
+        } else {
+          chip.removeAttribute('aria-current');
+        }
+        chip.classList.toggle('on', chip.dataset.seq === focus);
+        chip.classList.toggle('linked', owner != null && chip.dataset.el === owner && chip.dataset.seq !== focus);
+      }
+      if (focus !== this.stripFocus && this.host.passHover == null) {
+        strip.querySelector(`[data-seq="${focus}"]`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      }
+      this.stripFocus = focus;
+    }
+  }
+
+  /*
    * THE LAP BAR, along the foot: the lap's length, how many gates, whether the
    * lap closes and how many warnings there are, from the same path and the same
    * warnings the drawer's results show. The button opens the drawer, which is
@@ -1924,28 +2179,55 @@ export class Panels {
     if (!bar) {
       return;
     }
+    /* Emptying the bar takes a focused chip out of the page, and a click on a chip
+     * repaints the bar (the selection changed), so the keys that belong to the strip
+     * would stop working the moment the chip was pressed. A chip that is still on the
+     * strip afterwards gets its focus back. */
+    const held = bar.contains(document.activeElement) ? document.activeElement : null;
+    const heldAs = held && held.classList.contains('tb-chip') ? (held.dataset.seq ?? 'add') : null;
     bar.textContent = '';
     if (!this.host.isWhoopRace()) {
+      this.stripNode = null;
+      this.stripSig = '';
       return;
     }
     const doc = this.host.doc;
     const path = this.host.path;
     const gates = [...gateNumbers(doc).values()].filter((n) => n != null).length;
+    const reuse = reuseOf(doc);
     const bad = (this.host.warnings ?? []).filter((w) => w.level === 'warn').length;
     const fig = (label, value, tone) => {
       const f = el('span', tone ? `tb-lap-fig ${tone}` : 'tb-lap-fig');
       f.append(el('span', null, label), el('b', null, value));
       return f;
     };
+    /* Nothing to fly, nothing to show: a lone plus on an empty room is a tool for a lap
+     * that has no pieces. */
+    const anything = doc.sequence.length > 0 || doc.elements.some((e) => isSequenceable(e));
     bar.append(
+      ...(anything ? [this.lapStrip()] : []),
       fig('Length', path ? `${path.length.toFixed(1)} m, ${(path.length / 0.3048).toFixed(0)} ft` : '0 m'),
-      fig('Gates', String(gates)),
+      /* Passes are not gates: Track 8 is 14 pieces flown 29 times, and "Gates 29" was wrong about
+       * the room it stood in. Said as it is once a piece is flown more than once. */
+      reuse.passes > reuse.pieces ? fig('Passes', `${reuse.passes} on ${reuse.pieces} pieces`) : fig('Gates', String(gates)),
       fig('Lap', path && path.closed ? 'closes' : 'open', path && path.closed ? 'good' : ''),
       fig('Warnings', String(bad), bad ? 'bad' : 'good'),
       el('span', 'tb-lap-gap'),
+      ...(this.host.armed === 'route' && doc.sequence.length
+        ? [button('Start over', 'tb-btn', () => this.host.startOrderOver(), 'Empty the flying order and begin it again, waypoints included. One undo brings it back')]
+        : []),
       button('Build sheet', 'tb-btn', () => this.host.openSheet(), 'A page to print: where every piece stands, measured from a corner, and what pipe and fittings to buy'),
       button('Flying order', 'tb-btn', () => this.host.toggleDrawer(), 'The order the gates are flown in, every warning, and the elevation profile'),
     );
+    this.renderPassFocus();
+    if (held && held.isConnected && held !== document.activeElement) {
+      held.focus({ preventScroll: true });
+    } else if (heldAs && !held.isConnected && this.stripNode) {
+      /* The strip was made again (an edit changed the lap): the same pass, if it is
+       * still there, has the keyboard back. A pass that was taken out has none, and
+       * whoever took it out has said where the keyboard goes. */
+      this.stripNode.querySelector(heldAs === 'add' ? '.tb-chip-add' : `[data-seq="${heldAs}"]`)?.focus({ preventScroll: true });
+    }
   }
 
   /* One line at the foot of the room, while a track is still a few gates, saying
@@ -1959,7 +2241,19 @@ export class Panels {
     const doc = this.host.doc;
     const gates = doc.elements.filter((e) => kindOf(e) === KIND.APERTURE).length;
     let text = '';
-    if (this.host.isWhoopRace() && (this.host.armed === 'row' || this.host.armed === 'ruler')) {
+    const touched = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    if (this.host.isWhoopRace() && this.host.armed === 'route') {
+      /* Words only: a button floating over the room would take the tap meant for the
+       * piece beside it, and Start over is not a thing to be pressed by accident. It is
+       * on the lap bar. */
+      text = touched
+        ? (doc.sequence.length
+          ? 'Fly order: tap the next piece. A piece again is another pass. Tap the plus again to put the tool away.'
+          : 'Fly order: tap the first piece the lap goes through, then the next. A piece again is another pass.')
+        : (doc.sequence.length
+          ? 'Fly order: click the next piece. A piece again is another pass. Backspace takes the last pass off. Esc puts the tool away.'
+          : 'Fly order: click the first piece the lap goes through, then the next. A piece again is another pass. Esc puts the tool away.');
+    } else if (this.host.isWhoopRace() && (this.host.armed === 'row' || this.host.armed === 'ruler')) {
       text = this.host.armed === 'row'
         ? 'Drag along the floor to lay a row of two or three gates, 30 in apart. One click lays a pair. Right click or Esc puts the tool away.'
         : 'Click two points to measure between them. A click near a gate or a pole takes its middle. Right click or Esc puts the ruler away.';

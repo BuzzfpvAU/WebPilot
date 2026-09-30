@@ -43,7 +43,7 @@ import {
   neighboursOf, pinFacesAt, removeElement, removeFromSequence, setApertureIndex,
 } from './sequence.js';
 import { applyFigure, upgradeStackedFigures } from './figures.js';
-import { apertureAt, flyAgain, focusFor, removeLastPass } from './passes.js';
+import { apertureAt, flyAgain, focusFor, removeLastPass, MAX_PASSES } from './passes.js';
 import {
   QUARTER, copyElements, magnetFor, moveToPlace, nearestQuarter, placeOnTrack, placeRow as layRow, replaceWith,
   rowPlan, turnStepFor,
@@ -922,12 +922,17 @@ export class App {
    * pointer, else the pinned one while it belongs to what is selected, else
    * the first pass of the piece that is selected. Everything about a pass that
    * is not in focus is drawn quiet (3.8 of WHOOP-BUILDER-PLAN.md).
+   *
+   * `withHover` false leaves the pointer out: the card is about the pass that was
+   * chosen, and a pass only looked at in passing must not swap what its fields say.
    */
-  focusedPass() {
+  focusedPass(withHover = true) {
     if (!this.isWhoopRace()) {
       return null;
     }
-    return focusFor(this.doc, { selection: this.selection, pinned: this.passPinned, hover: this.passHover });
+    return focusFor(this.doc, {
+      selection: this.selection, pinned: this.passPinned, hover: withHover ? this.passHover : null,
+    });
   }
 
   /* The pin belongs to the piece it is a pass of: a selection that is not that
@@ -963,6 +968,73 @@ export class App {
     /* keepPassPin lets the pin go for a selection that is not its piece, and
      * this one is. */
     this.setSelection([q.elementId]);
+  }
+
+  /*
+   * FLY IT AGAIN: another pass through a piece, at the end of the lap, and the
+   * new pass is the one in focus, so the room and the strip show what was done.
+   * The direction is worked out from the line like every other pass's. Returns the
+   * pass, or null with a sentence when the piece cannot be flown or the lap is as
+   * long as one goes.
+   */
+  flyPieceAgain(elementId, apertureIndex = 0) {
+    if (!this.isWhoopRace()) {
+      return null;
+    }
+    const el = elementById(this.doc, elementId);
+    if (!el) {
+      return null;
+    }
+    if (this.doc.sequence.length >= MAX_PASSES) {
+      this.toast(`A lap of ${MAX_PASSES} passes is as long as this builder will make one.`);
+      return null;
+    }
+    let made = null;
+    this.edit('fly it again', (d) => { made = flyAgain(d, elementId, apertureIndex); });
+    if (!made) {
+      this.toast(`${el.name || labelOf(el.type, 'micro')} is not something the lap flies through or round.`);
+      return null;
+    }
+    this.passPinned = made.id;
+    /* keepPassPin lets the pin go for a selection that is not its piece, and this is. */
+    this.setSelection([elementId]);
+    return made;
+  }
+
+  /* The Fly order tool's click: a pass through the piece that was clicked, through
+   * the opening under the pointer when it is a stack. */
+  routeTo(elementId, point) {
+    const el = elementById(this.doc, elementId);
+    if (!el) {
+      return null;
+    }
+    const opening = kindOf(el) === KIND.APERTURE ? apertureAt(this.doc, elementId, point ? point.z : 0) : 0;
+    return this.flyPieceAgain(elementId, opening);
+  }
+
+  /* Backspace in the Fly order tool: the last pass comes off the lap. */
+  removeLastPassOfLap() {
+    if (!this.doc.sequence.length) {
+      return;
+    }
+    this.edit('take the last pass off', (d) => { removeLastPass(d); });
+  }
+
+  /* Start over: the whole flying order goes, and the waypoints with it, which are
+   * only bends of the line and have nothing to stand for without it. Pieces stay.
+   * One undo step brings it back. */
+  startOrderOver() {
+    if (!this.doc.sequence.length && !this.doc.elements.some((e) => e.type === 'waypoint')) {
+      return;
+    }
+    this.edit('start the order again', (d) => {
+      for (const e of d.elements.filter((x) => x.type === 'waypoint')) {
+        removeElement(d, e.id);
+      }
+      d.sequence.length = 0;
+    });
+    this.passPinned = null;
+    this.setSelection([]);
   }
 
   /* The focus moved: the room is drawn again, and the strip and the card catch
@@ -4275,6 +4347,12 @@ export class App {
         } else {
           this.setSelection([]);
         }
+        return;
+      }
+      if (this.armed === 'route' && (e.key === 'Delete' || e.key === 'Backspace')) {
+        /* In Fly order the key takes the last pass off the lap, not the piece. */
+        e.preventDefault();
+        this.removeLastPassOfLap();
         return;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {

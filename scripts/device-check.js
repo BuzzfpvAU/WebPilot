@@ -320,7 +320,9 @@ const WHOOP_PROBE = `(async () => {
   const lapBar = document.getElementById('tb-lapbar');
   const lapBox = box(lapBar);
   if (lapBar.scrollWidth > lapBar.clientWidth + 1) { bad.push('the lap bar is wider than the drawing: ' + lapBar.scrollWidth + ' px in ' + lapBar.clientWidth); }
-  for (const b of lapBar.querySelectorAll('button')) {
+  /* The strip of passes scrolls across by design, so its chips are not held to being inside
+   * the bar all at once: they have their own checks, further down. */
+  for (const b of lapBar.querySelectorAll('button:not(.tb-chip)')) {
     const q = box(b);
     if (q.h < 43.5) { bad.push('the lap bar button ' + (b.textContent || '').trim() + ' is ' + Math.round(q.h) + ' px tall'); }
     if (q.r > lapBox.r + 0.5 || q.l < lapBox.l - 0.5) { bad.push('the lap bar button ' + (b.textContent || '').trim() + ' is outside the bar'); }
@@ -328,9 +330,73 @@ const WHOOP_PROBE = `(async () => {
     if (!(e && (e === b || b.contains(e)))) { bad.push('the lap bar button ' + (b.textContent || '').trim() + ' is covered'); }
   }
   if (![...lapBar.querySelectorAll('button')].some((b) => b.textContent === 'Build sheet')) { bad.push('the lap bar has no Build sheet button'); }
+  /* The bar's height is measured for what sits above it, so the coach and a docked card clear it whatever is in it. */
+  const stageNode = document.getElementById('tb-stage');
+  const measured = parseFloat(stageNode.style.getPropertyValue('--tb-bar-h'));
+  if (!(Math.abs(measured - lapBar.offsetHeight) < 1.5)) { bad.push('the stage was told the lap bar is ' + measured + ' px tall and it is ' + lapBar.offsetHeight); }
   for (const n of document.querySelectorAll('.tb-bubble, .tb-warnbadge')) {
     const q = box(n);
     if (n.style.display !== 'none' && q.w < 29.5) { bad.push('a number or a mark is ' + Math.round(q.w) + ' px across'); break; }
+  }
+
+  /*
+   * A PIECE FLOWN MORE THAN ONCE, on the track that flies one six times. The strip along
+   * the foot has a chip for each pass and every one is a finger; the strip scrolls and
+   * does not widen the bar; and the card of that piece lists its passes as chips, each a
+   * finger, with the card still inside the drawing, off the bar and off its piece.
+   */
+  app.loadDocument(JSON.parse(JSON.stringify(PRESETS.find((p) => p.id === 'racegow5-track8'))), '');
+  await new Promise((r) => setTimeout(r, 1500));
+  const strip = document.querySelector('.tb-strip');
+  const chips = [...document.querySelectorAll('.tb-strip .tb-chip')];
+  if (!strip || chips.length < 30) { bad.push('the strip has ' + chips.length + ' chips on Track 8, which flies 29 passes'); }
+  for (const c of chips) {
+    const q = box(c);
+    if (q.h < 43.5) { bad.push('a chip on the strip (' + (c.textContent || c.className).trim().slice(0, 8) + ') is ' + Math.round(q.h) + ' px tall, less than a finger'); break; }
+  }
+  const bar = document.getElementById('tb-lapbar');
+  if (bar.scrollWidth > bar.clientWidth + 1) { bad.push('the strip widened the lap bar: ' + bar.scrollWidth + ' px in ' + bar.clientWidth); }
+  if (strip && strip.scrollWidth <= strip.clientWidth) { bad.push('the strip on Track 8 fits without scrolling, which cannot be at this width'); }
+  const last = chips[chips.length - 1];
+  if (last) {
+    last.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const q = box(last);
+    const e = document.elementFromPoint((q.l + q.r) / 2, (q.t + q.b) / 2);
+    if (!(e && (e === last || last.contains(e)))) { bad.push('the last chip on the strip cannot be reached by scrolling to it'); }
+    strip.scrollLeft = 0;
+  }
+  const { tagsOf } = await import('/src/trackbuilder/passes.js');
+  const many = tagsOf(app.doc).reduce((a, t) => (t.passes.length > a.passes.length ? t : a));
+  app.setSelection([many.elementId]);
+  await new Promise((r) => setTimeout(r, 1000));
+  const busy = document.getElementById('tb-card');
+  if (busy.hidden) {
+    bad.push('selecting the piece flown six times did not bring up its card');
+  } else {
+    const c = box(busy);
+    if (c.l < stage.l - 0.5 || c.r > stage.r + 0.5 || c.t < stage.t - 0.5 || c.b > stage.b + 0.5) { bad.push('the card of a piece flown six times is not inside the drawing'); }
+    if (c.h > stage.h * 0.45) { bad.push('the card of a piece flown six times is ' + Math.round(c.h) + ' px of a ' + Math.round(stage.h) + ' px drawing, and covers the track it is for'); }
+    const lap = box(document.getElementById('tb-lapbar'));
+    if (c.l < lap.r && c.r > lap.l && c.t < lap.b && c.b > lap.t) { bad.push('the card of a piece flown six times sits on the lap bar'); }
+    /* On a touched screen the strip is the way to another pass and the card names the one it is about. */
+    if (busy.querySelector('.tb-card-passes')) { bad.push('the touched card carries a row of pass chips, which is the height of the room it is for'); }
+    const sub = busy.querySelector('.tb-card-sub');
+    if (!sub || !new RegExp('Flown ' + many.passes.length + ' times').test(sub.textContent)) { bad.push('the touched card does not say the piece is flown ' + many.passes.length + ' times: ' + (sub ? sub.textContent : 'no line')); }
+    for (const b of busy.querySelectorAll('button')) {
+      const q = box(b);
+      if (q.h < 43.5) { bad.push('the card button ' + (b.textContent || '').trim().slice(0, 16) + ' is ' + Math.round(q.h) + ' px tall, less than a finger'); break; }
+    }
+    for (const w of ['Fly again', 'Remove piece', 'Remove pass']) {
+      if (![...busy.querySelectorAll('button')].some((x) => x.textContent === w)) { bad.push('the card of a piece flown six times has no ' + w); }
+    }
+    const el = app.doc.elements.find((e) => e.id === many.elementId);
+    const v = app.view3d;
+    v.applyCamera(); v.camera.updateMatrixWorld(true); v.root.updateMatrixWorld(true);
+    const p = new v.camera.position.constructor(el.position.x, el.position.y, 0.3);
+    v.root.localToWorld(p); p.project(v.camera);
+    const r = cv.getBoundingClientRect();
+    const under = document.elementFromPoint(r.left + ((p.x + 1) / 2) * r.width, r.top + ((1 - p.y) / 2) * r.height);
+    if (under && busy.contains(under)) { bad.push('the card is on top of the piece it is about'); }
   }
 
   /* More opens the drawer, and its fields are finger sized and inside the screen. */

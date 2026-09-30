@@ -85,7 +85,7 @@ import {
   aperturesOf, createElement, elementById, kindOf, apertureCenter, logosOf, logoForDecal, dressOrder, topOf,
 } from './model.js';
 import { sequenceNumbers } from './sequence.js';
-import { aroundPass, spreadTags, stretchOf, tagsOf } from './passes.js';
+import { aroundPass, arrowLanes, spreadTags, stretchOf, tagsOf } from './passes.js';
 import { RoomEditor } from './edit3d.js';
 import { frameRectFor } from './snap.js';
 import { levelName } from './figures.js';
@@ -2328,32 +2328,16 @@ export class View3D {
    */
   buildLanes(group, el, levels, numbers, f, quat, selected) {
     const focus = this.focusSeq;
-    const byOpening = new Map();
-    for (const n of numbers) {
-      const seq = n.seq;
-      if (!seq || seq.entry === 0) {
-        continue;
-      }
-      const at = Math.min(n.apertureIndex ?? 0, levels.length - 1);
-      const lanes = byOpening.get(at) ?? new Map();
-      const lane = lanes.get(seq.entry) ?? { entry: seq.entry, seqs: [] };
-      lane.seqs.push(seq.id);
-      lanes.set(seq.entry, lane);
-      byOpening.set(at, lanes);
-    }
-    for (const [at, lanes] of byOpening) {
-      const ap = levels[at];
-      const list = [...lanes.values()].sort((a, b) => a.entry - b.entry);
-      list.forEach((lane, i) => {
-        const inFocus = focus != null && lane.seqs.includes(focus);
-        const quiet = focus != null && !inFocus;
-        const across = list.length === 1 ? 0 : (i === 0 ? -1 : 1) * ap.clearW * 0.22;
-        const length = Math.max(0.22, ap.clearW * (inFocus ? 0.6 : 0.46));
-        const along = { x: f.normal.x * lane.entry, y: f.normal.y * lane.entry, z: f.normal.z * lane.entry };
-        const arrow = arrowMesh(along, length, inFocus || (selected && focus == null) ? COL.frameSel : COL.arrow, quiet ? 0.3 : (inFocus ? 1 : 0.85));
-        arrow.position.set(f.widthAxis.x * across, f.widthAxis.y * across, ap.centerH + f.widthAxis.z * across);
-        group.add(arrow);
-      });
+    for (const lane of arrowLanes(numbers, levels.length)) {
+      const ap = levels[lane.apertureIndex];
+      const inFocus = focus != null && lane.seqIds.includes(focus);
+      const quiet = focus != null && !inFocus;
+      const across = lane.lanes === 1 ? 0 : (lane.lane === 0 ? -1 : 1) * ap.clearW * 0.22;
+      const length = Math.max(0.22, ap.clearW * (inFocus ? 0.6 : 0.46));
+      const along = { x: f.normal.x * lane.entry, y: f.normal.y * lane.entry, z: f.normal.z * lane.entry };
+      const arrow = arrowMesh(along, length, inFocus || (selected && focus == null) ? COL.frameSel : COL.arrow, quiet ? 0.3 : (inFocus ? 1 : 0.85));
+      arrow.position.set(f.widthAxis.x * across, f.widthAxis.y * across, ap.centerH + f.widthAxis.z * across);
+      group.add(arrow);
     }
     /* The panes are the focused pass's, when it is one of this piece's. */
     if (focus != null) {
@@ -3355,7 +3339,9 @@ export class View3D {
       const holds = focus != null && tag.spec.passes.some((p) => p.seqId === focus);
       const selected = picked.has(tag.spec.id);
       tag.priority = (tag.hovered ? 4 : 0) + (holds ? 2 : 0) + (selected ? 1 : 0);
-      this.setTagOpen(tag, tag.hovered || holds || (selected && tag.spec.passes.length > 1));
+      /* Pointing at a tag puts its pass in focus (the chip's pointerenter), so a tag
+       * under the pointer already holds the focus; `hovered` is for where it is placed. */
+      this.setTagOpen(tag, holds || (selected && tag.spec.passes.length > 1));
       tag.node.classList.toggle('sel', selected);
       tag.node.classList.toggle('dim', focus != null && !holds && !near.has(tag.spec.id) && !selected);
       for (const chip of tag.chips) {
@@ -3488,6 +3474,10 @@ export class View3D {
     if (this.overlay.hidden) {
       return;
     }
+    /* With a tool in the hand a press is for the tool: the numbers and marks let it
+     * through, so a click meant for a piece is not taken by the tag on top of it, and
+     * a finger is not moved on to the nearest button (index.html, .tb-overlay.armed). */
+    this.overlay.classList.toggle('armed', Boolean(this.host.armed));
     const rect = this.canvas.getBoundingClientRect();
     this.camera.updateMatrixWorld(true);
     this.root.updateMatrixWorld(true);

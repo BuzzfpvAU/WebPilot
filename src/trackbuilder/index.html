@@ -712,6 +712,7 @@
         border-radius: var(--r-panel);
       }
       .tb-overlay[hidden] { display: none; }
+      .tb-overlay.armed .tb-bubble, .tb-overlay.armed .tb-warnbadge { pointer-events: none; }
       .tb-bubble {
         position: absolute;
         left: 0;
@@ -1262,6 +1263,9 @@
       .tb-seq-row.over { box-shadow: inset 0 2px 0 var(--amber); }
       .tb-seq-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
       .tb-seq-name { color: var(--cream); font-size: var(--t-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* On a whoop canvas a name wraps onto a second line instead of being cut to
+         "Tall ...": a pole flown six times is six rows, and they have to be told apart. */
+      body.tb-whoop .tb-seq-name { white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
       .tb-seq-face { color: var(--dim); font-size: var(--t-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       /* The amber wash under a selected row lifts the ground and drops --dim
          to 3.48:1, on the one line the row exists to tell you about. Slate
@@ -1699,11 +1703,82 @@
       .tb-lap-gap { flex: 1; }
       #tb-lapbar .tb-btn { padding: 4px 10px; }
 
+      /*
+       * THE LAP STRIP: the first row of the lap bar, one chip for each pass in flying
+       * order. The bar takes no pointer, so the strip and its chips take it back for
+       * themselves. It scrolls across when the lap is longer than the room is wide.
+       */
+      .tb-strip {
+        flex: 1 0 100%;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        overflow-x: auto;
+        padding: 3px 2px 5px;
+        scrollbar-width: thin;
+        pointer-events: auto;
+      }
+      .tb-chip {
+        position: relative;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-width: 26px;
+        height: 24px;
+        padding: 0 7px;
+        border-radius: 12px;
+        border: 1px solid rgba(157, 179, 200, 0.28);
+        background: rgba(247, 232, 205, 0.1);
+        color: var(--cream);
+        font: 600 var(--t-small) / 1 var(--mono);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .tb-chip:hover { background: rgba(247, 232, 205, 0.26); }
+      .tb-chip:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+      /* The pass in focus, and the other passes of its piece. */
+      .tb-chip.on { background: var(--amber); border-color: var(--amber); color: var(--deep); }
+      .tb-chip.linked { box-shadow: 0 0 0 2px var(--amber); }
+      .tb-chip.over { outline: 2px dashed var(--amber); }
+      .tb-chip.dragging { opacity: 0.45; }
+      /* A rule this pass breaks. */
+      .tb-chip.warn::before {
+        content: '';
+        position: absolute;
+        top: -3px;
+        right: -3px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--bad);
+        border: 1px solid rgba(15, 21, 15, 0.7);
+      }
+      /* What kind of piece it is: a mark, so a strip can be read without the room. */
+      .tb-chip[data-kind]:not(.tb-chip-add):not(.tb-chip-bend)::after {
+        content: '';
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border: 1.5px solid currentColor;
+        border-radius: 1px;
+        opacity: 0.6;
+      }
+      .tb-chip[data-kind="tall"]::after { width: 6px; height: 11px; }
+      .tb-chip[data-kind="flat"]::after { width: 11px; height: 6px; }
+      .tb-chip[data-kind="pole"]::after { width: 2px; height: 11px; border-width: 0; background: currentColor; }
+      .tb-chip[data-kind="cone"]::after { width: 0; height: 0; border: 4px solid transparent; border-bottom: 8px solid currentColor; border-top-width: 0; border-radius: 0; }
+      .tb-chip-bend { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; background: rgba(255, 212, 92, 0.5); border-color: transparent; }
+      .tb-chip-bend.on { background: var(--amber); }
+      .tb-chip-add { border-style: dashed; color: var(--amber); }
+      .tb-chip-add.on { background: var(--amber); color: var(--deep); border-style: solid; }
+
       #tb-coach {
         position: absolute;
         z-index: 4;
         left: 50%;
-        bottom: 96px;
+        bottom: calc(44px + var(--tb-bar-h, 90px));
         transform: translateX(-50%);
         max-width: calc(100% - 2 * var(--s5));
         padding: var(--s2) var(--s5);
@@ -1746,9 +1821,14 @@
       }
       /* Docked to the foot of the stage where there is no room to float it, and
          always on a narrow window. */
-      #tb-card.docked { left: var(--s4); right: auto; top: auto; bottom: 96px; }
+      #tb-card.docked { left: var(--s4); right: auto; top: auto; bottom: calc(44px + var(--tb-bar-h, 90px)); }
       .tb-card-head { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
       .tb-card-head strong { flex: 1; color: var(--amber); font-size: var(--t-body); }
+      /* The touched card of a piece flown more than once: the piece, and under it which
+         pass the card is about. */
+      .tb-card-title { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .tb-card-title strong { flex: none; }
+      .tb-card-sub { color: var(--dim); font-size: var(--t-small); }
       .tb-card-x { padding: 0 var(--s2); line-height: 1.2; }
       .tb-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
       .tb-card-grid .tb-field { margin: 0; }
@@ -1760,6 +1840,11 @@
         font: var(--t-micro) / 1.2 var(--mono);
       }
       .tb-card-swap { margin: var(--s3) 0 0; }
+      /* A piece's passes: a row of chips, the one the card is about filled. */
+      .tb-card-passes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 var(--s3); }
+      .tb-card-passes-label { font-size: var(--t-micro); color: var(--dim); letter-spacing: 0.06em; text-transform: uppercase; margin-right: 2px; }
+      .tb-card-passes .tb-chip { height: 22px; min-width: 24px; }
+      .tb-card-passes .tb-btn { margin-left: auto; }
       .tb-card-warns { margin-top: var(--s3); display: flex; flex-direction: column; gap: var(--s2); }
       .tb-card-warn { margin: 0; padding: var(--s2) var(--s3); border-left: 3px solid var(--bad); background: var(--lift); font-size: var(--t-small); line-height: 1.45; }
       .tb-card-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
@@ -1871,6 +1956,21 @@
          * Tap the piece, and its tag opens and can be tapped; the strip is the
          * other way to a pass. */
         .tb-numtag:not(.sel):not(.open) .tb-bubble { pointer-events: none; }
+        .tb-chip { min-width: 44px; height: 44px; border-radius: 22px; padding: 0 10px; font-size: var(--t-body); }
+        /* A waypoint stays a dot to look at and is a finger to press: the button is
+         * 44 px tall and the dot is drawn inside it. */
+        .tb-chip-bend, .tb-chip-bend:hover, .tb-chip-bend.on { min-width: 24px; width: 24px; height: 44px; padding: 0; border: 0; border-radius: 0; background: none; }
+        .tb-chip-bend::after { content: ''; width: 12px; height: 12px; border-radius: 50%; background: rgba(255, 212, 92, 0.5); }
+        .tb-chip-bend.on::after { background: var(--amber); }
+        .tb-strip { gap: 6px; }
+        .tb-card-passes .tb-chip { height: 44px; min-width: 44px; }
+        #tb-card .tb-card-passes .tb-btn { min-height: 44px; }
+        /* Three to a row, so the buttons of a card are two rows however long their words
+         * are (a piece flown more than once has six): a label that is too long for a third
+         * of the card takes a second line inside its button, and the card stays a small
+         * bar on a tablet whose room is 580 px. */
+        .tb-card-actions { display: grid; grid-template-columns: repeat(3, 1fr); }
+        .tb-card-actions .tb-btn { flex: none; min-width: 0; padding: 5px 4px; line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
         #tb-palette .tb-tool { min-height: 44px; }
         .tb-card-actions .tb-btn, #tb-lapbar .tb-btn { min-height: 44px; }
         .tb-card-x { min-width: 44px; min-height: 44px; }

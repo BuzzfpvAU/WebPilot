@@ -363,22 +363,29 @@ focus and select the piece; drag it to move the pass in the order; Delete takes 
 out, and only that pass. When a chip is in focus the other chips of the same piece are
 ringed, which is how a reused piece is found on a strip without a colour to remember, and a
 chip with a warning has a red dot. It scrolls on a narrow screen and keeps the focused chip
-in view. The last chip is Fly order, the tool below.
+in view. The last chip is Fly order, the tool below. For a keyboard it is one tab stop, the
+arrow keys, Home and End walk it, and Delete takes the pass out; on a touched screen every
+chip is 44 px, and a waypoint's dot has a 44 px box of its own with the dot drawn in it. An empty room has no strip, because a lone plus is a tool for a lap with nothing in it.
 
 **Fly order, a tool (O).** Armed, a click on a piece adds a pass through it at the end of
 the lap, and clicking the same piece again is the second pass. That is the whole way to
 fly a gate again. The pass is in focus at once, so its arrow, its stretch of line and its
 chip show what the click did. On a stack the opening is the one under the pointer.
-Backspace takes the last pass off and Escape puts the tool away. The direction is worked
-out from the line, as it is for every pass (faces.js), and Reverse on the card changes it.
-The coach line says so, with a Start over that empties the order in one undo step, so a
-lap can be clicked out from nothing.
+Backspace takes the last pass off and Escape puts the tool away (on a touched screen the
+plus chip, tapped again). The direction is worked out from the line, as it is for every
+pass (faces.js), and Reverse on the card changes it. The coach line says so in words only,
+because a button floating over the room takes the tap meant for the piece beside it (found
+when a tap wiped a lap); the lap bar has a Start over while the tool is in the hand and
+there is an order, which empties it in one undo step, so a lap can be clicked out from
+nothing. With a tool armed the numbers and marks let a press through to the piece under
+them, and the card is not shown.
 
 **The card,** for a piece flown more than once: "Tall pole, flown 6 times", a row of its
 pass chips with the focused one filled, and under it what is about the focused pass alone
 (Place in order, Other side or Reverse, Remove this pass), then Fly again, then what is
 about the piece (position, height, Replace with, Copy, Remove piece). Remove says how many
-passes it takes with it.
+passes it takes with it. The card is about the pass that was chosen: passing over another
+pass, on the strip or in the room, lights it in the room and changes nothing on the card.
 
 **Words.** The lap bar says "Passes 29 on 14 pieces" when a piece is flown more than once
 and "Gates 6" when none is. The order list wraps a name onto two lines on a whoop canvas.
@@ -387,7 +394,9 @@ and "Gates 6" when none is. The order list wraps a name onto two lines on a whoo
 `tracks/json`, the presets, the maps or the reader is edited, and the differential run
 against the pre-work reader, the GIF exporter and the game course are the proof that no
 existing track has moved. It is the whoop canvas only: the 5 inch and freestyle canvases
-stay pixel identical, and the plan view follows the room in a second slice.
+stay pixel identical. The plan view says the same thing as the room (a tag for each
+opening with its count, an arrow for each way an opening is flown, the pass in focus lit and
+its stretch of line bright), built in the same slice.
 
 **Not in this design.** A colour per piece (a hue to remember is what the ring is for,
 and it fails for a colour blind pilot), animating the lap, and any change to how a pass

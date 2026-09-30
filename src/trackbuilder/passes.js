@@ -317,3 +317,37 @@ export function spreadTags(boxes, gap = 3) {
   }
   return out;
 }
+
+/*
+ * ONE ARROW FOR EACH WAY AN OPENING IS FLOWN, and no more: the lanes the room
+ * and the plan draw. `numbers` is what sequenceNumbers gives for one piece
+ * ([{ apertureIndex, number, seq }]), and `openings` how many openings the piece
+ * has, so a stack that lost a level keeps its arrows on the ones that are left.
+ * An opening flown one way has one lane; flown both ways it has two, the backward
+ * one first, and the two are drawn side by side and never on top of each other.
+ * A pass whose face has not been decided has no lane.
+ *
+ * Returns [{ apertureIndex, entry, seqIds, lane, lanes }], lane the place of
+ * this one among the lanes of its opening and lanes how many there are.
+ */
+export function arrowLanes(numbers, openings = Infinity) {
+  const by = new Map();
+  for (const n of Array.isArray(numbers) ? numbers : []) {
+    const seq = n && n.seq;
+    if (!seq || (seq.entry !== 1 && seq.entry !== -1)) {
+      continue;
+    }
+    const at = Math.min(n.apertureIndex ?? 0, Math.max(0, openings - 1));
+    const lanes = by.get(at) ?? new Map();
+    const lane = lanes.get(seq.entry) ?? { apertureIndex: at, entry: seq.entry, seqIds: [] };
+    lane.seqIds.push(seq.id);
+    lanes.set(seq.entry, lane);
+    by.set(at, lanes);
+  }
+  const out = [];
+  for (const [, lanes] of by) {
+    const list = [...lanes.values()].sort((a, b) => a.entry - b.entry);
+    list.forEach((lane, i) => out.push({ ...lane, lane: i, lanes: list.length }));
+  }
+  return out;
+}

@@ -60691,3 +60691,247 @@ main as much as for this branch.
                             (after the reader change and the merge, which came after the first
                             batch): 8 of 8 byte identical to the pre-work build's again, no error
                             from the page in any
+
+## 2026-09-30 | builder | Whoop builder: a piece flown more than once is one piece in the room, its passes are on a strip
+
+The owner's ask, in three lines: design and fix "the super cluttered experience of building a tiny
+track where gates are used more than once on a lap"; "don't touch the existing tracks"; and "what
+other answers do you need from me". RaceGOW5 Tracks 5 to 8 do this all the time (Track 8 flies 14
+pieces 29 times, one tall pole six times and two gates three times each) and the room drew every
+pass as if it were a piece: 29 number chips, 29 arrows on top of each other, six sheets of coloured
+glass round one pipe, a card that was about the first pass only and a lap bar that said "Gates 29"
+for 14 gates. The design is section 3.8 of WHOOP-BUILDER-PLAN.md (written before the code, with
+decisions 13 to 16 for the owner). Nothing here touches the physics, the module ABI, the build, the
+board or the schema (`schemaVersion` stays 3, no field is added to a stored track), and no shipped
+track, preset, map, reader or exporter file is edited (section 3, and the differential run).
+
+### The idea, and what was built
+
+Pieces stand in the room; passes are moments in the lap. The room shows pieces, a strip along the
+foot shows passes in flying order, and pointing at either lights the other. At most one pass is in
+focus at a time, and everything about a pass that is not in focus is drawn quiet.
+
+- **`src/trackbuilder/passes.js` (new, pure, no DOM, no Three).** `tagsOf` (one tag for each
+  opening that is flown), `reuseOf`, `lanesOf`, `arrowLanes` (one arrow for each way an opening is
+  flown, side by side), `focusFor` (hover, else the pinned pass while its piece is selected, else the
+  first pass of the selected piece), `aroundPass` and `stretchOf` (the stretch of line from the pass
+  before to the pass after), `apertureAt`, `flyAgain`, `removeLastPass`, `spreadTags` (moves a tag
+  that would sit on another one, up or sideways and never down, with hysteresis so it does not jump)
+  and `MAX_PASSES` (400). Written test first: the checks failed with the module missing, then passed.
+- **The room (`view3d.js`).** One tag for each opening: its first number and, where it is flown more
+  than once, a count ("2 x6"); it opens into a chip for every pass when it is pointed at, selected
+  or holds the pass in focus. One arrow for each direction, at the size of the opening, and never on
+  top of another. A pole or cone's scoring squares are outlines, with glass only for the pass in
+  focus. The pass in focus has its arrow and its two panes bright, the racing line is drawn quiet
+  and the stretch of it round that pass is a bright tube. The 5 inch and freestyle branches of the
+  same functions keep the code they had.
+- **The plan (`view2d.js`), the same design.** A tag for each opening with its count, open into
+  circles side by side, the pass in focus lit amber and the tags of other pieces drawn back; an arrow
+  for each way an opening is flown; the chevrons of poles quiet unless in focus; the line drawn
+  back with the focused stretch bright. Tags carry a ring of the canvas's own dark and a haloed count,
+  because on a pale pole a cream tag was cream on cream (found in a close-up, not in a check).
+- **The lap strip (`ui.js`), along the foot above the lap bar.** One chip for each pass with a mark
+  for the kind of piece, a waypoint as a dot, a red dot on a pass that breaks a rule. Hover lights the
+  pass in the room and selects nothing; a click selects the piece and pins that pass; the other
+  passes of the same piece are ringed; a drag moves the pass in the order; Delete takes that pass out
+  and only that pass; Left, Right, Home and End walk it. It is one tab stop, and the keyboard stays
+  on a chip when an edit repaints the strip. The last chip is the Fly order tool.
+- **The card.** "Tall pole, flown 6 times", a row of its pass chips with the focused one filled, and
+  under it what is about that pass alone (Place in order, Other side or Reverse, Remove this pass),
+  then Fly again, then what is about the piece; Remove says it takes the piece and all its passes.
+  The card is about the pass that was chosen: passing over another only lights it in the room.
+- **Fly order (key O, and the plus chip).** Armed, a click on a piece adds a pass through it at the end
+  of the lap, a click on the same piece again is another pass, on a stack the opening under the
+  pointer. Backspace takes the last pass off, Escape puts the tool away (on a touched screen the plus
+  chip, tapped again), the lap bar has a Start over while there is an order (one undo step, waypoints
+  go with the order, pieces stay). With a tool armed the numbers and marks let a press through and the
+  card is not shown. A lap can be built from nothing by clicking pieces.
+- **Words.** The lap bar says "Passes 29 on 14 pieces" when a piece is flown more than once and
+  "Gates 6" when none is. A name wraps in the flying order list on a whoop canvas ("Tall ..." is
+  gone). The coach line is words only.
+- **Touch.** Every chip is 44 px (a waypoint's dot is a 44 px box with the dot drawn in it). The card
+  of a piece flown more than once has no row of chips on a touched screen (the strip is the way to
+  another pass, the passes of the piece are ringed on it) and names the pass under the piece; its
+  buttons are three to a row so they are two rows however long the words. The coach and a docked card
+  now sit above the lap bar's MEASURED height (`--tb-bar-h`), not a hard coded 134 px.
+
+### Where this departs from the plan, and why
+
+- **The touched card has no pass chips.** The plan put them on every card. Measured on a 1024 by 768
+  tablet, the card of a gate is 236 px and a row of chips at 44 px made the card of Track 8's pole
+  336 px, against the 45 per cent (261 px) of the 581 px room the device check holds a card to. The
+  strip is one thumb away, so the chips are on the card where there is a pointer and the strip does
+  the same job on a tablet. Say so if a hand test on a tablet misses them.
+- **Start over is on the lap bar, not in the coach line as planned.** A button floating over the
+  room took the tap meant for a gate (Chrome moves a tap to the nearest button) and wiped a 35 pass
+  lap in the touch case. Undo brings it back, but nobody should have to.
+- **The strip's chips are not held to "inside the bar" by the device check any more.** The strip
+  scrolls across by design, so the old loop over every button in the bar called every chip off
+  screen "outside the bar" and "covered". The chips have their own checks now: every one a finger
+  tall, the last one reachable by scrolling to it, the bar not widened by the strip. No threshold moved.
+
+### The tracks that exist are not touched
+
+Four proofs, all run on the final tree against the code as it was before any of this work
+(`31433d8`, exported to a scratch directory and served the same way).
+
+- **No file that holds a track is edited.** `git diff 31433d8 --stat -- src/trackbuilder/presets.js
+  tracks src/maps src/game configs` is empty, and so is the diff of the exporter's files
+  (`animate.js`, `animate.html`, `stage.js`, `gif.js`, `path.js`, `trackgif.js`, `cardgif.js`,
+  `src/game/trackdoc.js`), which import nothing this work edited. This turn edits no file of the
+  reader either (`model.js`, `sequence.js`, `faces.js`, `warnings.js`, `path.js` are as they were at
+  the last push).
+- **The differential run, old reader against new, on 431 documents.** 8 of 8 RaceGOW5 presets, 11 of
+  11 in `tracks/json` and 2 of 2 freestyle maps come out identical in the document written back, the
+  repairs, the racing line, the warnings and the course the GAME builds from it (`trackdoc.js`, which
+  Fly this track and the board read). 390 of the 431 are identical; the 41 that differ are the four
+  things the earlier turn named (a gate of no size repaired, a room the author resized kept as typed,
+  a reworded heading warning, a damaged `field` read as the room), none of them a shipped file. Neither
+  reader throws on any of the 431.
+- **The GIF exporter, through the real Export animation button.** 8 of 8 RaceGOW5 tracks come out byte
+  for byte the file the old build makes: same SHA-256, frame count and size (Track 1 92 frames
+  290,960 bytes; Track 8 298 frames 2,350,611 bytes), every one a GIF89a of 512 by 512 that loops,
+  and no error from the page.
+- **The 5 inch and freestyle canvases.** Six states (5 inch empty, with a 37 element course, and in
+  3D; freestyle empty, with the starter yard of 57 elements, and in 3D) compared pixel by pixel at
+  1600 by 900: 0 of 1,440,000 pixels differ in every one. The plan view's new drawing sits behind
+  `isWhoopRace()`, and where a shared painter needed a colour and an alpha it is called with none on
+  those canvases and runs the code it always ran.
+
+What changed on the screen for a shipped track is the room's and the plan's picture of it, which is
+the point of the work; its document is the same document. What none of this can see is the tracks
+people have saved in their own browsers and the ones on the board: the corpus stands in for them and
+none of it is theirs.
+
+### What went wrong
+
+- **A class name that was already taken.** The number tags were first called `.tb-tag`, which the
+  Publish dialog already uses for its tag buttons, so every tag had 3 px and 9 px of padding and a
+  border it did not ask for and the chips slid off the finger on the touch case. Found by the touch
+  case, after two wrong theories (the spreader moving tags down, chips too large); the class is
+  `.tb-numtag` now.
+- **Four mutations of `passes.js` were MISSED at first.** Two were guards nothing could reach (dead
+  code, removed) and two were checks that were not looking (strengthened). The same happened to
+  `arrowLanes` and the tag spreader; every mutation of the module is caught now.
+- **A click on a chip did not pin the pass, and no check said so.** The pointer is on the chip when
+  it is clicked, and the focus follows the pointer, so the pass looked pinned while the pointer stayed.
+  A mutation that only selected the piece was MISSED; the check now moves the pointer away and asks
+  whether the pass is still in focus.
+- **Two more flow mutations were MISSED.** Removing `tag.hovered` from the condition that opens a tag
+  changed nothing, because pointing at a tag already puts its pass in focus: the condition was dead and
+  is gone (`hovered` stays, for where the tag is placed). Making every chip a tab stop was invisible to a
+  check that ran after the first arrow key had already reset them; it is asked from the start now.
+- **The card followed the pointer.** The first card moved its filled chip to whatever pass was being
+  passed over on the strip, while its fields stayed on the chosen pass, so the card contradicted
+  itself. The mutation that removed the follow was MISSED because nothing could see it, which is how
+  I found it was wrong. The card uses the focus without the pointer now, and a check pins that.
+- **The keyboard fell off a chip the moment it was pressed.** A click repaints the lap bar (the
+  selection changed), emptying the bar took the focused chip out of the page, and Delete never
+  arrived. The Delete case timed out; the bar gives focus back to the chip it took it from, and to the
+  same pass when the strip is made again.
+- **A tap wiped the lap.** See Start over above: found by a debug script that printed the pass count
+  before and after a tap (35, then 0), not by a check. While a tool is armed the numbers and marks
+  now take no press either, so a tap meant for a piece next to a warning mark is not moved to it.
+- **The coach and a docked card were placed above a hard coded 134 px,** true for the bar with a mouse
+  and false for the taller bar on a tablet (the device check said "the card sits on the lap bar").
+- **Chips were 40 px on touch,** a finger by my reckoning and not by the check's 43.5 px. The chips
+  are 44 px; the threshold is where it was.
+- **Two edits of mine went wrong.** A patch of the plan view aborted on its own assertion (a colour
+  was left in the painter) and wrote nothing, which is what the assertion is for. A patch of the flow
+  check found the wrong "Fly again" line, took the text between the two, and duplicated three cases;
+  the run printed each case twice and I repaired it and checked that each case is defined once.
+- **Literal multiplication signs got into two lines of the flow check** (my tooling turned an escape
+  into the character). The non ASCII scan over the diff found them; they are the six character escape for it again.
+- **A lone plus chip on an empty room.** Seen in a screenshot of the empty state, not in a check: the
+  strip is left out until there is something to fly, and a case says so.
+- **The `numbers` flow case assumed one click renumbers a gate.** A click looks at a pass now and a
+  double click renumbers; the case says so.
+
+### Decisions for the owner (also asked in the reply)
+
+Open, and they gate the next stages (plan section 8, the recommended answer first):
+
+- **3.** Add the club profile (`spec`), default RaceGOW. Or stay RaceGOW only and drop Stage 4.
+- **4.** Which parts, and how a cube is stored: table, chair, banner, hoop, hex, cube in that order,
+  the cube as a group of face gates after a spike. Or per opening frames, about 60 call sites.
+- **5.** No plant, ABI or build change: parts from axis aligned boxes and capsules, tables and
+  banners at quarter turns. Or a turned box, which is a physics decision.
+- **6.** The board: approve the LeaderBoard change, deploy it first, add the types without a schema
+  bump. Or bump to 4.
+- **8.** Ways out: glb and USDZ in Stage 5, VR later, Liftoff and Velocidrone not now.
+
+Built this turn on my recommendation, cheap to turn round if the owner disagrees (plan 13 to 16):
+
+- **13.** A tag shows the first number and a count, the rest on hover. Or every number always, or
+  only a count.
+- **14.** Fly order adds a pass at the end of the lap, and the strip and the card move a pass. Or a
+  click inserts after the pass in focus.
+- **15.** The key is O, and Start over empties the order in one undo step.
+- **16.** The strip stays beside the Flying order drawer. Or it replaces the list on a whoop canvas.
+- Two departures from the plan, to say yes or no to: the touched card has no pass chips (the strip
+  does that job), and Start over is on the lap bar and not in the coach line.
+
+About the tracks, read only, nothing was changed:
+
+- **Every shipped RaceGOW5 track raises at least one warning under the builder's rules** (Track 8 has
+  8, mostly "faces away from" the next gate) and the new builder is the first thing to show them. I
+  have not checked whether they are true of those tracks or a product of how the line is derived from
+  the flying order. A read only look is the next step if the owner wants it.
+- **Row spacing.** The Row tool lays gates 30 in apart (RaceGOW's number); a row that shares an
+  upright is 29.05 in. Which one.
+
+Housekeeping:
+
+- Putting this branch on main is a fast forward (main's tip is in its history) and the word is the
+  owner's; nothing has been pushed to main.
+- `lint:input` has one racy check that fails on main's own tip about once in twelve runs (X in a
+  climb, described in the entry of the merge). It is a line in main's test; fix it or leave it.
+- Nothing has been tried on a real tablet or phone, on a real GPU or in a browser that is not
+  Chromium, and decision 12 (the first track test, who runs it) still wants a person.
+
+### RUN LOG
+
+    code                     src/trackbuilder: passes.js (new, pure), app.js, view3d.js, view2d.js, ui.js,
+                             edit3d.js, elements.js, index.html, selftest.js; src/fresh.js (the preload
+                             list, one module); scripts/builder-flow-check.js (+4 cases),
+                             scripts/device-check.js (the strip and a piece flown six times on a tablet);
+                             WHOOP-BUILDER-PLAN.md (3.8, Stage R, decisions 13 to 16)
+    self test                node src/trackbuilder/selftest.js: 1403 passed, 0 failed (1320 before this
+                             work; 83 new, written before the module they check)
+    browser check            npm run check:builder: 32 cases, 348 assertions, all pass, exit 0 (28 cases and
+                             267 assertions before). New: one piece many passes (strip, tags, card, Fly
+                             again, Delete, arrows, Tab, drag, double click), the plan shows one tag for
+                             each opening (read from the canvas's pixels), fly order (real clicks and keys),
+                             passes by touch (real touch events at 1024 by 768). Changed: numbers (a click
+                             looks, a double click renumbers), empty canvas (no strip on an empty room)
+    device check             npm run lint:devices: PASS. The whoop room at 820 by 1180, 1024 by 768 and 1180
+                             by 820 with touch emulation now also holds every strip chip to a finger, the
+                             last chip reachable, the bar's measured height handed to the stage, and the
+                             card of a piece flown six times inside the drawing, off the bar, off its piece,
+                             under 45 per cent of the room and its buttons a finger tall
+    mutations                87 single behaviour reversions, each caught by the check that guards it: 38
+                             against the self test (passes.js 21, the tag spreader 9, arrowLanes 8; two of
+                             them make the self test crash, which fails the gate), 40 against the flow cases
+                             (34 caught first time, 2 MISSED and repaired and re caught, 4 added last) and 9
+                             against the device probes. Eight were MISSED at first (four of passes.js, four of
+                             the flow cases) and each led to a change (see what went wrong)
+    differential             431 documents old reader against new: 390 identical, 41 differ and all 41 named
+                             (Stage 0's), 0 throw; 21 of 21 shipped documents identical
+    exporter                 8 of 8 GIFs byte identical to the old build's, through the real button
+    other canvases           6 states, 0 of 1,440,000 pixels differ in each
+    hover cost               Track 8 (24 pieces, 35 passes): a change of the pass in focus is one rebuild of
+                             the room, median 8.8 ms, worst 22 ms in this container's software renderer
+    micro:check              267 pass, exit 0
+    whoop:gates              21 of 21
+    lint:presets             4 of 4 clean
+    lint:preload             up to date, 237 served (passes.js is the one new module)
+    gif:selftest             38 passed, 0 failed
+    node --check             every edited file
+    dashes and non ASCII     none added (scanned over the diff; two literal multiplication signs were found
+                             and fixed, see above)
+    not run                  `npm run verify` (no physics, plant, ABI or build change), `shots.js` and a hand
+                             flight (offered at the end of the turn, as CLAUDE.md asks), `lint:input` and
+                             `lint:responsive` (nothing here reaches the shell or Fly this track), and
+                             `lint:catalog`, which cannot run in this container (vendor/betaflight is not
+                             checked out here). Nothing was tried on a real phone or tablet, on a real
+                             GPU, or in a browser that is not Chromium.

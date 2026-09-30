@@ -43,6 +43,7 @@ import {
   aperturesOf, elementById, kindOf, apertureCenter, logoForDecal,
 } from './model.js';
 import { sequenceNumbers } from './sequence.js';
+import { arrowLanes, stretchOf } from './passes.js';
 import { frameRectFor } from './snap.js';
 import { figureCue } from './figures.js';
 import { travelDirection, markerPassDir } from './faces.js';
@@ -97,6 +98,7 @@ const C = {
   number: '#101a26',
   numberBg: '#f7e8cd',
   numberBgSel: '#ffd45c',
+  tagRing: 'rgba(11, 18, 32, 0.92)',
   start: '#7dffb4',
   /* Ground paint. Cream, at the strength printed vinyl reads at on the
    * plan, because a decal is dressing rather than something to fly: it must
@@ -938,6 +940,9 @@ export class View2D {
     ctx.fillRect(0, 0, this.w, this.h);
 
     const doc = this.host.doc;
+    /* WHOOP CANVAS ONLY: the one pass in focus (passes.js), which the arrows, the
+     * chevrons and the racing line are quiet about. */
+    this.focusSeq = this.host.isWhoopRace() ? (this.host.focusedPass?.() ?? null) : null;
     /* A map has no flying order, so no racing line, no guide paint and no
      * numbers: a gate on a map is furniture. */
     const freestyle = docModeOf(doc) === 'freestyle';
@@ -1853,8 +1858,23 @@ export class View2D {
       }
     }
 
-    for (const n of numbers) {
-      this.drawArrowFor(ctx, el, n, dive);
+    if (this.host.isWhoopRace()) {
+      /* One arrow for each way an opening is flown, side by side where it is flown
+       * both ways, and only the pass in focus in full: see arrowLanes. */
+      for (const lane of arrowLanes(numbers, levels.length)) {
+        const n = numbers.find((x) => x.seq.id === lane.seqIds[0]);
+        const inFocus = this.focusSeq != null && lane.seqIds.includes(this.focusSeq);
+        const across = lane.lanes === 1 ? 0 : (lane.lane === 0 ? -1 : 1) * el.dims.clearW * this.cam.scale * 0.22;
+        this.drawArrowFor(ctx, el, n, dive, {
+          across,
+          alpha: this.focusSeq != null && !inFocus ? 0.3 : 1,
+          colour: inFocus ? C.selected : C.entry,
+        });
+      }
+    } else {
+      for (const n of numbers) {
+        this.drawArrowFor(ctx, el, n, dive);
+      }
     }
     this.drawHeaderFlags(ctx, el, selected);
     this.drawNumbers(ctx, el, numbers, selected);
@@ -1972,7 +1992,7 @@ export class View2D {
    * horizontal part of the travel is drawn as a short tail off the glyph so
    * the slope direction is readable too.
    */
-  drawArrowFor(ctx, el, entry, dive) {
+  drawArrowFor(ctx, el, entry, dive, style = null) {
     const seq = entry.seq;
     const dir = travelDirection(this.host.doc, seq.id);
     if (!dir) {
@@ -1981,10 +2001,24 @@ export class View2D {
     const c = this.toScreen(el.position);
     const flat = { x: dir.x, y: dir.y, z: 0 };
     const flatLen = Math.hypot(flat.x, flat.y);
+    if (!style) {
+      this.paintArrow(ctx, el, dive, c, dir, flat, flatLen, C.entry, 0);
+      return;
+    }
+    ctx.save();
+    ctx.globalAlpha = style.alpha ?? 1;
+    try {
+      this.paintArrow(ctx, el, dive, c, dir, flat, flatLen, style.colour ?? C.entry, style.across ?? 0);
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  paintArrow(ctx, el, dive, c, dir, flat, flatLen, tone, across) {
 
     if (dive) {
       const r = 9;
-      ctx.strokeStyle = C.entry;
+      ctx.strokeStyle = tone;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(c.x, c.y, r, 0, Math.PI * 2);
@@ -1999,7 +2033,7 @@ export class View2D {
         ctx.lineTo(c.x - k, c.y + k);
         ctx.stroke();
       } else {
-        ctx.fillStyle = C.entry;
+        ctx.fillStyle = tone;
         ctx.beginPath();
         ctx.arc(c.x, c.y, r * 0.34, 0, Math.PI * 2);
         ctx.fill();
@@ -2011,7 +2045,7 @@ export class View2D {
         ctx.moveTo(c.x + u.x * r, c.y - u.y * r);
         ctx.lineTo(c.x + u.x * (r + tail), c.y - u.y * (r + tail));
         ctx.stroke();
-        arrowHead(ctx, c.x + u.x * (r + tail), c.y - u.y * (r + tail), Math.atan2(-u.y, u.x), 6, C.entry);
+        arrowHead(ctx, c.x + u.x * (r + tail), c.y - u.y * (r + tail), Math.atan2(-u.y, u.x), 6, tone);
       }
       return;
     }
@@ -2021,17 +2055,20 @@ export class View2D {
     }
     const u = { x: flat.x / flatLen, y: flat.y / flatLen };
     const half = Math.max(18, el.dims.clearW * this.cam.scale * 0.85);
-    const ax = c.x - u.x * half;
-    const ay = c.y + u.y * half;
-    const bx = c.x + u.x * half;
-    const by = c.y - u.y * half;
-    ctx.strokeStyle = C.entry;
+    /* Across, sideways of the way it points, is how two lanes sit side by side. */
+    const cx = c.x + u.y * across;
+    const cy = c.y + u.x * across;
+    const ax = cx - u.x * half;
+    const ay = cy + u.y * half;
+    const bx = cx + u.x * half;
+    const by = cy - u.y * half;
+    ctx.strokeStyle = tone;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(ax, ay);
     ctx.lineTo(bx, by);
     ctx.stroke();
-    arrowHead(ctx, bx, by, Math.atan2(-u.y, u.x), 7, C.entry);
+    arrowHead(ctx, bx, by, Math.atan2(-u.y, u.x), 7, tone);
     /* A short red stub on the exit face, so entry green and exit red read
      * the same in 2D as they do in 3D. */
     ctx.strokeStyle = C.exit;
@@ -2087,8 +2124,14 @@ export class View2D {
       ctx.fill();
     }
 
+    const whoop = this.host.isWhoopRace();
     for (const n of numbers) {
-      this.drawChevron(ctx, el, n.seq);
+      /* Quiet unless it is the pass in focus: a pole flown six times has six of
+       * these, and one of them is what is being looked at. */
+      this.drawChevron(ctx, el, n.seq, whoop ? {
+        alpha: this.focusSeq != null && n.seq.id !== this.focusSeq ? 0.3 : 1,
+        colour: n.seq.id === this.focusSeq ? C.selected : C.entry,
+      } : undefined);
     }
     this.drawNumbers(ctx, el, numbers, selected);
   }
@@ -2099,7 +2142,21 @@ export class View2D {
    * strokes so it reads as a chevron and not as an arrow, because it marks a
    * side rather than a heading.
    */
-  drawChevron(ctx, el, seq) {
+  drawChevron(ctx, el, seq, style = null) {
+    if (!style) {
+      this.paintChevron(ctx, el, seq, C.entry);
+      return;
+    }
+    ctx.save();
+    ctx.globalAlpha = style.alpha ?? 1;
+    try {
+      this.paintChevron(ctx, el, seq, style.colour ?? C.entry);
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  paintChevron(ctx, el, seq, tone) {
     /*
      * The pass and its square come off the racing line's own knot
      * (markerSquare in path.js), which is the frame the race field scores
@@ -2151,7 +2208,7 @@ export class View2D {
       ctx.closePath();
       ctx.fillStyle = 'rgba(125, 255, 180, 0.22)';
       ctx.fill();
-      ctx.strokeStyle = C.entry;
+      ctx.strokeStyle = tone;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
@@ -2170,7 +2227,7 @@ export class View2D {
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(ang);
-    ctx.strokeStyle = C.entry;
+    ctx.strokeStyle = tone;
     ctx.lineWidth = 2.2;
     for (const off of [-4, 3]) {
       ctx.beginPath();
@@ -2282,6 +2339,10 @@ export class View2D {
       return;
     }
     const c = this.toScreen(el.position);
+    if (this.host.isWhoopRace()) {
+      this.drawTags(ctx, el, numbers, c, selected);
+      return;
+    }
     /* Stacked upward when a structure carries more than one, so a ladder
      * flown twice shows both of its positions. */
     numbers.forEach((n, i) => {
@@ -2303,6 +2364,67 @@ export class View2D {
         ctx.fillText(figureCue(this.host.doc, el, n.seq) || `L${(n.apertureIndex ?? 0) + 1}`, c.x + 12, y + 0.5);
       }
     });
+  }
+
+  /*
+   * ONE TAG FOR EACH OPENING THAT IS FLOWN, as in the room: the first number and,
+   * where it is flown more than once, a count. Selected, or holding the pass in
+   * focus, it opens into a circle for every pass, side by side (the pass in focus
+   * lit); the tags of pieces the focus is not about are drawn back.
+   */
+  drawTags(ctx, el, numbers, c, selected) {
+    const focus = this.focusSeq;
+    const levels = aperturesOf(el);
+    const groups = new Map();
+    for (const n of numbers) {
+      const at = Math.min(n.apertureIndex ?? 0, Math.max(0, levels.length - 1));
+      groups.set(at, [...(groups.get(at) ?? []), n]);
+    }
+    const holdsAny = focus != null && numbers.some((n) => n.seq.id === focus);
+    ctx.save();
+    if (focus != null && !holdsAny && !selected) {
+      ctx.globalAlpha = 0.45;
+    }
+    for (const [at, list] of groups) {
+      const y = c.y - 16 - at * 19;
+      const holds = focus != null && list.some((n) => n.seq.id === focus);
+      const open = list.length > 1 && (selected || holds);
+      const shown = open ? list : [list[0]];
+      shown.forEach((n, i) => {
+        const x = c.x + i * 19;
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, Math.PI * 2);
+        ctx.fillStyle = n.seq.id === focus || (focus == null && selected) ? C.numberBgSel : C.numberBg;
+        ctx.fill();
+        /* A ring in the canvas's own dark, so a tag reads on a pale pole or a
+         * lit footprint as well as on the floor. */
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = C.tagRing;
+        ctx.stroke();
+        ctx.fillStyle = C.number;
+        ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(n.number), x, y + 0.5);
+      });
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = C.tagRing;
+      const cue = list.length > 1 && !open
+        ? `\u00d7${list.length}`
+        : levels.length > 1 && list.length === 1
+          ? figureCue(this.host.doc, el, list[0].seq) || `L${(list[0].apertureIndex ?? 0) + 1}`
+          : '';
+      if (cue) {
+        ctx.strokeText(cue, c.x + 13, y + 0.5);
+        ctx.fillStyle = C.numberBg;
+        ctx.fillText(cue, c.x + 13, y + 0.5);
+      }
+    }
+    ctx.restore();
   }
 
   drawHandle(ctx) {
@@ -2518,6 +2640,13 @@ export class View2D {
     }
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
+    /* While a pass is in focus the line is drawn back to a quarter and its stretch,
+     * from the pass before to the pass after, is drawn over it thick and bright. */
+    const stretch = this.focusSeq != null ? stretchOf(path, this.focusSeq) : null;
+    if (stretch) {
+      ctx.save();
+      ctx.globalAlpha = 0.25;
+    }
     /* A wide soft pass under a thin bright one, so the line stays readable
      * where it crosses itself. */
     for (const [width, colour] of [[7, C.pathShadow], [2.2, C.path]]) {
@@ -2553,6 +2682,23 @@ export class View2D {
       ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
       ctx.fillStyle = k.role === 'marker' ? C.entry : C.path;
       ctx.fill();
+    }
+    if (stretch) {
+      ctx.restore();
+      for (const [width, colour] of [[9, C.pathShadow], [4, '#fff1b8']]) {
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        for (let i = stretch.from; i <= stretch.to; i += 1) {
+          const q = this.toScreen(path.samples[i].pos);
+          if (i === stretch.from) {
+            ctx.moveTo(q.x, q.y);
+          } else {
+            ctx.lineTo(q.x, q.y);
+          }
+        }
+        ctx.stroke();
+      }
     }
   }
 

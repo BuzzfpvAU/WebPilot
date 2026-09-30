@@ -299,6 +299,7 @@
     'src/trackbuilder/importfpv.js',
     'src/trackbuilder/logo.js',
     'src/trackbuilder/model.js',
+    'src/trackbuilder/passes.js',
     'src/trackbuilder/path.js',
     'src/trackbuilder/presets.js',
     'src/trackbuilder/profile.js',

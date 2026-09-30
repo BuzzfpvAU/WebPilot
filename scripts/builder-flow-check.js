@@ -1139,6 +1139,7 @@ kase('empty canvas', async () => {
     const empty = () => page.evaluate("!document.getElementById('tb-empty').hidden");
     const coach = () => page.evaluate("document.getElementById('tb-coach').hidden ? '' : document.getElementById('tb-coach').textContent");
     check('an empty whoop canvas says what to do', (await empty()) && /Pick a gate on the left, then click the floor/.test(await page.evaluate("document.getElementById('tb-empty').textContent")));
+    check('and has no strip of passes along the foot, which would be a lone plus for a lap with nothing in it', (await page.evaluate("document.querySelectorAll('.tb-strip').length")) === 0);
     const start = await json(page, `(() => { const b = document.querySelector('#tb-empty button'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: b.textContent }; })()`);
     check('and offers a finished track to start from', start.text === 'Start from a RaceGOW track', start.text);
     await click(page, start.x, start.y);
@@ -1155,6 +1156,7 @@ kase('empty canvas', async () => {
       await click(page, at.x, at.y);
     }
     check('the prompt goes with the first gate', !(await empty()));
+    check('and the strip of passes comes with the gates, one chip for each and the plus', (await page.evaluate("document.querySelectorAll('.tb-strip .tb-chip[data-seq]').length")) === 2 && (await page.evaluate("document.querySelectorAll('.tb-strip .tb-chip-add').length")) === 1);
     check('and the line at the foot is still there with two gates', (await coach()) !== '');
     const at = await screenOf(page, 'view3d', 5, 9, 0);
     await click(page, at.x, at.y);
@@ -2053,6 +2055,483 @@ kase('import from the designer', async () => {
     const before = await page.evaluate('window.trackBuilder.doc.name');
     await click(page, go2.x, go2.y);
     check('text that is not a track is refused in a sentence and changes nothing', /Could not import/.test((await toasts(page)).join(' ')) && (await page.evaluate('window.trackBuilder.doc.name')) === before, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* A piece flown more than once                                        */
+/* ------------------------------------------------------------------ */
+
+/* The passes module's own answers, asked of the page's live document, so what is on
+ * the screen is held to what the pure functions say about the same track. */
+const passFacts = async (page, body) => JSON.parse(await page.evaluate(`(async () => {
+  const P = await import('/src/trackbuilder/passes.js');
+  const doc = window.trackBuilder.doc;
+  return JSON.stringify((() => { ${body} })());
+})()`));
+
+/* Where a piece of the page is, measured twice a frame apart until it stops: a strip
+ * scrolls a chip into view, the room spreads its tags apart, and a press has to be
+ * aimed at where the thing ended up. */
+async function settled(page, selector, { scroll = false } = {}) {
+  const measure = () => json(page, `(() => {
+    const n = document.querySelector(${JSON.stringify(selector)});
+    if (!n) return null;
+    ${scroll ? 'n.scrollIntoView({ block: "nearest", inline: "nearest" });' : ''}
+    const r = n.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+  })()`);
+  let last = await measure();
+  for (let i = 0; i < 25; i += 1) {
+    await page.sleep(120);
+    const now = await measure();
+    if (now && last && Math.abs(now.x - last.x) < 0.5 && Math.abs(now.y - last.y) < 0.5) {
+      return now;
+    }
+    last = now;
+  }
+  return last;
+}
+
+const chipOf = (seq) => `.tb-strip .tb-chip[data-seq="${seq}"]`;
+const seqIds = (page) => json(page, 'window.trackBuilder.doc.sequence.map((q) => q.id)');
+const focusOf = (page) => page.evaluate('window.trackBuilder.focusedPass()');
+
+/*
+ * A PIECE FLOWN MORE THAN ONCE IS ONE PIECE IN THE ROOM, AND ITS PASSES ARE ON A
+ * STRIP. Track 8 flies 14 pieces 29 times, and the room used to hang 29 numbers,
+ * 29 pairs of panes and 29 arrows on them. What is asserted is what a pilot does:
+ * point at a pass, click it, take it out, fly it again, and see the same pass lit
+ * on the strip, in the room and on the card, without looking having made an edit.
+ */
+kase('one piece, many passes', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    await loadPreset(page, 'racegow5-track8');
+    await page.until('!window.trackBuilder.view3d.dirty', 20000);
+    await page.sleep(600);
+    const facts = await passFacts(page, `
+      const tags = P.tagsOf(doc);
+      const most = tags.reduce((a, t) => (t.passes.length > a.passes.length ? t : a), tags[0]);
+      return {
+        tags: tags.length, reuse: P.reuseOf(doc), sequence: doc.sequence.length,
+        most: { elementId: most.elementId, passes: most.passes.map((p) => ({ seqId: p.seq.id, number: p.number })) },
+      };`);
+    const pole = facts.most;
+    check('Track 8 is 14 pieces flown 29 times', facts.reuse.pieces === 14 && facts.reuse.passes === 29, JSON.stringify(facts.reuse));
+    check('and its busiest piece is flown six times', pole.passes.length === 6, pole.passes.map((p) => p.number).join(','));
+
+    const tagCount = await page.evaluate("document.querySelectorAll('.tb-numtag').length");
+    check('the room has one tag for each opening that is flown, and not one for each pass', tagCount === facts.tags && tagCount < facts.reuse.passes, `${tagCount} tags for ${facts.reuse.passes} passes`);
+    const bar = await page.evaluate("document.getElementById('tb-lapbar').textContent");
+    check('the lap bar says passes on pieces, and not gates', /Passes\s*29 on 14 pieces/.test(bar) && !/Gates/.test(bar), bar.replace(/\s+/g, ' ').slice(0, 90));
+
+    const chips = await json(page, `[...document.querySelectorAll('.tb-strip .tb-chip[data-seq]')].map((c) => ({ seq: c.dataset.seq, text: c.textContent, bend: c.classList.contains('tb-chip-bend') }))`);
+    const ids = await seqIds(page);
+    check('the strip has a chip for every pass in flying order, a waypoint as a dot',
+      chips.length === ids.length && chips.every((c, i) => c.seq === ids[i]) && chips.filter((c) => !c.bend).map((c) => c.text).join() === Array.from({ length: 29 }, (_, i) => i + 1).join(),
+      `${chips.length} chips for ${ids.length} passes`);
+
+    /* A toolbar of buttons: a list item role would take a chip's button role away from a screen reader. */
+    check('the strip is a labelled toolbar and its chips are buttons still', (await page.evaluate(`(() => { const s = document.querySelector('.tb-strip'); const c = [...s.querySelectorAll('.tb-chip')]; return s.getAttribute('role') === 'toolbar' && !!s.getAttribute('aria-label') && c.every((x) => x.tagName === 'BUTTON' && !x.hasAttribute('role') && (x.getAttribute('aria-label') || x.textContent)); })()`)));
+    /* The whole strip is one stop for Tab, from the start and not only once a chip has been used. */
+    const stops = () => json(page, `[...document.querySelectorAll('.tb-strip .tb-chip[tabindex="0"]')].map((c) => c.dataset.seq || 'add')`);
+    check('the strip is one tab stop from the start, and not one for each of its chips', (await stops()).length === 1, `${(await stops()).length} tab stops`);
+
+    /* Pointing at a chip lights that pass everywhere and selects nothing. */
+    const steps = await undoCount(page);
+    const third = pole.passes[2];
+    let at = await settled(page, chipOf(third.seqId), { scroll: true });
+    await mouse(page, 'mouseMoved', at.x, at.y, 0);
+    await page.until(`window.trackBuilder.focusedPass() === '${third.seqId}'`, 5000);
+    await page.sleep(300);
+    const lit = await json(page, `({ on: [...document.querySelectorAll('.tb-strip .tb-chip.on')].map((c) => c.dataset.seq), current: [...document.querySelectorAll('.tb-strip .tb-chip[aria-current]')].map((c) => c.dataset.seq), ringed: document.querySelectorAll('.tb-strip .tb-chip.linked').length, picked: window.trackBuilder.selection.size, room: window.trackBuilder.view3d.focusSeq })`);
+    check('pointing at a chip puts that pass in focus, in the room too, and selects nothing', lit.on.join() === third.seqId && lit.room === third.seqId && lit.picked === 0, JSON.stringify(lit));
+    check('and the chip in focus is the one a screen reader is told is current', lit.current.join() === third.seqId, lit.current.join());
+    check('and rings the other five passes of the same piece on the strip', lit.ringed === 5, `${lit.ringed} ringed`);
+    check('looking is no edit', (await undoCount(page)) === steps);
+    await mouse(page, 'mouseMoved', 800, 300, 0);
+    await page.until('window.trackBuilder.focusedPass() === null', 5000);
+    check('the pointer going away lets the focus go', (await page.evaluate("document.querySelectorAll('.tb-strip .tb-chip.on').length")) === 0);
+
+    /* A click selects the piece and keeps that pass in focus; the card names all six. */
+    at = await settled(page, chipOf(third.seqId), { scroll: true });
+    await click(page, at.x, at.y);
+    await page.until("!document.getElementById('tb-card').hidden", 5000);
+    check('a click on a chip selects its piece and puts that pass in focus, and is no edit', (await page.evaluate(`window.trackBuilder.selection.has('${pole.elementId}') && window.trackBuilder.focusedPass() === '${third.seqId}'`)) && (await undoCount(page)) === steps);
+    /* The pointer is what the focus follows while it is on a chip. The click's own
+     * part is what is left when it goes: the pass stays pinned, and does not fall back
+     * to the first pass of the piece. */
+    await mouse(page, 'mouseMoved', 800, 300, 0);
+    await page.until('window.trackBuilder.passHover === null', 5000);
+    await page.sleep(200);
+    check('and the pass stays in focus when the pointer has gone', (await focusOf(page)) === third.seqId && (await page.evaluate("document.querySelectorAll('.tb-strip .tb-chip.on').length")) === 1, `${await focusOf(page)} for ${third.seqId}`);
+    const card = await json(page, `({ title: document.querySelector('#tb-card .tb-card-head strong, #tb-card strong')?.textContent, chips: [...document.querySelectorAll('#tb-card .tb-card-passes .tb-chip')].map((c) => ({ text: c.textContent, on: c.classList.contains('on') })), buttons: [...document.querySelectorAll('#tb-card button')].map((b) => b.textContent) })`);
+    check('the card says the piece is flown six times and lists the passes', /flown 6 times/.test(card.title) && card.chips.map((c) => c.text).join() === pole.passes.map((p) => p.number).join(), `${card.title} | ${card.chips.map((c) => c.text).join()}`);
+    check('with this pass filled', card.chips.filter((c) => c.on).map((c) => c.text).join() === String(third.number), card.chips.filter((c) => c.on).map((c) => c.text).join());
+    check('and Fly again and Remove piece among its buttons', card.buttons.includes('Fly again') && card.buttons.includes('Remove piece') && card.buttons.includes('Remove this pass'), card.buttons.join(' | '));
+
+    /* The card's own chips turn the focus, and the strip follows. */
+    const fifth = pole.passes[4];
+    const cardChip = await settled(page, `#tb-card .tb-card-passes .tb-chip[data-seq="${fifth.seqId}"]`);
+    await click(page, cardChip.x, cardChip.y);
+    await page.until(`window.trackBuilder.focusedPass() === '${fifth.seqId}'`, 5000);
+    const turned = await json(page, `({ strip: [...document.querySelectorAll('.tb-strip .tb-chip.on')].map((c) => c.dataset.seq), card: [...document.querySelectorAll('#tb-card .tb-card-passes .tb-chip.on')].map((c) => c.textContent), order: document.querySelector('#tb-card [data-tbkey^="card-order-"]')?.value })`);
+    check('a chip on the card turns the focus, and the strip and the card agree', turned.strip.join() === fifth.seqId && turned.card.join() === String(fifth.number) && turned.order === String(fifth.number), JSON.stringify(turned));
+
+    /* Passing over another pass of the piece lights it in the room and leaves the card
+     * about the pass that was chosen, even when the card is drawn again meanwhile. */
+    const other = pole.passes[1];
+    const otherChip = await settled(page, chipOf(other.seqId), { scroll: true });
+    await mouse(page, 'mouseMoved', otherChip.x, otherChip.y, 0);
+    await page.until(`window.trackBuilder.focusedPass() === '${other.seqId}'`, 5000);
+    await page.evaluate(`window.trackBuilder.setSelection(['${pole.elementId}']), 1`);
+    await page.sleep(300);
+    const passing = await json(page, `({ room: window.trackBuilder.view3d.focusSeq, card: [...document.querySelectorAll('#tb-card .tb-card-passes .tb-chip.on')].map((c) => c.textContent), order: document.querySelector('#tb-card [data-tbkey^="card-order-"]')?.value })`);
+    check('passing over another pass lights it in the room and leaves the card about the pass that was chosen', passing.room === other.seqId && passing.card.join() === String(fifth.number) && passing.order === String(fifth.number), JSON.stringify(passing));
+    await mouse(page, 'mouseMoved', 800, 300, 0);
+    await page.until(`window.trackBuilder.focusedPass() === '${fifth.seqId}'`, 5000);
+    check('and the pointer going away puts the room back on the pass that was chosen', true);
+
+    /* Fly again puts one more pass at the end, in focus; Remove this pass takes just that one. */
+    const before = await seqIds(page);
+    const stepsA = await undoCount(page);
+    const fly = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === 'Fly again'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await click(page, fly.x, fly.y);
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length + 1}`, 5000);
+    const after = await seqIds(page);
+    const made = await json(page, `window.trackBuilder.doc.sequence[window.trackBuilder.doc.sequence.length - 1]`);
+    check('Fly again adds one pass at the end of the lap through this piece, as one undo step', after.slice(0, -1).join() === before.join() && made.elementId === pole.elementId && (await undoCount(page)) === stepsA + 1, `${before.length} then ${after.length}`);
+    const tagText = () => page.evaluate(`document.querySelector('.tb-numtag[data-key^="${pole.elementId}"]')?.textContent ?? ''`);
+    await page.until(`/\\u00d77/.test(document.querySelector('.tb-numtag[data-key^="${pole.elementId}"]')?.textContent ?? '')`, 5000).catch(() => {});
+    check('and the new pass is the one in focus, and the tag says seven', (await focusOf(page)) === made.id && /\u00d77/.test(await tagText()), `${await focusOf(page)} for ${made.id}: ${await tagText()}`);
+    await page.sleep(200);
+    const rem = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === 'Remove this pass'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    await click(page, rem.x, rem.y);
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length}`, 5000);
+    check('Remove this pass takes only that pass, and the lap is as it was', (await seqIds(page)).join() === before.join() && (await page.evaluate(`!!window.trackBuilder.doc.elements.find((e) => e.id === '${pole.elementId}')`)));
+
+    /* Delete on a chip takes that pass out and only that pass, and moves on to the next chip. */
+    const victim = pole.passes[3];
+    at = await settled(page, chipOf(victim.seqId), { scroll: true });
+    await click(page, at.x, at.y);
+    const stepsD = await undoCount(page);
+    const elementsBefore = JSON.stringify(await elements(page));
+    await key(page, 'Delete');
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length - 1}`, 5000);
+    const gone = await seqIds(page);
+    check('Delete on a chip takes that pass out of the lap and only that pass, as one undo step', gone.join() === before.filter((s) => s !== victim.seqId).join() && (await undoCount(page)) === stepsD + 1);
+    check('the piece is still where it stood, and its other passes are still flown', JSON.stringify(await elements(page)) === elementsBefore);
+    const next = before[before.indexOf(victim.seqId) + 1];
+    await page.until(`document.activeElement && document.activeElement.dataset && document.activeElement.dataset.seq === '${next}'`, 5000).catch(() => {});
+    const active = await page.evaluate('(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.seq) || document.activeElement.tagName');
+    check('and the keyboard moves on to the next chip', active === next, `${active} for ${next}`);
+    await key(page, 'KeyZ', 2);
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length}`, 5000);
+    check('Control Z brings that pass back in the same place', (await seqIds(page)).join() === before.join());
+
+    /* Arrow keys on a chip walk the strip and nudge nothing. */
+    at = await settled(page, chipOf(before[1]), { scroll: true });
+    await click(page, at.x, at.y);
+    const stepsK = await undoCount(page);
+    const placed = JSON.stringify(await elements(page));
+    await key(page, 'ArrowRight');
+    await page.sleep(150);
+    check('the arrow keys walk the strip and move nothing', (await page.evaluate('document.activeElement && document.activeElement.dataset && document.activeElement.dataset.seq')) === before[2]
+      && JSON.stringify(await elements(page)) === placed && (await undoCount(page)) === stepsK);
+    /* And the stop is the chip that last had the keyboard. */
+    check('the tab stop is the chip the keyboard is on', (await stops()).join() === before[2], (await stops()).join());
+    await key(page, 'Tab');
+    check('Tab leaves the strip in one press', await page.evaluate("!document.activeElement.closest('.tb-strip')"));
+    await key(page, 'Tab', 8);
+    check('and Shift Tab comes back to the chip it left', (await page.evaluate('document.activeElement && document.activeElement.dataset && document.activeElement.dataset.seq')) === before[2]);
+    /* An edit that makes the strip again does not take the keyboard from the pass that had it. */
+    await page.evaluate(`window.trackBuilder.flyPieceAgain('${pole.elementId}', 0), 1`);
+    await page.sleep(400);
+    check('an edit that repaints the strip gives the keyboard back to the same pass', (await page.evaluate('document.activeElement && document.activeElement.dataset && document.activeElement.dataset.seq')) === before[2]);
+    await page.evaluate('window.trackBuilder.undo(), 1');
+    await page.until(`window.trackBuilder.doc.sequence.map((q) => q.id).join() === '${before.join()}'`, 5000);
+
+    /* A drag on the strip moves a pass in the order. The drag is the page's own drag
+     * and drop events, because the browser's is not one a protocol can start. */
+    const moving = before[4];
+    const target = before[1];
+    const stepsM = await undoCount(page);
+    await page.evaluate(`(() => {
+      const from = document.querySelector('${chipOf(moving)}');
+      const to = document.querySelector('${chipOf(target)}');
+      const data = new DataTransfer();
+      from.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: data }));
+      to.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
+      to.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }));
+      from.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: data }));
+      return 1;
+    })()`);
+    await page.sleep(300);
+    const dragged = await seqIds(page);
+    check('dragging a chip onto another moves that pass there, as one undo step', dragged.indexOf(moving) === before.indexOf(target) && dragged.length === before.length && (await undoCount(page)) === stepsM + 1, `${before.indexOf(moving)} to ${dragged.indexOf(moving)}`);
+    await key(page, 'KeyZ', 2);
+    await page.until(`window.trackBuilder.doc.sequence.map((q) => q.id).join() === '${before.join()}'`, 5000);
+    check('and Control Z puts it back', true);
+
+    /* The tag in the room: pointed at, it opens into a chip for each of the six. */
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(300);
+    const tagAt = await settled(page, `.tb-numtag[data-key^="${pole.elementId}"] .tb-bubble`);
+    await mouse(page, 'mouseMoved', tagAt.x, tagAt.y, 0);
+    await page.until(`document.querySelectorAll('.tb-numtag[data-key^="${pole.elementId}"] .tb-bubble').length === 6`, 5000);
+    const opened = await json(page, `[...document.querySelectorAll('.tb-numtag[data-key^="${pole.elementId}"] .tb-bubble')].map((c) => c.firstChild.textContent)`);
+    check('pointed at, the tag opens into a chip for each pass', opened.join() === pole.passes.map((p) => p.number).join(), opened.join());
+    const chip24 = await settled(page, `.tb-numtag[data-key^="${pole.elementId}"] .tb-bubble[data-seq="${pole.passes[4].seqId}"]`);
+    await mouse(page, 'mouseMoved', chip24.x, chip24.y, 0);
+    await page.until(`window.trackBuilder.focusedPass() === '${pole.passes[4].seqId}'`, 5000);
+    check('and the pass under the pointer is the pass in focus, on the strip as well', (await page.evaluate(`document.querySelector('.tb-strip .tb-chip.on')?.dataset.seq`)) === pole.passes[4].seqId);
+    await mouse(page, 'mouseMoved', 800, 200, 0);
+    await page.until('window.trackBuilder.focusedPass() === null', 5000);
+    check('the pointer going away closes it again', (await page.evaluate(`document.querySelectorAll('.tb-numtag[data-key^="${pole.elementId}"] .tb-bubble').length`)) === 1);
+
+    /* A double click on one chip of an opened tag gives that pass another place. */
+    await page.evaluate(`window.trackBuilder.setSelection(['${pole.elementId}']), 1`);
+    await page.sleep(400);
+    const second = pole.passes[1];
+    const chip4 = await settled(page, `.tb-numtag[data-key^="${pole.elementId}"] .tb-bubble[data-seq="${second.seqId}"]`);
+    const stepsR = await undoCount(page);
+    await doubleClick(page, chip4.x, chip4.y);
+    await page.until("!!document.querySelector('.tb-bubble-input')", 5000);
+    await page.evaluate("(() => { const i = document.querySelector('.tb-bubble-input'); i.value = '10'; return 1; })()");
+    await key(page, 'Enter');
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    const renum = await seqIds(page);
+    check('a double click on the second chip, 10 and Enter, gives that pass the tenth place, as one undo step', renum[9] === second.seqId && renum.length === before.length && (await undoCount(page)) === stepsR + 1, `now at ${renum.indexOf(second.seqId) + 1}`);
+    await key(page, 'KeyZ', 2);
+    await page.until(`window.trackBuilder.doc.sequence.map((q) => q.id).join() === '${before.join()}'`, 5000);
+    check('and Control Z puts it back', true);
+
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * THE PLAN SAYS THE SAME THING. Drawn on a canvas and not in the page, so this reads the
+ * pixels: the tag of the pass in focus is lit, the tags of pieces the focus is not about
+ * are drawn back, and a piece flown more than once shows its count and not a stack of
+ * numbers.
+ */
+kase('the plan shows one tag for each opening', async () => {
+  const page = await openBuilder();
+  try {
+    await loadPreset(page, 'racegow5-track8');
+    await page.until('!window.trackBuilder.view3d.dirty', 20000);
+    await page.evaluate("window.trackBuilder.setMode('2d'), 1");
+    await page.sleep(500);
+    const facts = await passFacts(page, `
+      const tags = P.tagsOf(doc);
+      const most = tags.reduce((a, t) => (t.passes.length > a.passes.length ? t : a), tags[0]);
+      const single = tags.find((t) => t.passes.length === 1 && t.apertureIndex === 0 && t.elementId !== most.elementId);
+      return { most: most.elementId, single: single.elementId };`);
+    /* The pixel under the left of a tag's circle, clear of the digit written in the middle. */
+    const tagPixel = (id) => json(page, `(() => {
+      const v = window.trackBuilder.view2d;
+      const el = window.trackBuilder.doc.elements.find((e) => e.id === '${id}');
+      const c = v.toScreen(el.position);
+      const d = v.canvas.getContext('2d').getImageData(Math.round((c.x - 6.5) * v.dpr), Math.round((c.y - 13) * v.dpr), 1, 1).data;
+      return [d[0], d[1], d[2]];
+    })()`);
+    const amber = ([r, g, b]) => r > 235 && g > 190 && g < 230 && b < 140;
+    const cream = ([r, g, b]) => r > 230 && g > 215 && b > 185;
+    await page.evaluate("window.trackBuilder.setSelection([]), 1");
+    await page.sleep(400);
+    check('nothing selected, the tags are cream', cream(await tagPixel(facts.single)), (await tagPixel(facts.single)).join());
+    await page.evaluate(`window.trackBuilder.setSelection(['${facts.most}']), 1`);
+    await page.sleep(500);
+    const lit = await tagPixel(facts.most);
+    const other = await tagPixel(facts.single);
+    check('the piece selected has the pass in focus lit in amber', amber(lit), lit.join());
+    check('and the tag of a piece the focus is not about is drawn back, and is not amber', !amber(other) && !cream(other), other.join());
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * THE FLY ORDER TOOL BUILDS A LAP FROM NOTHING, BY CLICKING THE PIECES IN THE ORDER
+ * THEY ARE FLOWN. A click on a piece again is another pass through it, Backspace takes
+ * the last pass off, Start over empties the order, and Escape puts the tool away. Every
+ * click is one undo step, and none of it is a toast.
+ */
+kase('fly order', async () => {
+  const page = await openBuilder();
+  try {
+    await trapToasts(page);
+    await page.evaluate(`(() => {
+      const app = window.trackBuilder;
+      const put = (t, x, y) => { app.arm(t); app.placeAt({ x, y, z: 0 }); app.disarm(); };
+      put('gate', 4.2, 5.2); put('gate', 5.8, 5.2); put('gate', 5.0, 7.0); put('pole', 5.0, 6.0);
+      app.setSelection([]);
+      return 1;
+    })()`);
+    await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    await page.sleep(400);
+    const els = await json(page, "window.trackBuilder.doc.elements.map((e) => ({ id: e.id, type: e.type, x: e.position.x, y: e.position.y }))");
+    const [g1, g2, g3, pole] = els;
+    check('a lap of three gates and a pole is laid down in the order they were placed', (await seqIds(page)).length === 4);
+
+    await key(page, 'KeyO');
+    check('O arms the Fly order tool, and the coach says what a click does now', (await page.evaluate('window.trackBuilder.armed')) === 'route' && /Fly order/.test(await page.evaluate("document.getElementById('tb-coach').textContent")), await page.evaluate("document.getElementById('tb-coach').textContent"));
+    /* With a tool in the hand a press is for the tool: the numbers and the marks let it through. */
+    const lets = () => page.evaluate("(() => { const n = [...document.querySelectorAll('.tb-bubble, .tb-warnbadge')]; return n.length > 0 && n.every((x) => getComputedStyle(x).pointerEvents === 'none'); })()");
+    check('with the tool armed the numbers and marks let a press through to the piece under them', await lets());
+    const stepsS = await undoCount(page);
+    const start = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-lapbar button')].find((x) => x.textContent === 'Start over'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    check('the lap bar has a Start over while there is an order', start != null);
+    check('and nothing that can be pressed floats over the room in the coach, where it would take a tap meant for a piece', (await page.evaluate("document.querySelectorAll('#tb-coach button, #tb-coach a').length")) === 0);
+    await click(page, start.x, start.y);
+    check('Start over empties the order and keeps the pieces, as one undo step', (await seqIds(page)).length === 0 && (await elements(page)).length === 4 && (await undoCount(page)) === stepsS + 1);
+    check('and the tool stays in the hand, with no Start over left to press on an empty order', (await page.evaluate('window.trackBuilder.armed')) === 'route'
+      && !(await page.evaluate("[...document.querySelectorAll('#tb-lapbar button')].some((x) => x.textContent === 'Start over')")));
+
+    const lap = [[g1, 0.4], [g2, 0.4], [pole, 0.9], [g2, 0.4], [g3, 0.4], [pole, 0.9], [g1, 0.4]];
+    const stepsC = await undoCount(page);
+    for (const [piece, z] of lap) {
+      const spot = await screenOf(page, 'view3d', piece.x, piece.y, z);
+      await click(page, spot.x, spot.y);
+      await page.until('!window.trackBuilder.view3d.dirty', 10000);
+    }
+    const order = await json(page, 'window.trackBuilder.doc.sequence.map((q) => q.elementId)');
+    check('seven clicks are seven passes, in the order they were clicked, a piece twice where it was clicked twice', order.join() === lap.map(([p]) => p.id).join(), order.join());
+    check('each click is one undo step', (await undoCount(page)) === stepsC + 7, `${(await undoCount(page)) - stepsC} steps`);
+    const last = await json(page, 'window.trackBuilder.doc.sequence[window.trackBuilder.doc.sequence.length - 1]');
+    check('the last pass made is the one in focus', (await focusOf(page)) === last.id);
+    const bar = await page.evaluate("document.getElementById('tb-lapbar').textContent");
+    check('the lap bar says seven passes on four pieces', /Passes\s*7 on 4 pieces/.test(bar), bar.replace(/\s+/g, ' ').slice(0, 80));
+    const tags = await json(page, `[...document.querySelectorAll('.tb-numtag')].map((t) => t.textContent.replace(/\\s+/g, ''))`);
+    check('four tags, three of them counting two passes', tags.length === 4 && tags.filter((t) => /\u00d72/.test(t)).length === 3, tags.join(' '));
+
+    await key(page, 'Backspace');
+    await page.until('window.trackBuilder.doc.sequence.length === 6', 5000);
+    check('Backspace takes the last pass off, and only it, and the tool stays armed', (await page.evaluate('window.trackBuilder.armed')) === 'route'
+      && (await json(page, 'window.trackBuilder.doc.sequence.map((q) => q.elementId)')).join() === lap.slice(0, 6).map(([p]) => p.id).join());
+    await key(page, 'KeyZ', 2);
+    await page.until('window.trackBuilder.doc.sequence.length === 7', 5000);
+    check('Control Z puts it back', true);
+
+    /* Escape puts the tool away, and a click is then only a selection. */
+    await key(page, 'Escape');
+    check('Escape puts the tool away', (await page.evaluate('window.trackBuilder.armed')) === null);
+    await page.sleep(300);
+    check('and the numbers and marks take a press again', !(await lets()));
+    const spot = await screenOf(page, 'view3d', g3.x, g3.y, 0.4);
+    const stepsE = await undoCount(page);
+    await click(page, spot.x, spot.y);
+    check('and a click on a piece then only selects it', (await page.evaluate(`window.trackBuilder.selection.has('${g3.id}')`)) && (await seqIds(page)).length === 7 && (await undoCount(page)) === stepsE);
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
+    check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+ * THE SAME BY TOUCH, on a tablet: a tap on a chip looks at a pass, the card lists the passes
+ * as chips a finger can press, Fly again is a tap, and the Fly order tool is a tap on its chip
+ * and then a tap on each piece, put away by tapping the chip again because there is no Escape.
+ */
+kase('passes by touch', async () => {
+  const page = await openBuilder('?class=micro', 1024, 768, { touch: true });
+  try {
+    await trapToasts(page);
+    await loadPreset(page, 'racegow5-track8');
+    await page.until('!window.trackBuilder.view3d.dirty', 20000);
+    await page.sleep(700);
+    const facts = await passFacts(page, `
+      const tags = P.tagsOf(doc);
+      const most = tags.reduce((a, t) => (t.passes.length > a.passes.length ? t : a), tags[0]);
+      return { most: { elementId: most.elementId, passes: most.passes.map((p) => ({ seqId: p.seq.id, number: p.number })) } };`);
+    const pole = facts.most;
+    const third = pole.passes[2];
+    const before = await seqIds(page);
+    const steps = await undoCount(page);
+
+    let at = await settled(page, chipOf(third.seqId), { scroll: true });
+    await tap(page, at);
+    await page.until(`window.trackBuilder.selection.has('${pole.elementId}')`, 5000);
+    check('a tap on a chip selects its piece and puts that pass in focus, and is no edit', (await focusOf(page)) === third.seqId && (await undoCount(page)) === steps);
+    const chipSize = await json(page, `[...document.querySelectorAll('.tb-strip .tb-chip')].map((c) => c.getBoundingClientRect().height)`);
+    check('every chip on the strip is a finger tall', chipSize.length === before.length + 1 && chipSize.every((h) => h >= 43.5), `${Math.min(...chipSize)} px at the least`);
+
+    await page.until("!document.getElementById('tb-card').hidden", 5000);
+    const said = await page.evaluate("document.querySelector('#tb-card .tb-card-sub')?.textContent ?? ''");
+    check('the touched card names the pass it is about and says how often the piece is flown, with no row of chips',
+      new RegExp(`Flown 6 times, this is pass ${third.number}`).test(said) && !(await page.evaluate("!!document.querySelector('#tb-card .tb-card-passes')")), said);
+
+    /* Another pass of the piece is a tap on its chip on the strip, and the card turns to it. */
+    const fifth = pole.passes[4];
+    const fifthChip = await settled(page, chipOf(fifth.seqId), { scroll: true });
+    await tap(page, fifthChip);
+    await page.until(`window.trackBuilder.focusedPass() === '${fifth.seqId}'`, 5000);
+    await page.sleep(300);
+    const said2 = await page.evaluate("document.querySelector('#tb-card .tb-card-sub')?.textContent ?? ''");
+    check('a tap on another pass of the piece on the strip turns the card to it', new RegExp(`this is pass ${fifth.number}$`).test(said2), said2);
+
+    /* Remove pass takes just that pass, and one Undo brings it back. */
+    const rp = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === 'Remove pass'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: r.height }; })()`);
+    check('the card has a Remove pass a finger tall', rp != null && rp.h >= 43.5, rp ? `${rp.h} px` : 'no such button');
+    await tap(page, rp);
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length - 1}`, 5000);
+    check('and a tap on it takes that pass out, only that pass, and leaves the piece', (await seqIds(page)).join() === before.filter((q) => q !== fifth.seqId).join() && (await page.evaluate(`!!window.trackBuilder.doc.elements.find((e) => e.id === '${pole.elementId}')`)));
+    await page.evaluate('window.trackBuilder.undo(), 1');
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length}`, 5000);
+    await page.evaluate(`window.trackBuilder.setSelection(['${pole.elementId}']), 1`);
+    await page.sleep(600);
+
+    const fly = await json(page, `(() => { const b = [...document.querySelectorAll('#tb-card button')].find((x) => x.textContent === 'Fly again'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    check('the small bar of the card has Fly again on a touched screen', fly != null);
+    await tap(page, fly);
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length + 1}`, 5000);
+    check('a tap on Fly again makes one more pass through the piece, in focus', (await page.evaluate('window.trackBuilder.doc.sequence.at(-1).elementId')) === pole.elementId && (await page.evaluate('window.trackBuilder.focusedPass() === window.trackBuilder.doc.sequence.at(-1).id')));
+    await page.evaluate('window.trackBuilder.undo(), 1');
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length}`, 5000);
+
+    /* Fly order: the chip on the strip arms it, a tap on a piece is a pass, the chip again puts it away. */
+    await page.evaluate('window.trackBuilder.setSelection([]), 1');
+    await page.sleep(300);
+    const add = await settled(page, '.tb-strip .tb-chip-add', { scroll: true });
+    await tap(page, add);
+    check('a tap on the plus chip arms Fly order', (await page.evaluate('window.trackBuilder.armed')) === 'route' && (await page.evaluate("document.querySelector('.tb-chip-add').classList.contains('on')")));
+    const bar = await json(page, `(() => { const r = document.getElementById('tb-lapbar').getBoundingClientRect(); return r.top; })()`);
+    const gates = await json(page, `window.trackBuilder.doc.elements.filter((e) => e.type === 'gate').map((e) => ({ id: e.id, x: e.position.x, y: e.position.y }))`);
+    /* A gate that a tap on its middle picks as itself, clear of the bar: on a track this
+     * close, a gate's middle can be the body of another piece in front of it. */
+    let aim = null;
+    for (const g of gates) {
+      const p = await screenOf(page, 'view3d', g.x, g.y, 0.4);
+      if (!p || !(p.x > 60 && p.x < 960 && p.y > 140 && p.y < bar - 60)) {
+        continue;
+      }
+      const picked = await page.evaluate(`(() => { const h = window.trackBuilder.view3d.pickHit({ clientX: ${p.x}, clientY: ${p.y}, pointerType: 'touch' }); return h && !h.ring ? h.id : null; })()`);
+      if (picked === g.id) {
+        aim = { g, p };
+        break;
+      }
+    }
+    check('there is a gate in the room to tap, clear of the bar', aim != null);
+    const stepsT = await undoCount(page);
+    await tap(page, aim.p);
+    await page.until(`window.trackBuilder.doc.sequence.length === ${before.length + 1}`, 5000);
+    check('a tap on a piece with the tool armed is one more pass through it, as one undo step, and the tool stays armed',
+      (await page.evaluate('window.trackBuilder.doc.sequence.at(-1).elementId')) === aim.g.id && (await undoCount(page)) === stepsT + 1 && (await page.evaluate('window.trackBuilder.armed')) === 'route');
+    const away = await settled(page, '.tb-strip .tb-chip-add', { scroll: true });
+    await tap(page, away);
+    check('and the plus chip again puts the tool away', (await page.evaluate('window.trackBuilder.armed')) === null);
+    check('no toast the author did not ask for', (await toasts(page)).length === 0, (await toasts(page)).join(' | '));
     check('the page reported no error of its own', ownErrors(page).length === 0, ownErrors(page).join(' | '));
   } finally {
     await page.close();

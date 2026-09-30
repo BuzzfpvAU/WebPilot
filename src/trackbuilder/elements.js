@@ -1378,9 +1378,10 @@ export function labelOf(type, cls = TRACK_CLASS_DEFAULT) {
 
 /*
  * THE WHOOP CANVAS'S TOOLS THAT ARE NOT PIECES. A row of gates is RaceGOW's Side
- * by Side Gates, dragged out along the floor, and the ruler measures between two
- * points. Neither is an element, so they are not in ELEMENTS and not in a
- * document; they are on the palette under their own heading, with keys.
+ * by Side Gates, dragged out along the floor, the ruler measures between two
+ * points, and Fly order adds a pass through the piece that is clicked. None is an
+ * element, so they are not in ELEMENTS and not in a document; they are on the
+ * palette under their own heading, with keys.
  */
 export const WHOOP_TOOLS = [
   {
@@ -1394,6 +1395,12 @@ export const WHOOP_TOOLS = [
     label: 'Ruler',
     key: 'M',
     note: 'Click two points to measure between them, in inches and millimetres. A click near a gate or a pole takes its middle. Nothing is saved with the track.',
+  },
+  {
+    id: 'route',
+    label: 'Fly order',
+    key: 'O',
+    note: 'Click the pieces in the order you fly them. A click on a piece again is another pass through it, which is how a gate is flown twice. Backspace takes the last pass off.',
   },
 ];
 

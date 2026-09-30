@@ -63,7 +63,7 @@ const CLICK_PX = 4;
 
 /* Tools that are not placed with a click on the floor: a road is laid node by
  * node and a vehicle is dropped on a road. Neither is on a whoop palette. */
-const NOT_PLACED = new Set(['road', 'vehicle']);
+const NOT_PLACED = new Set(['road', 'vehicle', 'route']);
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -132,6 +132,12 @@ export class RoomEditor {
     /* The ruler: a click is a point, and a drag looks round, as a tool does. */
     if (h.armed === 'ruler') {
       this.drag = { kind: 'ruler', start: at, last: at, moved: false };
+      return;
+    }
+    /* Fly order: a click on a piece adds a pass through it, and a drag looks round.
+     * What is under the pointer is read at the press, before anything moves it. */
+    if (h.armed === 'route') {
+      this.drag = { kind: 'route', start: at, last: at, moved: false, hit: v.pickHit(e) };
       return;
     }
 
@@ -249,7 +255,7 @@ export class RoomEditor {
       this.showRow(d);
       return;
     }
-    if (d.kind === 'floor' || d.kind === 'place' || d.kind === 'ruler') {
+    if (d.kind === 'floor' || d.kind === 'place' || d.kind === 'ruler' || d.kind === 'route') {
       if (!d.moved && dist(at, d.start) < CLICK_PX) {
         return;
       }
@@ -344,6 +350,10 @@ export class RoomEditor {
       h.placeRow(d.a, d.b);
     } else if (d.kind === 'ruler' && !d.moved) {
       this.rulerClick(e);
+    } else if (d.kind === 'route' && !d.moved) {
+      if (d.hit && d.hit.id && !d.hit.ring) {
+        h.routeTo(d.hit.id, d.hit.point);
+      }
     } else if (d.kind === 'box') {
       h.setSelection(this.idsInBox(d, e), true);
       v.showBox(null);
@@ -488,6 +498,14 @@ export class RoomEditor {
       this.rulerHover(e);
       v.setHover(null);
       v.canvas.style.cursor = 'crosshair';
+      return;
+    }
+    if (h.armed === 'route') {
+      /* The piece a click would fly through lights up, as a piece does under the
+       * pointer when nothing is armed. */
+      const near = v.pickHit(e);
+      v.setHover(near && near.id && !near.ring ? near.id : null);
+      v.canvas.style.cursor = near && near.id ? 'pointer' : '';
       return;
     }
     if (h.armed && !NOT_PLACED.has(h.armed)) {
