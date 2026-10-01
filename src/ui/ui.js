@@ -3862,23 +3862,57 @@ const WAYS = [
     facts: ['No gates', 'No clock', 'Build a map'],
   },
   /*
-   * THE FORK'S WAY IN: inspection training. It seats the caged inspection
-   * aircraft and an inspection world, which is a freestyle world as far as
-   * the rest of the shell is concerned, so the mode is 'freestyle' and the
-   * `inspection` flag is what keeps the gate from treating it as the town.
-   * The tethered aircraft is one press away on the Aircraft row.
+   * THE FORK'S WAYS IN: inspection training, on either aircraft. Each seats
+   * its inspection aircraft and an inspection world, which is a freestyle
+   * world as far as the rest of the shell is concerned, so the mode is
+   * 'freestyle' and the `inspection` flag is what keeps the gate from
+   * treating it as the town.
+   *
+   * They are not on the gate itself. The gate carries one Inspection
+   * training card (INSPECT_CARD below), and choosing it asks the second
+   * question, which aircraft, with these two: `pick` is what keeps them off
+   * the first set of cards. The owner asked for exactly that on 2026-10-01,
+   * the tethered aircraft having been hidden on the Quad screen's Aircraft
+   * row until then. Their pictures are of the machines, not the tank, since
+   * both fly in it: see scripts/gatecards.js.
    */
   {
     id: 'inspect-caged',
     airframe: 'caged',
     mode: 'freestyle',
     inspection: true,
-    label: 'Inspection training',
-    art: 'assets/gate/inspection.jpg',
-    blurb: 'A dark storage tank, flown on an Elios 3 class caged aircraft or a Scout 137 class tethered one. Position hold and your own lights.',
-    facts: ['Assisted', 'Dark tank', 'Cage'],
+    pick: 'inspect',
+    label: 'Caged (Elios 3 class)',
+    art: 'assets/gate/inspect-caged.jpg',
+    blurb: 'A cage half a metre across round 5 inch props. Touch a wall, bounce and keep flying. A 12 minute pack.',
+    facts: ['Cage', 'Battery', '50 cm'],
+  },
+  {
+    id: 'inspect-tethered',
+    airframe: 'tethered',
+    mode: 'freestyle',
+    inspection: true,
+    pick: 'inspect',
+    label: 'Tethered (Scout 137 class)',
+    art: 'assets/gate/inspect-tethered.jpg',
+    blurb: 'Uncaged on 8 inch props, powered down a 30 m tether from a ground station. LiDAR stops it short of a wall, and the cable drags, drapes and snags.',
+    facts: ['Tether', 'LiDAR', '48 cm'],
   },
 ].map((w) => ({ ...w, action: `way-${w.id}` }));
+
+/*
+ * The gate's Inspection training card, which opens the second question
+ * rather than seating anything. The picture is the tank, because on the
+ * gate the place is what tells it apart from the other ways in.
+ */
+const INSPECT_CARD = {
+  id: 'inspect',
+  label: 'Inspection training',
+  art: 'assets/gate/inspection.jpg',
+  blurb: 'A dark storage tank, flown on an Elios 3 class caged aircraft or a Scout 137 class tethered one. Position hold, your own lights, and faults to find and photograph.',
+  facts: ['Assisted', 'Dark tank', 'Two aircraft'],
+  action: 'inspect-pick',
+};
 
 /*
  * THE FOURTH CARD, WHICH MAKES SOMETHING RATHER THAN FLYING IT. The owner
@@ -3911,7 +3945,8 @@ const BUILDER_CARD = {
  * of the seated aircraft is the standing answer. */
 function seatedWay(settings, mode) {
   if (airframeById(settings.airframe).inspection) {
-    return WAYS.find((w) => w.inspection) || WAYS[0];
+    return WAYS.find((w) => w.inspection && w.airframe === settings.airframe)
+      || WAYS.find((w) => w.inspection) || WAYS[0];
   }
   return WAYS.find((w) => w.airframe === settings.airframe && w.mode === (mode || 'race'))
     || WAYS.find((w) => w.airframe === settings.airframe)
@@ -4107,8 +4142,13 @@ export class Ui {
      * renderMenu only re-picks when the cursor has fallen off the list, and
      * zero is a valid row here, so the first paint has to be told.
      */
+    /* Whether the gate is asking its second question, which inspection
+     * aircraft. See INSPECT_CARD. */
+    this.inspectPick = false;
     if (this.craftGate || !this.mode) {
-      const at = WAYS.findIndex((w) => w.id === seatedWay(this.settings, this.mode).id);
+      const way = seatedWay(this.settings, this.mode);
+      const main = WAYS.filter((w) => !w.pick);
+      const at = way.pick ? main.length : main.findIndex((w) => w.id === way.id);
       this.cursor = at >= 0 ? at : 0;
     }
     /* Which course card the player has chosen, by courseCardKey, and the
@@ -6806,17 +6846,34 @@ export class Ui {
        * cards, and every word of it is already on the card in a place that
        * says which of the three it belongs to.
        */
+      const wayCard = (w) => ({
+        label: w.label,
+        card: w.id,
+        art: w.art,
+        svg: craftSvg(airframeById(w.airframe)),
+        blurb: w.blurb,
+        facts: w.facts,
+        action: w.action,
+      });
+      if (this.onGate() && this.inspectPick) {
+        /* The second question: which inspection aircraft. */
+        return [
+          ...WAYS.filter((w) => w.pick === 'inspect').map(wayCard),
+          { label: 'Back', action: 'inspect-back' },
+        ];
+      }
       if (this.onGate()) {
         return [
-          ...WAYS.map((w) => ({
-            label: w.label,
-            card: w.id,
-            art: w.art,
-            svg: craftSvg(airframeById(w.airframe)),
-            blurb: w.blurb,
-            facts: w.facts,
-            action: w.action,
-          })),
+          ...WAYS.filter((w) => !w.pick).map(wayCard),
+          {
+            label: INSPECT_CARD.label,
+            card: INSPECT_CARD.id,
+            art: INSPECT_CARD.art,
+            svg: craftSvg(airframeById('caged')),
+            blurb: INSPECT_CARD.blurb,
+            facts: INSPECT_CARD.facts,
+            action: INSPECT_CARD.action,
+          },
           /* Last of the cards and before the trouble row, which has to
            * come after every card: see the offset note above. */
           {
@@ -9949,6 +10006,7 @@ export class Ui {
     }
     const items = this.items().filter((it) => it.card);
     const key = items.map((it) => it.card).join('|');
+    host.classList.toggle('is-pick', Boolean(this.inspectPick && this.onGate()));
     if (!this.titleCards || this.titleCardKey !== key) {
       this.titleCardKey = key;
       host.textContent = '';
@@ -12138,9 +12196,9 @@ export class Ui {
   titleStop() {
     const items = this.items();
     if (this.onGate()) {
-      const at = items.findIndex(
-        (it) => it.action === seatedWay(this.settings, this.mode).action,
-      );
+      const way = seatedWay(this.settings, this.mode);
+      const want = way.pick && !this.inspectPick ? INSPECT_CARD.action : way.action;
+      const at = items.findIndex((it) => it.action === want);
       if (at >= 0) {
         return at;
       }
@@ -14651,7 +14709,7 @@ export class Ui {
     if (this.screen === 'courses' && !pad) {
       out.push({ keys: ['Double click'], text: 'Fly' });
     }
-    if (this.screen !== 'title') {
+    if (this.screen !== 'title' || (this.onGate() && this.inspectPick)) {
       out.push({ keys: [pad ? 'B' : 'Esc'], text: 'Back' });
     } else if (!this.onGate()) {
       /* NOT ON THE GATE. The gate is the root and Escape does nothing
@@ -15075,6 +15133,17 @@ export class Ui {
     return true;
   }
 
+  /* Open or close the gate's second question, which inspection aircraft,
+   * with the cursor on the card that answers it. */
+  answerInspectPick(open) {
+    this.inspectPick = open;
+    if (this.onUiSound) {
+      this.onUiSound(open ? 'select' : 'back');
+    }
+    this.setCursor(this.titleStop());
+    this.renderMenu();
+  }
+
   back() {
     if (this.dropEl) {
       this.closeDrop();
@@ -15097,6 +15166,11 @@ export class Ui {
        * gate is open: see the comment there.
        */
       if (this.onGate()) {
+        /* Out of the inspection pick to the gate's own cards; on the gate's
+         * own cards, nothing. */
+        if (this.inspectPick) {
+          this.answerInspectPick(false);
+        }
         return;
       }
       this.craftGate = true;
@@ -15245,6 +15319,10 @@ export class Ui {
      * pictures. See BUILDER_CARD. */
     if (action === 'builder') {
       window.location.href = 'src/trackbuilder/index.html';
+      return;
+    }
+    if (action === 'inspect-pick' || action === 'inspect-back') {
+      this.answerInspectPick(action === 'inspect-pick');
       return;
     }
 
@@ -15496,6 +15574,7 @@ export class Ui {
       }
       this.settings.airframeAsked = true;
       this.craftGate = false;
+      this.inspectPick = false;
       this.mode = way.mode;
       saveSettings(this.settings);
       /* The shell has to hear this before anything is flown: it is the

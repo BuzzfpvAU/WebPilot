@@ -88,6 +88,10 @@ export const TANK = {
   /* Between the centre column (0.3 m) and the heating coil (4.6 m), on the
    * floor, facing the column. */
   spawn: { x: 0, z: 3.0, yaw: 0 },
+  /* The tethered aircraft's ground station, on the floor a metre behind
+   * the spawn, and the cable it pays out, metres. */
+  station: { x: 0.7, z: 4.0, w: 0.45, d: 0.35, h: 0.30 },
+  tetherLength: 30,
 };
 
 /* A canvas texture of rolled steel plate: a mill scale ground, rust
@@ -399,6 +403,11 @@ function buildColliders(T, hw) {
     const a = la + side * (0.22 / lr);
     col.add('pole', lr * Math.cos(a), 0, lr * Math.sin(a), lr * Math.cos(a), T.height - 0.5, lr * Math.sin(a), 0.03);
   }
+  /* The tether's ground station: a case on the floor. */
+  {
+    const st = T.station;
+    col.addBox('obstacle', st.x - st.w / 2, 0, st.z - st.d / 2, st.x + st.w / 2, st.h, st.z + st.d / 2);
+  }
   /* The schoepentoeter, the manway and the support legs (hardware.js). */
   for (const b of hw.boxes) {
     col.addBox('pole', b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z);
@@ -560,6 +569,69 @@ function blockedFor(T) {
   };
 }
 
+/*
+ * The tether's ground station and its cable, drawn. The cable's shape is
+ * the plant's (src/native/tether.c), handed over each frame by the shell
+ * through setTether; this only draws it, as forty short cylinders between
+ * its points, in the high visibility yellow these cables are made in.
+ */
+function tetherVisuals(scene, T) {
+  const st = T.station;
+  const caseMat = new THREE.MeshStandardMaterial({ color: 0x2a2d31, roughness: 0.6, metalness: 0.2 });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(st.w, st.h, st.d), caseMat);
+  box.position.set(st.x, st.h / 2, st.z);
+  scene.add(box);
+  const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.12, 24),
+    new THREE.MeshStandardMaterial({ color: 0x444a52, roughness: 0.5, metalness: 0.6 }));
+  reel.rotation.z = Math.PI / 2;
+  reel.position.set(st.x, st.h + 0.11, st.z);
+  scene.add(reel);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 6), new THREE.MeshBasicMaterial({ color: 0x55ff88 }));
+  lamp.position.set(st.x + st.w * 0.35, st.h + 0.01, st.z - st.d * 0.4);
+  scene.add(lamp);
+  const anchor = new THREE.Vector3(st.x, st.h + 0.22, st.z);
+  const SEGS = 40;
+  const cableMat = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.55, metalness: 0.05 });
+  const cable = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 6, 1, true), cableMat, SEGS);
+  cable.frustumCulled = false;
+  cable.visible = false;
+  cable.userData.noRay = true;
+  scene.add(cable);
+  const Y = new THREE.Vector3(0, 1, 0);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const mid = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const sc = new THREE.Vector3();
+  const R = 0.006;
+  return {
+    anchor,
+    tension: 0,
+    set(pts, tension) {
+      if (!pts) {
+        cable.visible = false;
+        this.tension = 0;
+        return;
+      }
+      for (let i = 0; i < SEGS; i += 1) {
+        dir.subVectors(pts[i + 1], pts[i]);
+        const len = dir.length();
+        mid.addVectors(pts[i], pts[i + 1]).multiplyScalar(0.5);
+        if (len > 1e-6) {
+          q.setFromUnitVectors(Y, dir.multiplyScalar(1 / len));
+        }
+        /* A slack segment is shorter than its share: coiled cable. Drawn a
+         * little fatter so a pile on the floor reads as a pile. */
+        m.compose(mid, q, sc.set(R, Math.max(len, 0.002), R));
+        cable.setMatrixAt(i, m);
+      }
+      cable.instanceMatrix.needsUpdate = true;
+      cable.visible = true;
+      this.tension = Number.isFinite(tension) ? tension : 0;
+    },
+  };
+}
+
 export async function buildMap(shell, onProgress, options) {
   const progress = onProgress ?? (() => {});
   const opts = options || {};
@@ -600,6 +672,7 @@ export async function buildMap(shell, onProgress, options) {
   await yieldToPaint();
 
   const colliders = buildColliders(T, hw);
+  const tether = tetherVisuals(scene, T);
   /* What can stand between a camera and a defect, or stop a photo's ray
    * short of the shell: every solid built so far but the shell, floor and
    * roof (a ray from inside never crosses them before its end), the beads
@@ -891,6 +964,14 @@ export async function buildMap(shell, onProgress, options) {
     updateAnim() {},
     egg: null,
     marks: [],
+    /* The tethered aircraft's ground station: where the cable starts, Three.js
+     * frame, and how long it is. main.js hands both to the plant. */
+    tether: { anchor: tether.anchor.clone(), length: T.tetherLength },
+    /* The cable's points from the plant, Three.js frame, or null for none. */
+    setTether(pts, tension) {
+      tether.set(pts, tension);
+    },
+    tetherTension: () => tether.tension,
     gaps: [],
     /* The inspection controls the shell drives (src/game/inspection.js): the
      * lights on the aircraft. level is 0 to 1 of `lumens`, the airframe's. */

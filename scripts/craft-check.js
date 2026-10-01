@@ -68,14 +68,24 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
  *   whoop65   a 65 mm whoop: 65 mm motor to motor across the
  *             diagonal, 82.6 mm square over the ducts, 23.4 g.
  *
+ *   caged     an Elios 3 class caged aircraft: the project's class figure,
+ *             a 50 by 50 by 45 cm cage (INSPECTION.md, plant.c), and a cage
+ *             is round, so its sweep is its span.
+ *   tethered  a Scout 137 class aircraft, 448 by 479 by 262 mm published;
+ *             8 inch props 120 mm out on each axis are its outside, so the
+ *             span is the 448 and the sweep the diagonal prop tip.
  * `spanMm` is the AXIS ALIGNED width, two ducts about two motors, which is
  * the figure a manufacturer prints; `sweepMm` is the diagonal reach, which
  * is what a collider sweeps. They are different numbers about one machine
  * and both are checked.
  */
 const REAL = {
-  '5inch': { spanMm: 282.6, sweepMm: 347.0, tolMm: 6 },
-  whoop65: { spanMm: 82.6, sweepMm: 101.2, tolMm: 3 },
+  '5inch': { spanMm: 282.6, sweepMm: 347.0, tolMm: 6, wheelbaseMm: 220 },
+  whoop65: { spanMm: 82.6, sweepMm: 101.2, tolMm: 3, wheelbaseMm: 65 },
+  /* Wheelbase, motor to motor across the diagonal, from plant.c's motor
+   * positions: 85 and 120 mm out on each axis. */
+  caged: { spanMm: 500, sweepMm: 500, tolMm: 6, wheelbaseMm: 240.4 },
+  tethered: { spanMm: 448, sweepMm: 542.6, tolMm: 6, wheelbaseMm: 339.4 },
 };
 
 /* Measure the drawn model, in the craft's own frame, from its vertices. */
@@ -244,7 +254,11 @@ async function main() {
     const k = af.trackClass === 'micro' ? MICRO_SCALE : 1;
     near(`${af.id}: swept radius vs drawn`, r.craftRadiusTrue * 1000, drawnReach * k, real.tolMm * k);
     near(`${af.id}: hull up vs drawn`, r.craftUpTrue * 1000, drawnUp * k, real.tolMm * k);
-    if (af.id === '5inch') {
+    if (af.inspection) {
+      /* The inspection aircraft are modelled to their own plant hulls
+       * (src/render/inspectcraft.js), so down is held like up. */
+      near(`${af.id}: hull down vs drawn`, r.craftDownTrue * 1000, drawnDown, real.tolMm);
+    } else if (af.id === '5inch') {
       pinned(`${af.id}: hull down vs drawn`, r.craftDownTrue * 1000, drawnDown, 15.0,
         'the plant parks it 15 mm under the model, see the note above');
     } else {
@@ -280,7 +294,7 @@ async function main() {
      */
     near(`${af.id}: wheelbase`,
       (af.id === 'whoop65' ? WHOOP_TRUE_DIMS.arm : dims.arm) * 2000,
-      af.id === 'whoop65' ? 65 : 220, 0.5);
+      real.wheelbaseMm, 0.5);
   }
 
   const w = Math.max(...rows.map((r) => r.id.length));

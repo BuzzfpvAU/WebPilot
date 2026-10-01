@@ -857,6 +857,10 @@ export function createInspection({ sim, notify, input, onControls }) {
     if (state.af.enduranceS > 0) {
       const left = state.af.enduranceS - state.flightS;
       lines.push(`BATTERY   ${left > 0 ? fmtClock(left) : 'LAND NOW'}`);
+    } else if (view && typeof view.tetherTension === 'function' && view.tether) {
+      /* The cable's pull at the aircraft, from the plant (tether.c): what a
+       * tether station's tension readout shows. */
+      lines.push(`TETHER    ${view.tether.length} m  pull ${view.tetherTension().toFixed(1)} N`);
     } else {
       lines.push('POWER     tether');
     }

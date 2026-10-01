@@ -180,6 +180,35 @@ const SHOTS = [
      * the train is where it is every time this is regenerated. */
     anim: 14125,
   },
+  /*
+   * THE INSPECTION PICK'S TWO, which are pictures of MACHINES and not of a
+   * place. Inspection training opens a second pair of cards, caged or
+   * tethered, and both fly in the same tank, so the place says nothing
+   * there and the aircraft says everything. The tank is also dark but for
+   * the aircraft's own lights, which point away from it, so a frame of the
+   * aircraft in the tank is a frame of a black shape. So these are the Quad
+   * screen's own studio view (src/render/showcase.js) of each model, its
+   * canvas made the whole window: the real renderer, the real model.
+   */
+  ...['caged', 'tethered'].map((id) => ({
+    name: `inspect-${id}`,
+    args: [`--airframe=${id}`],
+    steps: [
+      'eval:window.__ui.show("quad"), "quad"',
+      'until:window.__screen === "quad"',
+      `eval:(() => {
+        const c = document.querySelector('.craft-view');
+        c.style.cssText += ';position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:9999;border-radius:0';
+        document.querySelectorAll('.craft-caption, .hint, .frame-top, .frame-bot, .bug-chip, .music-dock')
+          .forEach((n) => { n.style.display = 'none'; });
+        window.__gateFrame = window.__boot().frames;
+        return 'studio';
+      })()`,
+      /* The showcase turns the model slowly; a few seconds lets the resize
+       * land and puts the model three quarters on. */
+      'until:window.__boot().frames > window.__gateFrame + 30',
+    ],
+  })),
 ];
 
 /*
@@ -274,7 +303,11 @@ const wanted = asked.length ? asked : ALL;
 const out = await mkdtemp(join(tmpdir(), 'webfpv-gatecards-'));
 try {
   for (const shot of SHOTS.filter((s) => wanted.includes(s.name))) {
-    const steps = [
+    const steps = shot.steps ? [
+      'until:!!window.__boot && window.__boot().frames > 2',
+      ...shot.steps,
+      `shot:${shot.name}`,
+    ] : [
       'until:!!window.__boot && window.__boot().frames > 2',
       `eval:(() => { ${hide} })()`,
       ...(shot.anim == null ? [] : [`eval:(window.__animTo(${shot.anim}), 'anim')`]),

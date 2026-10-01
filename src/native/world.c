@@ -3140,6 +3140,95 @@ void world_step(SimState *s, int ground_on, const double gn[3], double gd) {
  * the distance is from the point to the surface, never negative (a point
  * inside a solid reports 0 with the nearest face's normal).
  * ------------------------------------------------------------------ */
+/*
+ * One node of the tether cable (tether.c) against the static shapes: a
+ * sphere of radius r at p, plant frame, pushed out of every box and capsule
+ * it is inside, one after another. Writes the sum of the pushes' unit
+ * normals (plant frame, not normalised) and returns how many shapes pushed
+ * it. Moving shapes are not tested: a cable over a train is not a case
+ * this tank has. Read only apart from the broadphase's dedupe stamp, which
+ * nothing physical reads.
+ */
+int world_tether_push(double p_plant[3], double r, double n_plant[3]) {
+  n_plant[0] = 0.0;
+  n_plant[1] = 0.0;
+  n_plant[2] = 0.0;
+  if (!world_active()) {
+    return 0;
+  }
+  double p[3];
+  plant_to_world_pos(p_plant, p);
+  const int nc = world_gather(p[0] - r, p[1] - r, p[0] + r, p[1] + r);
+  int pushed = 0;
+  double acc[3] = { 0.0, 0.0, 0.0 };
+  for (int c = 0; c < nc; c += 1) {
+    const Shape *sh = &g_shape[g_cand[c]];
+    double n[3] = { 0.0, 0.0, 0.0 };
+    double depth = 0.0;
+    if (sh->type == SHAPE_BOX) {
+      int inside = 1;
+      for (int k = 0; k < 3; k += 1) {
+        if (!(p[k] > sh->lo[k] - r && p[k] < sh->hi[k] + r)) {
+          inside = 0;
+        }
+      }
+      if (!inside) {
+        continue;
+      }
+      /* Out through the nearest face of the box grown by r. */
+      double g = 1e300;
+      int face = 0;
+      for (int k = 0; k < 3; k += 1) {
+        const double dl = p[k] - (sh->lo[k] - r);
+        const double dh = (sh->hi[k] + r) - p[k];
+        if (dl < g) {
+          g = dl;
+          face = 2 * k;
+        }
+        if (dh < g) {
+          g = dh;
+          face = 2 * k + 1;
+        }
+      }
+      n[face / 2] = face % 2 == 0 ? -1.0 : 1.0;
+      depth = g;
+    } else {
+      const double ab[3] = { sh->b[0] - sh->a[0], sh->b[1] - sh->a[1], sh->b[2] - sh->a[2] };
+      const double ap[3] = { p[0] - sh->a[0], p[1] - sh->a[1], p[2] - sh->a[2] };
+      const double l2 = dot3(ab, ab);
+      double t = l2 > 1e-18 ? dot3(ap, ab) / l2 : 0.0;
+      t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+      const double dv[3] = { p[0] - sh->a[0] - t * ab[0], p[1] - sh->a[1] - t * ab[1],
+                             p[2] - sh->a[2] - t * ab[2] };
+      const double d = sim_sqrt(dot3(dv, dv));
+      if (!(d < sh->r + r)) {
+        continue;
+      }
+      if (d > 1e-9) {
+        n[0] = dv[0] / d;
+        n[1] = dv[1] / d;
+        n[2] = dv[2] / d;
+      } else {
+        n[2] = 1.0;
+      }
+      depth = sh->r + r - d;
+    }
+    p[0] += n[0] * depth;
+    p[1] += n[1] * depth;
+    p[2] += n[2] * depth;
+    acc[0] += n[0];
+    acc[1] += n[1];
+    acc[2] += n[2];
+    pushed += 1;
+  }
+  if (pushed) {
+    const double rel[3] = { p[0] - g_org[0], p[1] - g_org[1], p[2] - g_org[2] };
+    world_to_plant_dir(rel, p_plant);
+    world_to_plant_dir(acc, n_plant);
+  }
+  return pushed;
+}
+
 int world_proximity(const double p_plant[3], double reach, double n_out[][3],
                     double d_out[], int max) {
   if (!world_active() || max <= 0 || !(reach > 0.0)) {

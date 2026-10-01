@@ -62726,3 +62726,73 @@ Asked in the conversation and answered by the owner, "Approve, all now", on 2026
 Same request, no approval needed (shell and render only): 3D models for both aircraft (an Elios 3 class
 geodesic cage, a Scout 137 class uncaged quad with LiDAR and lights), the cable drawn, a caged or tethered choice
 on Inspection training, and both shown with pictures where a quad is chosen.
+
+## 2026-10-01 | inspection | The two aircraft: models, a pick on the gate, and the tether in the plant
+
+The owner asked for a caged drone like the Elios 3 and a tethered one like the Scout 137 when choosing the
+quad. Asked first, the owner chose all four of: proper 3D models, a visible cable, a caged or tethered pick on
+Inspection training, both shown with pictures where a quad is chosen; and full cable physics, approved as the
+entry above records, "all now".
+
+- Coverage first (the owner's condition): scripts/plant-golden.js pins the caged and tethered aircraft, three runs
+  each (free air acro; an assisted takeoff, hold, run, stop and sliding landing on grass; a wall contact through
+  sim_contact_at), committed and green before any plant change. Their configs are their tunes plus their rates
+  from configs/airframes.js. The selftest first went red: the new grounded runs lifted straight off and never slid,
+  so grass friction was not in their traces. They were made to land drifting rather than the selftest touched.
+- src/native/tether.c (new), world.c (world_tether_push), sim.c (step, lay on reset and pose), sim_abi.h
+  (sim_set_tether, sim_tether_state, SIM_TETHER_SEGS 40), build-wasm.sh. Position based: gravity and implicit
+  quadratic drag on the nodes, 12 projection passes holding each segment to its share and each node within its
+  length of cable from the anchor, the aircraft's end weighted by its mass; nodes pushed out of the floor and the
+  static shapes after the projection, a touching node keeping 0.85 of its sliding speed; what the projection moved
+  the aircraft's end by is applied to its position, velocity and, through the attach point 120 mm behind the CG,
+  its rates. Refused for any airframe but the tethered one. 25 g/m, 5 mm, Cd 1.2.
+- Cost, measured in Node in a tank of 240 wall capsules: 5 us a step off, 69 us with two collision passes, 36 us
+  with one, which changed nothing check:tether sees. About 0.6 ms of a 60 fps frame on this machine.
+- scripts/tether-check.js (new, npm run check:tether), every band chosen before its first run.
+- Shell: main.js syncTether on every run, world and aircraft, drawTether each flight frame; the tank has a ground
+  station (a solid case, anchor at its reel, 30 m), draws the cable as forty yellow cylinders, and the panel shows
+  the pull. src/render/inspectcraft.js (new): a geodesic cage round 5 inch props, LiDAR and a lit nose; an uncaged
+  quad on 8 inch push props with skids, a LiDAR mast, light bars and the tether boss. craft.js craftBuilderFor.
+- Gate: Inspection training is one card that asks which aircraft with two cards (Esc or Back returns); pictures
+  are the Quad screen's studio view of each model (scripts/gatecards.js, two new shots). Two cards are capped at a
+  four card width.
+- scripts/craft-check.js crashed before it measured anything (no real sizes for the inspection aircraft, since
+  they were added). It has them now, the project's class figures, a per aircraft wheelbase from plant.c's motor
+  positions, and down held like up for models built to their hulls. configs/airframes.js: the tethered arm is
+  0.1697, plant.c's 120 mm a side, not 0.170, which the 0.5 mm wheelbase band caught.
+
+### What went wrong
+
+- First golden wall run: the autopilot holds a craft posed in the air as landed, so it fell 40 m. It takes off now.
+- The first snag check would not have wrapped anything; redesigned so the hanging cable sweeps across the column.
+- gatecards.js exits 1 here on a refused local request that every card would hit; the two pictures were made with
+  the same steps through shots.js directly.
+- The cable is unlit wherever the aircraft's lights are not, which is true and makes it hard to photograph.
+
+### Measured, not judged
+
+- Snag: pushed sideways against the caught cable the aircraft swings round on it and is still creeping at 0.26
+  m/s after 14 s, inside the 0.3 band set before the run. Plausible, and a pilot should judge it.
+
+### RUN LOG
+
+    build                    emsdk 3.1.61; the untouched tree rebuilt byte identical to the committed sim.wasm
+                             (e8b2cd3f); vendor/betaflight diff empty before and after
+    verify                   npm run verify: 18 of 18, exit 0, trace de0401cd4266 (unchanged: the replay has no
+                             cable, and the off path must be bit identical), Node and Chrome equal, 4 rates equal
+    goldens                  check:plant 35 scenarios all passed, selftest all passed (18 grounded, 22 throttle);
+                             check:world-golden all passed; both with the cable built in and off
+    check:tether             all passed: refused on 5inch and caged; hover height wander 0.010 m, horizontal
+                             0.002 m, mean pull 0.616 N, cable never under the floor; 6 m cable held at 6.000 m,
+                             speed 0.011 m/s; snag 24 points touching, held at 4.651 m of 6, 0.261 m/s; two runs
+                             identical
+    check:inspection         all passed, before and after the arm correction
+    check:craft              40 of 40 (it could not run at all before this)
+    lints                    lint:preload regenerated (246 served); lint:nouns PASS; lint:boot 9 of 9;
+                             lint:responsive PASS; lint:shell 1 problem, the credits overflow recorded above as
+                             identical on upstream
+    browser                  shots.js: gate shows five cards, Inspection training opens Caged and Tethered, Esc
+                             returns to five, Tethered seats the tethered aircraft in the tank; the Quad screen
+                             shows each model; the tethered aircraft flies with the cable drawn and the panel
+                             reading TETHER 30 m pull 0.2 to 0.4 N; no frame fault
+    not run                  nobody has flown the cable or the models; feel awaits the owner

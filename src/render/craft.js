@@ -33,6 +33,7 @@
 import { CRAFT_ARM, CRAFT_PROP_R, CRAFT_HULL_R } from '../game/collide.js';
 import { buildHeroCraft } from './herocraft.js';
 import { buildWhoopCraft } from './whoopcraft.js';
+import { buildCagedCraft, buildTetheredCraft } from './inspectcraft.js';
 import { airframeById } from '../../configs/airframes.js';
 
 /*
@@ -88,6 +89,21 @@ export const CRAFT_DIMS = {
  * name; this is what craftDims reports against in between. */
 let currentCraftId = '5inch';
 
+/* Which builder draws an aircraft: one file per silhouette. The two
+ * inspection aircraft are src/render/inspectcraft.js. */
+export function craftBuilderFor(id) {
+  if (id === 'whoop65') {
+    return buildWhoopCraft;
+  }
+  if (id === 'caged') {
+    return buildCagedCraft;
+  }
+  if (id === 'tethered') {
+    return buildTetheredCraft;
+  }
+  return buildHeroCraft;
+}
+
 export function buildCraft(airframeId = '5inch') {
   /*
    * The airframe is MODELLED at its true size and DRAWN at 1/WORLD_SCALE of
@@ -103,7 +119,7 @@ export function buildCraft(airframeId = '5inch') {
    * builder. See src/render/whoopcraft.js.
    */
   currentCraftId = airframeById(airframeId).id;
-  const build = currentCraftId === 'whoop65' ? buildWhoopCraft : buildHeroCraft;
+  const build = craftBuilderFor(currentCraftId);
   return build({
     name: 'craft',
     fog: true,

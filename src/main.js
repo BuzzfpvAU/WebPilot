@@ -112,7 +112,7 @@ import { MAP_PRELOAD } from './maps/preload.js';
 import { TUNES, tuneById, tunePath } from '../configs/registry.js';
 import { airframeById, simIdFor } from '../configs/airframes.js';
 import { createInspection } from './game/inspection.js';
-import { buildWhoopCraft } from './render/whoopcraft.js';
+import { craftBuilderFor } from './render/craft.js';
 import { hoverStickPercent, normaliseRates, ratesAreDefault, ratesDiff, ratesSummary, TOUCH_RATE_DEFAULTS } from '../configs/rates.js';
 import { clearPidsFor, PID_AXES, pidCliKey, pidsDiffFor, SLIDER_KEYS, SLIDERS } from '../configs/pids.js';
 import { cliMap, composeConfig, FC_DUMP_KEY, FC_DUMP_AIRFRAME_KEY, moduleDump, moduleGet, RATES_KEEP, ratesFromDump, tuneBody } from './fc/dump.js';
@@ -4350,6 +4350,57 @@ export async function boot({ loading, bootStart, mapId }) {
     }
   }
 
+  /*
+   * THE TETHER (src/native/tether.c): on for the tethered aircraft in a
+   * world that has a ground station for it (view.tether, Three.js frame),
+   * off for everything else. The plant lays the cable out afresh on every
+   * reset and teleport by itself; this only says whether there is one and
+   * where it starts. Called on every run, on a new world and on a new
+   * aircraft. Guarded, because an older dist/sim.wasm has no cable.
+   */
+  const tetherBuf = { ptr: 0 };
+  const tetherSim = new THREE.Vector3();
+  function syncTether() {
+    if (typeof sim.e.sim_set_tether !== 'function') {
+      return;
+    }
+    const t = view && view.tether;
+    if (t && runAirframe === 'tethered') {
+      worldPosToSim(t.anchor.x, t.anchor.y, t.anchor.z, tetherSim);
+      sim.e.sim_set_tether(1, tetherSim.x, tetherSim.y, tetherSim.z, t.length);
+    } else {
+      sim.e.sim_set_tether(0, 0, 0, 0, 1);
+    }
+    if (view && typeof view.setTether === 'function' && !(t && runAirframe === 'tethered')) {
+      view.setTether(null);
+    }
+  }
+  /* The cable as the plant has it, into the world, for the map to draw. */
+  const TETHER_POINTS = 41;
+  const tetherPts = Array.from({ length: TETHER_POINTS }, () => new THREE.Vector3());
+  function drawTether() {
+    if (!view || typeof view.setTether !== 'function' || typeof sim.e.sim_tether_state !== 'function') {
+      return;
+    }
+    if (!tetherBuf.ptr) {
+      tetherBuf.ptr = sim.e.malloc((3 * TETHER_POINTS + 3) * 8);
+    }
+    const n = sim.e.sim_tether_state(tetherBuf.ptr);
+    if (n !== TETHER_POINTS) {
+      view.setTether(null);
+      return;
+    }
+    const d = new Float64Array(sim.e.memory.buffer, tetherBuf.ptr, 3 * TETHER_POINTS + 3);
+    for (let i = 0; i < TETHER_POINTS; i += 1) {
+      simPosToThree(d[3 * i], d[3 * i + 1], d[3 * i + 2] + SPAWN_ALT, tetherPts[i]);
+      tetherPts[i].applyQuaternion(qSpawn);
+      tetherPts[i].x += startX;
+      tetherPts[i].y += startY;
+      tetherPts[i].z += startZ;
+    }
+    view.setTether(tetherPts, d[3 * TETHER_POINTS]);
+  }
+
   function reset() {
     /* A reset is the pilot taking the offer the fault banner made, so the
      * next fault is a new one and deserves to be reported in its turn. See
@@ -4405,6 +4456,7 @@ export async function boot({ loading, bootStart, mapId }) {
      * spawn adoptSpawn just set.
      */
     resetCraft(null);
+    syncTether();
     race.reset();
     /* A new run starts quiet: last run's final lap is not called over it. */
     lapVoice.stop();
@@ -4471,6 +4523,7 @@ export async function boot({ loading, bootStart, mapId }) {
   function adoptLoadedView(keepPlace, stayMode, stayScreen) {
     /* A new view is a new set of solids, whether or not the place is kept. */
     uploadPlantWorld();
+    syncTether();
     /* And a new GPU cost: the old world's average says nothing about this
      * one's. See reset in gpugate.js. */
     gpuGate.reset(true);
@@ -5286,6 +5339,7 @@ export async function boot({ loading, bootStart, mapId }) {
          * craft is session lived and the world is not.
          */
         syncCraftScale();
+        syncTether();
         /*
          * AND THE TRACK, because the seats are one per class and the new one
          * may be empty. A pilot who chooses the whoop having never built a
@@ -8975,7 +9029,7 @@ export async function boot({ loading, bootStart, mapId }) {
         showcaseCraft = runAirframe;
         showcase = createShowcase(ui.craftCanvas, {
           sweep: af.dims.arm + (af.dims.hullR ?? af.dims.propR),
-          build: af.id === 'whoop65' ? buildWhoopCraft : undefined,
+          build: af.id === '5inch' ? undefined : craftBuilderFor(af.id),
         });
         if (showcase.failed) {
           ui.setCraftCaption('The 3D preview could not start.');
@@ -9196,6 +9250,7 @@ export async function boot({ loading, bootStart, mapId }) {
         ghostGapMs: ghostGap && nowWall < ghostGap.untilWall ? ghostGap.deltaMs : null,
         ghostFinal: Boolean(ghostGap && ghostGap.final),
       });
+      drawTether();
       inspection.frame({
         view,
         flight: true,

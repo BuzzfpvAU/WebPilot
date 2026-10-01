@@ -15,8 +15,14 @@ simulator or endorses it.
 
     npm run serve        # then open http://127.0.0.1:8000/
 
-On the title screen choose **Inspection training**. That seats the caged aircraft in
-the storage tank. The tethered aircraft is on the **Aircraft** row of the Quad screen.
+On the title screen choose **Inspection training**, then the aircraft: **Caged (Elios 3
+class)** or **Tethered (Scout 137 class)**. Either is seated in the storage tank. Both are
+also on the **Aircraft** row of the Quad screen, whose preview shows the model.
+
+The tethered aircraft flies on a 30 m cable from a ground station on the floor behind the
+spawn. The cable is physics, not a picture: it weighs on the aircraft, drags, drapes over
+the coil, wraps the column and the schoepentoeter, and holds the aircraft back when it is
+snagged or all paid out. The panel shows its pull at the aircraft.
 
 | Control | Position mode | ATTI mode |
 |---|---|---|
@@ -112,6 +118,13 @@ Where every number comes from, published or derived, is written beside it in
 - **The defects** are `src/maps/tank/defects.js`: placed on those seams and bolts from a
   seed, drawn, and asked after each photo which ones its frame shows.
 - **The shell's part** (keys, lights, panel) is `src/game/inspection.js`.
+- **The tether** is `src/native/tether.c`, in the plant at 1 kHz: 40 segments from the
+  ground station's anchor to the aircraft's tail, gravity, air drag, a fixed length,
+  collision with every static shape and the floor, and its pull applied to the aircraft.
+  Off for every other aircraft, and an aircraft with no cable steps bit identically to
+  before. `npm run check:tether` flies hover, length, snag, floor and repeatability.
+- **The models** are `src/render/inspectcraft.js`, each built inside its plant hull;
+  `npm run check:craft` measures them.
 
 `npm run check:inspection` flies both aircraft headless through takeoff, holds, full
 stick runs and stops, ATTI drift, flat and curved wall contacts and the virtual cage,
