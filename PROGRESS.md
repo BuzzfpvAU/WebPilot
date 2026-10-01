@@ -62608,3 +62608,22 @@ export, for now).
                              4 bound as tilt, button 2 as the shutter; the dial at -0.5 set -45 deg and the
                              button took a photo. Not tried on a real radio or gamepad.
     not run                  npm run verify: no physics, plant, ABI or build change
+
+## 2026-10-01 | inspection | The page would not start with the tethered aircraft seated
+
+The owner reported from the deployed site, Chrome 154 on Windows: "WebFPV failed to start: collide: hullR 0.07
+is inside propR 0.1016". The tethered aircraft's `dims.hullR` in configs/airframes.js was 0.07 against an 8 inch
+prop's 0.1016, and setCraftAirframe in src/game/collide.js throws on a hull inside the blade. A browser that
+had the tethered aircraft stored therefore failed at boot. Every browser run this day seated the caged aircraft
+only; the tethered one was flown headless, which never reaches collide.js. That is the gap, and it is closed two
+ways: hullR is 0.1016 (arm plus blade 0.272 m, the frame's own envelope: the props are its outside), and
+check:inspection now bands hullR minus propR at zero or more for both inspection aircraft, in Node.
+
+### RUN LOG
+
+    browser                  shots.js with the tethered aircraft seated: boots with no frame fault, takes off,
+                             pushed full forward at the centre column the virtual cage held it at 0.51 to
+                             0.52 m, camera tilted to -37 and a photo graded GOOD at 0.92 m
+    check:inspection         all passed, the new dims band included
+    not run                  npm run verify: no physics, plant, ABI or build change (dims are the shell's
+                             collider and drawing, not the plant's hull, which is plant.c's)

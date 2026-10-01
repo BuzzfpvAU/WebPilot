@@ -303,6 +303,10 @@ for (const id of ['caged', 'tethered']) {
   const diff = await readFile(join(root, `configs/${af.defaultTune}.diff`), 'utf8');
   const m = diff.match(/^set angle_limit = (\d+)$/m);
   console.log(`\n${af.name}, tune`);
+  /* src/game/collide.js refuses a hull inside the blade, at page start, so
+   * a seated aircraft whose dims break it is a page that will not open.
+   * That shipped once (PROGRESS.md 2026-10-01): held here, in Node. */
+  band('dims.hullR minus dims.propR (collide.js needs >= 0)', af.dims.hullR - af.dims.propR, 0, 1, 'm');
   band('angle_limit in the diff minus assist.angleLimit', (m ? Number(m[1]) : NaN) - af.assist.angleLimit, 0, 0, 'deg');
   await position(af);
   await atti(af);

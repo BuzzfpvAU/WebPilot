@@ -562,7 +562,11 @@ export const AIRFRAMES = [
     dims: {
       arm: 0.170,
       propR: 0.1016,
-      hullR: 0.07,
+      /* The props are the outside of this aircraft: arm plus blade is
+       * 0.272 m, the frame's own 448 by 479 mm envelope. collide.js refuses
+       * a hull inside the blade, which 0.07 was, and the page would not
+       * start with this aircraft seated. */
+      hullR: 0.1016,
       vHalfDown: 0.12,
       vHalfUp: 0.142,
       bodyLength: 0.448,
