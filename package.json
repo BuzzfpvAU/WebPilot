@@ -32,6 +32,7 @@
     "check:plant": "node scripts/plant-golden.js",
     "check:plant:selftest": "node scripts/plant-golden.js --selftest",
     "check:crash": "node scripts/crash-check.js",
+    "check:inspection": "node scripts/inspection-check.js",
     "check:crash-pacing": "node scripts/crash-pacing.js",
     "check:world": "node scripts/world-check.js",
     "check:world-golden": "node scripts/world-golden.js",

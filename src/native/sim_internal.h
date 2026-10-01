@@ -153,7 +153,11 @@ typedef struct {
  */
 #define SIM_AIRFRAME_5IN 0
 #define SIM_AIRFRAME_WHOOP65 1
-#define SIM_AIRFRAME_COUNT 2
+/* The inspection aircraft. Added after the two above so neither index
+ * moves; see plant.c for where each number comes from. */
+#define SIM_AIRFRAME_CAGED 2
+#define SIM_AIRFRAME_TETHERED 3
+#define SIM_AIRFRAME_COUNT 4
 
 typedef struct {
   /* rigid body, world frame */
@@ -315,6 +319,11 @@ int world_select_support(const SimState *s, const double tn[3], double td,
                          double out_n[3], double *out_d);
 void world_step(SimState *s, int ground_on, const double gn[3], double gd);
 void world_tick(void);
+/* Static shapes within reach of a plant frame point, nearest first: up to
+ * max normals (out of the solid, plant frame) and surface distances. Read
+ * only. For assist.c's virtual cage. */
+int world_proximity(const double p_plant[3], double reach, double n_out[][3],
+                    double d_out[], int max);
 
 void plant_reset(SimState *s);
 
@@ -396,4 +405,18 @@ int bf_config_apply_setting(const char *key, const char *value, double num,
 int bf_config_apply_command(const char *word0, const char *word1);
 int bf_config_finish(void);
 
+/*
+ * The assist layer, assist.c. A pilot aid that sits between the sticks and
+ * Betaflight the way an inspection aircraft's own autopilot does. Off by
+ * default: a host that never calls sim_set_assist gets the raw sticks
+ * through to the controller exactly as before.
+ *
+ *   assist_active  nonzero while a mode is set
+ *   assist_reset   forget holds and integrators (sim_reset, sim_init)
+ *   assist_run     rewrite this step's RC from the pilot's; returns whether
+ *                  the controller should treat it as a fresh RC frame
+ */
+int assist_active(void);
+void assist_reset(void);
+int assist_run(const SimState *s, const double pilot[4], double rc_out[4], int on_ground);
 #endif /* SIM_INTERNAL_H */

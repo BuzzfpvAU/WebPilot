@@ -327,7 +327,8 @@ int sim_set_flight_style(int arcade);
 
 /*
  * Choose the airframe: 0 is the five inch this project was built around and
- * is the default, 1 is a 65 mm 1S brushless whoop. Returns SIM_ERR_BAD_ARG
+ * is the default, 1 is a 65 mm 1S brushless whoop, 2 the caged inspection
+ * aircraft and 3 the tethered one (plant.c). Returns SIM_ERR_BAD_ARG
  * for anything else.
  *
  * Additive ABI change, version unchanged: no existing entry point moved or
@@ -566,6 +567,38 @@ int sim_world_vehicle(int m, int road, double offset,
 int sim_world_clock(double step);
 int sim_world_vehicle_poses(double *out);
 int sim_world_vehicle_contacts(double *out, int max);
+
+/*
+ * THE INSPECTION AUTOPILOT, src/native/assist.c, added 2026-10-01 with the
+ * owner's approval for the inspection aircraft (sim_set_airframe 2, caged,
+ * and 3, tethered). It sits between the sticks and Betaflight and turns
+ * them into velocity and climb requests with Betaflight's angle mode as the
+ * inner loop, the way an aircraft of that class flies.
+ *
+ *   sim_set_assist(mode, v_h, v_up, v_down, tilt_max_deg, angle_limit_deg,
+ *                  hover)
+ *     mode 0 off, 1 position (sticks are velocities, centred holds), 2 atti
+ *     (sticks are leans, height held). Speeds m/s; tilt_max no more than
+ *     angle_limit, which must be the loaded tune's angle_limit; hover the
+ *     throttle the airframe hovers at. A mode forces angle mode on.
+ *   sim_set_assist_guard(standoff)
+ *     The virtual cage: metres from the hull to keep off every static
+ *     world shape. 0 off.
+ *   sim_assist_report(out)
+ *     SIM_ASSIST_REPORT_DOUBLES doubles: mode, flying, holding position,
+ *     holding height, nearest clearance (-1 none), cage acting, climb
+ *     request, throttle emitted, hover estimate.
+ *
+ * Additive, version unchanged. Mode 0 is the default and the only mode the
+ * harness sees, so every replay is bit identical to one from before these
+ * existed. Like angle mode, the settings survive sim_reset and sim_init;
+ * the autopilot's holds and integrators do not.
+ */
+#define SIM_ASSIST_REPORT_DOUBLES 9
+int sim_set_assist(int mode, double v_h, double v_up, double v_down,
+                   double tilt_max_deg, double angle_limit_deg, double hover);
+int sim_set_assist_guard(double standoff);
+int sim_assist_report(double *out);
 
 /* Number of doubles sim_state writes. SIM_STATE_DOUBLES for this version. */
 int sim_state_size(void);

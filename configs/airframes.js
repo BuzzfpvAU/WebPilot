@@ -439,6 +439,138 @@ export const AIRFRAMES = [
       bodyHeight: 0.034,
     },
   },
+  /*
+   * THE INSPECTION AIRCRAFT. Two classes of confined space inspection
+   * machine, modelled on the published specification of each class and
+   * named for the class, not the product: neither maker is affiliated with
+   * this simulator or endorses it. Their plants are SIM_AIRFRAME_CAGED and
+   * SIM_AIRFRAME_TETHERED in src/native/plant.c, which says where every
+   * number comes from.
+   *
+   * `inspection: true` is what the shell keys the inspection world, the
+   * lights, the ground station and the forced rates off. `assist` is the
+   * autopilot's configuration, handed to sim_set_assist by the shell
+   * (src/native/assist.c):
+   *
+   *   speeds        the speed modes a pilot can pick, m/s at full stick
+   *   defaultSpeed  the index of the one a run starts on
+   *   vUp, vDown    climb and descent at full stick, m/s
+   *   tiltMax       the most lean the autopilot asks for, degrees
+   *   angleLimit    the tune's angle_limit, which must match the diff's;
+   *                 npm run check:inspection checks it
+   *   hover         the throttle the airframe hovers at, the autopilot's
+   *                 starting estimate, measured by scripts/inspection-check.js
+   *   guard         the virtual cage's standoff from the hull, metres; 0 is
+   *                 off, which is the caged aircraft: it is built to touch
+   *
+   * Rates are FORCED to `rates` below on these airframes whatever the
+   * pilot's own rates are, because the autopilot asks for a lean by stick
+   * position and Betaflight's angle mode reads the stick THROUGH the rates
+   * curve: linear rates, centre equal to max, are what make a stick a lean.
+   *
+   * gravityBase is 1: these are real aircraft at real weight, without the
+   * five inch's feel scale.
+   */
+  {
+    id: 'caged',
+    simId: 2,
+    name: 'Caged inspection drone (Elios 3 class)',
+    short: 'Caged',
+    blurb: 'A 1.9 kg caged confined space inspection aircraft of the Elios 3 class. Built to touch: it bumps off a tank wall and keeps flying. Position hold, 16,000 lumens, about 12 minutes on a pack.',
+    facts: ['6S HV', '50 cm cage', 'Assisted'],
+    trackClass: 'full',
+    cells: 6,
+    osdSpeed: true,
+    packVoltages: [4.35, 3.9, 3.6],
+    packLabels: { 4.35: 'Charged', 3.9: 'Half', 3.6: 'Nearly empty' },
+    defaultTune: 'inspection-caged',
+    gravityBase: 1.0,
+    weightMax: 100,
+    inspection: true,
+    enduranceS: 12 * 60,
+    lightLumens: 16000,
+    assist: {
+      speeds: [0.5, 1.0, 2.0, 5.0],
+      speedLabels: ['Close', 'Normal', 'Transit', 'Max'],
+      defaultSpeed: 1,
+      vUp: 1.0,
+      vDown: 0.8,
+      tiltMax: 20,
+      angleLimit: 45,
+      hover: 0.47,
+      guard: 0,
+    },
+    rates: {
+      type: 'ACTUAL',
+      roll: { rcRate: 20, srate: 20, expo: 0 },
+      pitch: { rcRate: 20, srate: 20, expo: 0 },
+      yaw: { rcRate: 6, srate: 6, expo: 0 },
+      throttleCap: 100,
+    },
+    cameraFov: 100,
+    cameraAngle: 0,
+    dims: {
+      arm: 0.120,
+      propR: 0.0635,
+      hullR: 0.130,
+      vHalfDown: 0.20,
+      vHalfUp: 0.25,
+      bodyLength: 0.50,
+      bodyWidth: 0.50,
+      bodyHeight: 0.45,
+      hullHx: 0.25,
+    },
+  },
+  {
+    id: 'tethered',
+    simId: 3,
+    name: 'Tethered inspection drone (Scout 137 class)',
+    short: 'Tethered',
+    blurb: 'A 3 kg uncaged, tethered confined space inspection aircraft of the Scout 137 class. Its LiDAR virtual cage stops it short of a wall instead of letting it touch. Power down the tether, so no clock.',
+    facts: ['Tether', '48 cm', 'LiDAR cage'],
+    trackClass: 'full',
+    cells: 12,
+    osdSpeed: true,
+    packVoltages: [4.2],
+    packLabels: { 4.2: 'Tether power' },
+    defaultTune: 'inspection-tethered',
+    gravityBase: 1.0,
+    weightMax: 100,
+    inspection: true,
+    enduranceS: 0,
+    lightLumens: 12000,
+    assist: {
+      speeds: [0.5, 1.0, 2.0, 3.0],
+      speedLabels: ['Close', 'Normal', 'Transit', 'Max'],
+      defaultSpeed: 1,
+      vUp: 0.8,
+      vDown: 0.6,
+      tiltMax: 18,
+      angleLimit: 45,
+      hover: 0.68,
+      guard: 0.5,
+    },
+    rates: {
+      type: 'ACTUAL',
+      roll: { rcRate: 20, srate: 20, expo: 0 },
+      pitch: { rcRate: 20, srate: 20, expo: 0 },
+      yaw: { rcRate: 5, srate: 5, expo: 0 },
+      throttleCap: 100,
+    },
+    cameraFov: 95,
+    cameraAngle: 0,
+    dims: {
+      arm: 0.170,
+      propR: 0.1016,
+      hullR: 0.07,
+      vHalfDown: 0.12,
+      vHalfUp: 0.142,
+      bodyLength: 0.448,
+      bodyWidth: 0.479,
+      bodyHeight: 0.262,
+      hullHx: 0.224,
+    },
+  },
 ];
 
 

@@ -3118,3 +3118,91 @@ void world_step(SimState *s, int ground_on, const double gn[3], double gd) {
     g_rep_n[2] = g_con[strongest].n[2];
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * PROXIMITY, for assist.c's virtual cage: the static shapes whose surface
+ * is within reach of a point, nearest first.
+ *
+ * A read only query. It touches the broadphase's stamp, which world_step
+ * resets on its own first gather, and nothing else, so a module that never
+ * calls it steps exactly as before. Movers are not included: a train is not
+ * a wall the cage should hold off from. The point and the normals are in
+ * the plant frame; the normal points out of the solid toward the point, and
+ * the distance is from the point to the surface, never negative (a point
+ * inside a solid reports 0 with the nearest face's normal).
+ * ------------------------------------------------------------------ */
+int world_proximity(const double p_plant[3], double reach, double n_out[][3],
+                    double d_out[], int max) {
+  if (!world_active() || max <= 0 || !(reach > 0.0)) {
+    return 0;
+  }
+  double p[3];
+  plant_to_world_pos(p_plant, p);
+  const int nc = world_gather(p[0] - reach, p[1] - reach, p[0] + reach, p[1] + reach);
+  int found = 0;
+  for (int c = 0; c < nc; c += 1) {
+    const Shape *sh = &g_shape[g_cand[c]];
+    double n[3];
+    double d;
+    if (sh->type == SHAPE_BOX) {
+      double q[3];
+      for (int k = 0; k < 3; k += 1) {
+        q[k] = p[k] < sh->lo[k] ? sh->lo[k] : (p[k] > sh->hi[k] ? sh->hi[k] : p[k]);
+      }
+      const double dv[3] = { p[0] - q[0], p[1] - q[1], p[2] - q[2] };
+      const double d2 = dot3(dv, dv);
+      if (d2 > 1e-18) {
+        d = sim_sqrt(d2);
+        n[0] = dv[0] / d;
+        n[1] = dv[1] / d;
+        n[2] = dv[2] / d;
+      } else {
+        point_in_box(p, 0, sh->lo, sh->hi, n);
+        d = 0.0;
+      }
+    } else {
+      const double ab[3] = { sh->b[0] - sh->a[0], sh->b[1] - sh->a[1], sh->b[2] - sh->a[2] };
+      const double ap[3] = { p[0] - sh->a[0], p[1] - sh->a[1], p[2] - sh->a[2] };
+      const double l2 = dot3(ab, ab);
+      double t = l2 > 1e-18 ? dot3(ap, ab) / l2 : 0.0;
+      t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+      const double dv[3] = { p[0] - sh->a[0] - t * ab[0], p[1] - sh->a[1] - t * ab[1],
+                             p[2] - sh->a[2] - t * ab[2] };
+      const double dc = sim_sqrt(dot3(dv, dv));
+      if (dc > 1e-9) {
+        n[0] = dv[0] / dc;
+        n[1] = dv[1] / dc;
+        n[2] = dv[2] / dc;
+      } else {
+        n[0] = 0.0;
+        n[1] = 0.0;
+        n[2] = 1.0;
+      }
+      d = dc - sh->r;
+      if (d < 0.0) {
+        d = 0.0;
+      }
+    }
+    if (!(d <= reach)) {
+      continue;
+    }
+    /* Insertion into a list kept nearest first, dropping the farthest. */
+    int at = found < max ? found : max - 1;
+    if (found >= max && !(d < d_out[max - 1])) {
+      continue;
+    }
+    while (at > 0 && d < d_out[at - 1]) {
+      d_out[at] = d_out[at - 1];
+      n_out[at][0] = n_out[at - 1][0];
+      n_out[at][1] = n_out[at - 1][1];
+      n_out[at][2] = n_out[at - 1][2];
+      at -= 1;
+    }
+    d_out[at] = d;
+    world_to_plant_dir(n, n_out[at]);
+    if (found < max) {
+      found += 1;
+    }
+  }
+  return found;
+}

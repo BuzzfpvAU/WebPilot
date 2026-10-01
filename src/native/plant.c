@@ -656,6 +656,179 @@ const PlantParams PLANT_TABLE[SIM_AIRFRAME_COUNT] = {
   .camera_y = 0.0,
   .camera_z = 0.012,
 },
+
+/* ---------------------------------------------------------------------
+ * SIM_AIRFRAME_CAGED: a caged confined space inspection quad, Elios 3
+ * class. Not the maker's aircraft and not endorsed by them: a plant built
+ * from the published specification of that class of machine so a pilot can
+ * train on its handling.
+ *
+ * PUBLISHED FIGURES USED. 1900 g with battery, payload and cage (2350 g
+ * with the LiDAR payload); about 50 x 50 x 45 cm over the cage; four 5 inch
+ * props; a 6S HV smart pack, 4350 mAh, 99 Wh; about 12 minutes; about
+ * 5 m/s top speed. Everything else is derived or estimated below and says
+ * which.
+ *
+ * POWERTRAIN. The rotor is the five inch's, kt and kq unchanged, because a
+ * 5 inch triblade is a 5 inch triblade: the same momentum theory figure of
+ * merit, the same pitch. What changes is what it carries. At the five
+ * inch's own full throttle speed four of them make 58.7 N, which on 1.90 kg
+ * is 3.15 to 1, and that is the right answer for this class: enough to
+ * fight a draught in a boiler, nowhere near a racer's 8. The electrical set
+ * is the five inch's too, so the hover is SOLVED rather than chosen: 4.66 N
+ * a rotor needs 1534 rad/s, and d V = ke w + R kq w^2 / ke puts that at a
+ * duty near 0.47 on a fresh pack, eleven amps a motor. That is more current
+ * than the real machine's twelve minute endurance implies, because its props
+ * and motors are optimised for hover efficiency and a racer's are not; the
+ * shell's endurance clock is taken from the published figure instead, and
+ * the plant's job is the handling, which this gets right.
+ *
+ * INERTIA. Estimated from point masses, not published. The cage as a thin
+ * shell of 350 g at 0.24 m, 2/3 m R^2 = 0.0134 on every axis; four 60 g
+ * motor and prop sets at 85 mm on each axis; a 620 g pack at the CG; 700 g
+ * of payload, gimbal, lights and frame as a 25 cm box. 0.0205, 0.022, 0.025.
+ * A cage makes this machine slow to rotate for its size, which is most of
+ * why it feels planted.
+ *
+ * DRAG. The cage is a lattice, roughly a third solid in projection, over
+ * 0.225 m^2 of frontal area at a bluff Cd near 1: 0.06 m^2 each way, more
+ * from above where the pack and arms add. At 5 m/s that is 1.1 N, a few
+ * degrees of lean, and a chopped throttle falls at about 10 m/s.
+ *
+ * THE HULL IS THE CAGE. Half extents 0.25 by 0.25, 0.20 down to the cage
+ * floor and 0.25 up, so the props, at 85 mm plus 63.5 mm, are inside it on
+ * every axis and world.c's props_exposed() is false: nothing reaches a
+ * blade that does not reach the cage first, which is the whole design.
+ * contact_arm_max is 12 percent over the cage corner, the five inch's margin.
+ * ------------------------------------------------------------------- */
+[SIM_AIRFRAME_CAGED] = {
+  .mass_kg = 1.90,
+  .inertia = { 0.0205, 0.0220, 0.0250 },
+  .gravity = 9.80665,
+  .arm_x = 0.085,
+  .arm_y = 0.085,
+  .kt = 1.98e-6,
+  .kq = 3.04e-8,
+  .ke = 0.006336,
+  .r_motor = 0.1825,
+  .j_rotor = 8.0e-6,
+  .cells = 6.0,
+  .r_cell = 0.004,  /* 4 mOhm a cell, a 4350 mAh smart pack */
+  .cda_plan = 0.080,
+  .cda_front = 0.060,
+  .cda_side = 0.060,
+  .k_body_lift = 0.0,  /* a sphere of lattice has no slender body */
+  .rho = 1.225,
+  /* A FEEL constant, a third under the five inch's 0.15: four times the
+   * mass on the same discs, and a cage that damps what is left. */
+  .k_propwash = 0.10,
+  .prop_r = 0.0635,
+  .k_rotor_drag = 0.43842,
+  .k_rotor_axial = 0.0,
+  .k_ground = 1.0,
+  .k_inflow = 0.017382,
+  .torque_ind = 0.520,
+  .k_duct = 1.0,
+  .duct_fade = 0.0,
+  .k_duct_lip = 0.0,
+  .spin = { -1.0, 1.0, 1.0, -1.0 },
+  .pos_x = { -0.085, 0.085, -0.085, 0.085 },
+  .pos_y = { -0.085, -0.085, 0.085, 0.085 },
+  .pos_z = { 0.020, 0.020, 0.020, 0.020 },
+  /* The whoop's solved pair: a production frame's tolerance, and the
+   * radial set cancels the tangential set's lateral force at hover. */
+  .cant_radial_deg = { 0.47, 0.28, 0.38, 0.20 },
+  .cant_tangent_deg = { -0.3, 0.47, 0.2, -0.4 },
+  .hull_hx = 0.25,
+  .hull_hy = 0.25,
+  .hull_hz_down = 0.20,
+  .hull_hz_up = 0.25,
+  .contact_patch_r = 0.15,
+  .contact_arm_max = 0.48,
+  .vib_ref_w = 2700.0,
+  .camera_x = 0.10,
+  .camera_y = 0.0,
+  .camera_z = 0.0,
+},
+
+/* ---------------------------------------------------------------------
+ * SIM_AIRFRAME_TETHERED: a tethered, uncaged confined space inspection
+ * quad, Scout 137 class. Not the maker's aircraft and not endorsed by
+ * them, same rule as the caged one above.
+ *
+ * PUBLISHED FIGURES USED. 3.0 kg; 448 x 479 x 262 mm; power and data down a
+ * tether, so no pack and no endurance limit; a LiDAR "virtual cage" that
+ * stops the aircraft short of a surface (that is assist.c's, not this
+ * plant's). The props are not published. Four props inside a 448 mm
+ * envelope that do not overlap each other fit at 8 inch on 120 mm offsets,
+ * tips at 222 mm, so that is what this is.
+ *
+ * ROTOR. An 8 x 4.5 two blade near 8.3 N at 10,000 rpm gives kt 7.6e-6.
+ * kq by the same momentum theory identity the five inch uses, at a figure
+ * of merit of 0.55, a little better than the triblade because the disc is
+ * bigger and the Reynolds number higher: 1.351e-7. At 2.2 to 1 a rotor
+ * needs 16.2 N, 1460 rad/s, and hovers at 983.
+ *
+ * ELECTRICAL, SOLVED the way the five inch's was: full throttle at
+ * 1460 rad/s and duty 1, hover at 983 rad/s and duty 0.65, on 12 cells
+ * held at 4.2 V by a tether supply with half a milliohm a cell, which is a
+ * stiff bus that does not sag the way a pack does. ke 0.03087 (309 kV
+ * loaded) and R 0.571 ohm. Hover is 4.2 A a motor.
+ *
+ * j_rotor: a 10 g prop at 102 mm, m R^2 / 3, plus a bell, 4.0e-5. The
+ * rotor time constant lands near 21 ms, slower than a racer's, which is
+ * what a bigger prop is.
+ *
+ * PUSH CONFIGURATION. The rotors sit under the frame, 60 mm below the CG.
+ *
+ * INERTIA, estimated: four 120 g motor sets at 120 mm and a 2.5 kg body as
+ * a 30 x 30 x 20 cm box. 0.038, 0.040, 0.060.
+ * ------------------------------------------------------------------- */
+[SIM_AIRFRAME_TETHERED] = {
+  .mass_kg = 3.0,
+  .inertia = { 0.038, 0.040, 0.060 },
+  .gravity = 9.80665,
+  .arm_x = 0.120,
+  .arm_y = 0.120,
+  .kt = 7.6e-6,
+  .kq = 1.351e-7,
+  .ke = 0.03087,
+  .r_motor = 0.571,
+  .j_rotor = 4.0e-5,
+  .cells = 12.0,
+  .r_cell = 0.0005,
+  .cda_plan = 0.12,
+  .cda_front = 0.05,
+  .cda_side = 0.05,
+  .k_body_lift = 0.0,
+  .rho = 1.225,
+  .k_propwash = 0.08,
+  .prop_r = 0.1016,
+  .k_rotor_drag = 0.43842,
+  .k_rotor_axial = 0.0,
+  .k_ground = 1.0,
+  .k_inflow = 0.01819, /* 4.5 inch pitch over 2 pi */
+  .torque_ind = 0.55,
+  .k_duct = 1.0,
+  .duct_fade = 0.0,
+  .k_duct_lip = 0.0,
+  .spin = { -1.0, 1.0, 1.0, -1.0 },
+  .pos_x = { -0.120, 0.120, -0.120, 0.120 },
+  .pos_y = { -0.120, -0.120, 0.120, 0.120 },
+  .pos_z = { -0.060, -0.060, -0.060, -0.060 },
+  .cant_radial_deg = { 0.47, 0.28, 0.38, 0.20 },
+  .cant_tangent_deg = { -0.3, 0.47, 0.2, -0.4 },
+  .hull_hx = 0.224,
+  .hull_hy = 0.240,
+  .hull_hz_down = 0.12,
+  .hull_hz_up = 0.142,
+  .contact_patch_r = 0.10,
+  .contact_arm_max = 0.40,
+  .vib_ref_w = 1460.0,
+  .camera_x = 0.20,
+  .camera_y = 0.0,
+  .camera_z = 0.02,
+},
 };
 
 /*

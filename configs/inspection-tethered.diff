@@ -1,0 +1,166 @@
+# diff
+# Betaflight / SITL (SITL) 4.5.1
+#
+# THE TETHERED INSPECTION AIRCRAFT'S TUNE, Scout 137 class.
+#
+# motor_kv is the plant's loaded 309 kV. The bus is a tether supply held at
+# 4.2 V a cell over 12 cells, so the battery numbers here only keep the
+# monitor quiet; nothing drains.
+#
+# The inspection aircraft fly under src/native/assist.c, which asks
+# Betaflight's ANGLE mode for a lean and asks the throttle for a climb rate.
+# So the two settings that matter to that layer are angle_limit, which is
+# what full stick means in angle mode and which configs/airframes.js
+# repeats as assist.angleLimit (they must agree, and npm run check:inspection
+# checks it), and the rates, which the shell forces linear for these
+# airframes so a stick is proportional to a lean.
+#
+# Every PID and filter is the Betaflight 4.5.1 factory tune this project
+# ships for the five inch, unchanged: the airframe is heavier and slower to
+# rotate, so the factory gains are soft on it rather than hot, which is the
+# safe side to start a heavy machine on. They move when a pilot flies it.
+#
+batch start
+
+board_name SITL
+
+# ---- master ----
+
+set motor_kv = 309
+set motor_poles = 14
+set vbat_max_cell_voltage = 420
+set vbat_min_cell_voltage = 350
+set vbat_warning_cell_voltage = 350
+set battery_capacity = 10000
+set small_angle = 180
+
+# Filters, 4.5 defaults
+set gyro_hardware_lpf = NORMAL
+set gyro_lpf1_type = PT1
+set gyro_lpf1_static_hz = 250
+set gyro_lpf2_type = PT1
+set gyro_lpf2_static_hz = 500
+set gyro_notch1_hz = 0
+set gyro_notch1_cutoff = 0
+set gyro_notch2_hz = 0
+set gyro_notch2_cutoff = 0
+set gyro_lpf1_dyn_min_hz = 250
+set gyro_lpf1_dyn_max_hz = 500
+set gyro_lpf1_dyn_expo = 5
+set simplified_gyro_filter = ON
+set simplified_gyro_filter_multiplier = 100
+
+set dyn_notch_count = 3
+set dyn_notch_q = 300
+set dyn_notch_min_hz = 100
+set dyn_notch_max_hz = 600
+
+set yaw_spin_recovery = AUTO
+set dshot_idle_value = 550
+set mixer_type = LEGACY
+set yaw_motors_reversed = OFF
+
+# ---- profile 0 ----
+profile 0
+set angle_limit = 45
+
+set pid_at_min_throttle = ON
+set anti_gravity_gain = 80
+set anti_gravity_cutoff_hz = 5
+set anti_gravity_p_gain = 100
+set acc_limit_yaw = 0
+set acc_limit = 0
+
+set iterm_rotation = OFF
+# Not factory (RP and 15): the header, items 2 and 3.
+set iterm_relax = RPY_INC
+set iterm_relax_type = SETPOINT
+set iterm_relax_cutoff = 10
+set iterm_windup = 85
+set iterm_limit = 400
+set pidsum_limit = 500
+
+# 500, not the factory 400. 400 is 40 percent of the mixer's yaw range, and
+# Betaflight's anti windup is driven only by getMotorMixRange against
+# iterm_windup, so a yaw axis clipped at 40 percent can never on its own
+# reach the 85 percent windup point: the I term keeps integrating for the
+# whole time the axis is saturated. Round 23 in PROGRESS.md measured it on a
+# full stick yaw step, yaw I pinned at its 400 cap for 225 ms, and found the
+# discontinuity between 450 and 480 that betaflight/betaflight issue 13486
+# reports, open since March 2024. At 500 the windup point is reachable and
+# the anti windup does its job on yaw. On its own, on this weight, that
+# takes a full stick yaw stop from 164 ms to 141 and its swing back from
+# 8.15 degrees to 7.48; with the rest of this tune beside it, three quarter
+# stick, where the I term used to pin as well, goes from 7.79 to 4.64.
+#
+# Until 2026-09-28 this line flew the bug on purpose, because the file's
+# whole job was to be what a freshly flashed quad flies, the parts of that
+# which are wrong included. The header says why that changed.
+set pidsum_limit_yaw = 500
+
+set throttle_boost = 5
+set throttle_boost_cutoff = 15
+
+# The three F values are not factory (120, 125, 120): they are what
+# simplified_feedforward_gain 125 below computes. The header, item 1.
+set p_roll = 45
+set i_roll = 80
+set d_roll = 40
+set f_roll = 150
+set p_pitch = 47
+set i_pitch = 84
+set d_pitch = 46
+set f_pitch = 156
+set p_yaw = 45
+set i_yaw = 80
+set d_yaw = 0
+set f_yaw = 150
+
+set d_min_roll = 30
+set d_min_pitch = 34
+set d_min_yaw = 0
+set d_max_gain = 37
+set d_max_advance = 20
+
+set abs_control_gain = 0
+set use_integrated_yaw = OFF
+
+set thrust_linear = 0
+set transient_throttle_limit = 0
+set feedforward_transition = 0
+set feedforward_max_rate_limit = 90
+
+set dyn_idle_min_rpm = 0
+
+set simplified_pids_mode = RPY
+set simplified_master_multiplier = 100
+set simplified_i_gain = 100
+set simplified_d_gain = 100
+set simplified_pi_gain = 100
+set simplified_dmax_gain = 100
+# Not factory (100): the header, item 1.
+set simplified_feedforward_gain = 125
+set simplified_pitch_d_gain = 100
+set simplified_pitch_pi_gain = 100
+
+set tpa_mode = D
+set tpa_rate = 65
+set tpa_breakpoint = 1350
+set tpa_low_rate = 20
+set tpa_low_breakpoint = 1050
+set tpa_low_always = OFF
+
+set dterm_lpf1_dyn_min_hz = 75
+set dterm_lpf1_dyn_max_hz = 150
+set dterm_lpf1_dyn_expo = 5
+set dterm_lpf1_type = PT1
+set dterm_lpf1_static_hz = 75
+set dterm_lpf2_type = PT1
+set dterm_lpf2_static_hz = 150
+set dterm_notch_hz = 0
+set dterm_notch_cutoff = 0
+set yaw_lowpass_hz = 100
+set simplified_dterm_filter = ON
+set simplified_dterm_filter_multiplier = 100
+
+batch end

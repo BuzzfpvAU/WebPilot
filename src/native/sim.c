@@ -231,6 +231,7 @@ static void reset_dynamics(void) {
   g_ground_projected = 0;
   g_ground_near = 0;
   world_forget();
+  assist_reset();
 }
 
 SIM_EXPORT int sim_init(const unsigned char *diff_utf8, int len) {
@@ -1439,7 +1440,18 @@ SIM_EXPORT int sim_step(int n) {
       rx_new = 1;
     }
     double duty[SIM_MOTOR_COUNT];
-    bridge_run(&S, g_current_rc, rx_new, duty);
+    if (assist_active() && !g_stand_on) {
+      /* The inspection autopilot, assist.c: it reads the pilot's sticks and
+       * writes the frame Betaflight sees, on its own 250 Hz clock. Off by
+       * default, and the harness never turns it on. */
+      double rc_assist[4];
+      const int on_ground = g_ground_hits > 0
+        || (g_ground_on && S.ground_h >= 0.0 && S.ground_h - PLANT.hull_hz_down < 0.03);
+      const int fresh = assist_run(&S, g_current_rc, rc_assist, on_ground);
+      bridge_run(&S, rc_assist, fresh, duty);
+    } else {
+      bridge_run(&S, g_current_rc, rx_new, duty);
+    }
     for (int m = 0; m < SIM_MOTOR_COUNT; m += 1) {
       if (g_override[m] >= 0.0) {
         duty[m] = g_override[m];

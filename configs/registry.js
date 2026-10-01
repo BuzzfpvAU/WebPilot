@@ -83,6 +83,18 @@ export const TUNES = [
     name: 'Whoop freestyle',
     note: 'The 25000 kV variant on the bigger GF1219S prop. The highest gains of the three, and the only one the maker ships on Betaflight rates rather than Actual.',
   },
+  {
+    id: 'inspection-caged',
+    airframe: 'caged',
+    name: 'Inspection, caged',
+    note: 'Betaflight 4.5.1 factory gains under the inspection autopilot, with angle mode limited to 45 degrees.',
+  },
+  {
+    id: 'inspection-tethered',
+    airframe: 'tethered',
+    name: 'Inspection, tethered',
+    note: 'Betaflight 4.5.1 factory gains under the inspection autopilot, with angle mode limited to 45 degrees.',
+  },
 ];
 
 /*
