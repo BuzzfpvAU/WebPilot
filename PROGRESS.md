@@ -62705,3 +62705,24 @@ run; found means a graded photo with it in frame.
                              regeneration)
     not run                  npm run verify: no physics, plant, ABI or build change (the tank's colliders are world
                              content through the existing interface). Not flown on a real GPU or by a person.
+
+## 2026-10-01 | inspection | APPROVAL: tether cable physics in the plant
+
+Asked in the conversation and answered by the owner, "Approve, all now", on 2026-10-01. What it covers:
+
+- A tether cable for the tethered inspection aircraft only (airframe simId 3): a chain of point masses from a
+  ground station anchor to the aircraft, stepped in C inside the plant at 1 kHz, with gravity, drag, a fixed
+  length, collision against the world's shapes (it drapes and snags), and its tension applied to the aircraft at
+  the attach point. Every other airframe has no cable and must keep a bit-identical trace.
+- Module ABI: two new exports, one to set the anchor and length (and switch the cable on or off), one to read the
+  cable's points for drawing.
+- Risks named to the owner: the tethered aircraft's hold, stops and climb change under the cable's weight and
+  check:inspection's bands for it may need arguing here; frame cost of the cable's collision queries at 1 kHz;
+  determinism, so npm run verify is run.
+- Order the owner approved: goldens pinning the caged and tethered aircraft as they are now land first and green
+  (the plant goldens fly only the five inch and the whoop today); then the cable with new checks (length never
+  exceeded, a snag holds, the aircraft settles in a hover on the cable); then verify.
+
+Same request, no approval needed (shell and render only): 3D models for both aircraft (an Elios 3 class
+geodesic cage, a Scout 137 class uncaged quad with LiDAR and lights), the cable drawn, a caged or tethered choice
+on Inspection training, and both shown with pictures where a quad is chosen.
