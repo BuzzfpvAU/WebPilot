@@ -82,7 +82,7 @@ export const MAPS = [
     name: 'Storage tank',
     mode: 'freestyle',
     inspection: true,
-    note: 'Inside a 14 m welded storage tank, 12 m to the roof. No light but the aircraft\'s. A centre column, roof rafters, a ladder, a heating coil and an inlet nozzle to fly round.',
+    note: 'Inside a 14 m welded storage tank, 12 m to the roof. No light but the aircraft\'s. A centre column, roof rafters, a ladder, a heating coil and a schoepentoeter on the inlet to fly round, and a new set of faults to find and photograph every run.',
     buildMs: MAP_BUILD_MS.tank,
     load: () => import('./tank/index.js'),
   },

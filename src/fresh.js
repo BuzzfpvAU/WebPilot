@@ -229,6 +229,8 @@
     'src/maps/field.js',
     'src/maps/preload.js',
     'src/maps/registry.js',
+    'src/maps/tank/defects.js',
+    'src/maps/tank/hardware.js',
     'src/maps/tank/index.js',
     'src/partners/roster.js',
     'src/props/aperture.js',

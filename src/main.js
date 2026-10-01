@@ -439,8 +439,11 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
  * them), but the counter matches one prefix and none of those is this map's
  * alone. The entry is written out because it has moved with the directory:
  * it was three before looks.js came and four before egg.js, and with no
- * entry then the bar sat at 75 percent until the import resolved. */
-const MAP_MODULE_COUNT = { field: 1, city: 72, custom: 1, built: 5, tank: 1 };
+ * entry then the bar sat at 75 percent until the import resolved.
+ *
+ * tank: index.js, hardware.js (the welds, bolts and schoepentoeter) and
+ * defects.js, the three files under src/maps/tank. */
+const MAP_MODULE_COUNT = { field: 1, city: 72, custom: 1, built: 5, tank: 3 };
 /* Where a map's modules live, so the loading bar can count them. Data, not a
  * ternary: the ternary read "field or else city", so a third map counted its
  * modules under the city's prefix and the bar sat at zero.
@@ -10502,6 +10505,9 @@ export async function boot({ loading, bootStart, mapId }) {
   window.__race = () => ({
     laps: race ? race.laps : [],
   });
+  /* A chosen set of defects in a world that has them, so a check can fly
+   * to one it knows. Harness only. */
+  window.__rollDefects = (seed) => (typeof view.rollDefects === 'function' ? view.rollDefects(seed) : null);
   /* The inspection panel's state and the autopilot's report, for checks. */
   window.__inspection = () => ({
     ...inspection.snapshot(),

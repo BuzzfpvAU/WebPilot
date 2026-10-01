@@ -62651,3 +62651,57 @@ gamepads and radios; defaults for standard pads plus a menu row to remap; tilt a
                              axis 6 learned as tilt, button 8 as the photo; the row then read Learned, "Tilt dial
                              or slider, axis 6. Photo button 8.". Not tried on real hardware.
     not run                  npm run verify: no physics, plant, ABI or build change
+
+## 2026-10-01 | inspection | Welds, bolts, a schoepentoeter, and defects to find
+
+The owner asked for more detail in the tank: welds rather than what read as bricks, bolts in places, and random
+faults (rusty or cracked welds, missing bolts) for the pilot to find and photograph. Asked first, the owner chose:
+raised bead geometry for the welds; bolts on the manway and nozzle flanges, the rafter clips, the ladder brackets
+and the coil stands; a schoepentoeter separator on the inlet to inspect top and bottom; a new random set every
+run; found means a graded photo with it in frame.
+
+- src/maps/tank/hardware.js (new): every weld is a seam (a centre line, its direction and the surface normal) and
+  one sweep turns them into a merged bead mesh with a rippled cap: shell courses and staggered vertical seams,
+  floor and roof lap seams, the shell to floor fillet, the column foot and the nozzle. Bolts are three
+  InstancedMeshes (washer, nut, stud), 312 of them. The schoepentoeter runs 4.6 m from the nozzle at 1.2 m,
+  tapering 0.70 to 0.34 m, vanes down both sides bolted top and bottom, plate centre seams and splices top and
+  underside, two legs on bolted base plates. A 24 inch manway with a bolted cover in the bottom course.
+- src/maps/tank/defects.js (new): six to ten per run from a seed, at least one on the schoepentoeter's top and one
+  on its underside, 0.8 m apart, never under the ladder or behind the manway. Corroded weld (a lumpy rust bead and
+  a stain), cracked weld (along the crown, or across into the plate, in a dark halo), missing bolt (instance
+  hidden, hole and washer footprint drawn). seen(camera) answers which a frame shows: middle 70%, within 1.5 m for
+  a crack, 2 m for a bolt, 3 m for rust, seen from its own side, nothing in between.
+- src/maps/tank/index.js: the painted dark seam lines (the brickwork look) are a faint heat tint now; the rust
+  blots became speck clusters; the shell has 256 segments so beads sit on it; colliders for the schoepentoeter
+  (six boxes), its flange, spool and legs and the manway; rayHit also tests meshes; capture reports seen defects.
+- src/game/inspection.js: a defect is found by the first USABLE or GOOD photo that shows it; a photo that shows
+  one is ranged and marked on it; DEFECTS line in the panel; the gallery says what each photo found and has
+  Reveal the ones I missed (red rings, ends the hunt). Restart rolls a new set.
+- src/main.js: `__rollDefects(seed)`, harness only; MAP_MODULE_COUNT tank 3. src/fresh.js regenerated.
+- Labels say "plate ring" where a tank man would say "course", because lint:nouns keeps "course" off the screen.
+
+### What went wrong
+
+- THE TANK HAD NO DEPTH BUFFER, since it was written. The shell's renderer is made with depth: false, every other
+  map draws through targets with their own depth, and the tank drew straight to the canvas. Opaque objects are
+  sorted near to far, so the farther painted over the nearer: the coil showed through the schoepentoeter and its
+  vanes through its top plate. It went unseen with a few separated internals. The tank now renders into a half
+  float target with depth and one full screen pass applies the filmic curve, exposure and sRGB as before.
+- The first underside photo graded "too far, 11.80 m" while it found a bolt a metre away, because range was the
+  frame's centre ray reaching the roof past the edge of the device. Fixed by ranging on the defect.
+- The container's proxy refuses cdn.jsdelivr.net (403). The harness cache was filled from three@0.160.0 off the
+  npm registry, which is the same files.
+
+### RUN LOG
+
+    browser                  shots.js, caged aircraft in the tank, low preset: boots, no frame fault; 198 seams,
+                             312 bolts, 316 colliders; a corroded weld on the top plate photographed from above
+                             and found; a missing vane bolt photographed from under the device and found; a cracked
+                             shell weld from 0.95 m GOOD and found; a missing nozzle flange bolt from 1.19 m GOOD
+                             and found; gallery lists finds, Reveal rings the rest; R rolls a new seed; the title
+                             renders normally after leaving the tank
+    check:inspection         all passed (its worlds are its own, untouched)
+    lint:preload             up to date after regeneration; lint:nouns PASS; check:fresh 18 of 18 (before the
+                             regeneration)
+    not run                  npm run verify: no physics, plant, ABI or build change (the tank's colliders are world
+                             content through the existing interface). Not flown on a real GPU or by a person.
