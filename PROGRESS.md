@@ -62545,3 +62545,28 @@ Asked before any code, answered in the conversation:
     not run                  lint:input (slow, input untouched), lint:catalog (cannot run here). Nothing was
                              flown by a person, on a real GPU or on a phone: the harness is green and the
                              feel awaits the owner.
+
+## 2026-10-01 | inspection | Ready to host: the board disconnected, and the fork's own name
+
+The owner asked how to put the fork on a website to try it, and decided (asked in the conversation) to
+disconnect upstream's board and to rebrand. The simulator is a static site (DEPLOY.md, render.yaml), so GitHub
+Pages from this branch, or Render with the existing blueprint, serves it as it is.
+
+- `src/share/board.js`: PRODUCTION_BOARD_ORIGIN is `https://board.invalid`. A fork's laps, published tracks and
+  bug reports are not upstream's to receive; `.invalid` never resolves (RFC 2606), so every board call fails
+  fast and the shell takes its existing board-is-down path. ?board= and the Publish dialog still override it.
+- Title: the wordmark reads WEB PILOT in upstream's two colours, the page title and og:title name the fork and
+  credit WebFPV, the Patreon chip is hidden by CSS, and the Support (Patreon) and Tracks and Statistics (the
+  board) rows are gone from the title and pause menus. The Five inch card no longer promises the public
+  leaderboard. With an inspection aircraft seated, the title's one line of advice is about taking off and
+  holding rather than about gates (src/game/inspection.js swaps it and puts upstream's back).
+- Credits are untouched: upstream's own credits screen, and INSPECTION.md and README.md say what this is a fork of.
+
+### RUN LOG
+
+    lints                    lint:boot 9 of 9; lint:devices PASS; lint:responsive PASS; lint:shell 1 problem,
+                             the credits overflow, identical on upstream (previous entry)
+    browser                  shots.js: the title reads WEBPILOT with five cards, no Patreon chip; the menu
+                             behind Inspection training shows the inspection line and no Support or board rows;
+                             document.title is the fork's
+    not run                  npm run verify (no physics, plant, ABI or build change in this entry)

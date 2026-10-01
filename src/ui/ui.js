@@ -2046,7 +2046,8 @@ function hintWithKeys(keys, text) {
 
 function wordmark() {
   const h = el('h1', 'wordmark');
-  h.append(document.createTextNode('WEB'), el('span', 'fpv', 'FPV'));
+  /* The fork's name, in upstream's two colours. */
+  h.append(document.createTextNode('WEB'), el('span', 'fpv', 'PILOT'));
   return h;
 }
 
@@ -3824,8 +3825,10 @@ const WAYS = [
     mode: 'race',
     label: 'Five inch racing',
     art: 'assets/gate/race.jpg',
-    blurb: 'A gated track on a sixty metre field, against the clock. A 710 gram 6S quad at forty metres a second, and every lap you finish goes to the public leaderboard.',
-    facts: ['6S', '220 mm', 'The board'],
+    /* This fork has no board (src/share/board.js), so the line that
+     * promised one is gone. */
+    blurb: 'A gated track on a sixty metre field, against the clock. A 710 gram 6S quad at forty metres a second.',
+    facts: ['6S', '220 mm', 'Timed laps'],
   },
   {
     id: 'race-whoop65',
@@ -3872,7 +3875,7 @@ const WAYS = [
     inspection: true,
     label: 'Inspection training',
     art: 'assets/gate/inspection.jpg',
-    blurb: 'Confined space inspection inside a dark storage tank, on a caged aircraft of the Elios 3 class or a tethered one of the Scout 137 class. Position hold, your own lights, and a wall you are allowed to touch.',
+    blurb: 'A dark storage tank, flown on an Elios 3 class caged aircraft or a Scout 137 class tethered one. Position hold and your own lights.',
     facts: ['Assisted', 'Dark tank', 'Cage'],
   },
 ].map((w) => ({ ...w, action: `way-${w.id}` }));
@@ -7001,12 +7004,6 @@ export class Ui {
           note: 'The closed loop, the plant, and every Betaflight 4.5.1 key. Opens the wiki on webfpv.org.',
         },
         {
-          label: 'Tracks and Statistics',
-          action: 'leaderboard',
-          note: 'The public page: every published track with its times, and how the site is doing. Opens in a new tab.',
-        },
-        { label: 'Support', action: 'support', note: PATREON_NOTE },
-        {
           label: 'Credits',
           action: 'credits',
           note: 'Who made this, who flew it, whose work it stands on, and the partners who back it.',
@@ -8064,7 +8061,6 @@ export class Ui {
         graphicsItem(s, this.autoScaleNow),
         { label: 'How to fly', action: 'howto' },
         { label: 'FPV wiki', action: 'wiki', note: 'The plant, the compiled controller, and every catalog key. Opens the wiki on webfpv.org.' },
-        { label: 'Support', action: 'support', note: PATREON_NOTE },
         { label: 'Credits', action: 'credits', note: 'Who made this, who flew it, and whose work it stands on.' },
         { label: 'Quit to title', action: 'title' },
       ];

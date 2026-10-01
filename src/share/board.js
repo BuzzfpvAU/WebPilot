@@ -73,7 +73,13 @@ import { readShareImport, writeShareImport } from './session.js';
  * `new URL('/some/path', board)`, which is not done anywhere here.
  */
 export const DEFAULT_BOARD_ORIGIN = 'http://127.0.0.1:3100';
-export const PRODUCTION_BOARD_ORIGIN = 'https://webfpv.org/board';
+/* THIS FORK HAS NO BOARD. webfpv.org's board is upstream's server, and a
+ * fork's laps, published tracks and bug reports are not upstream's to
+ * receive. `.invalid` is reserved never to resolve (RFC 2606), so every
+ * board call fails fast at the network and the shell takes the path it
+ * already has for a board that is down. Put a board of the fork's own here
+ * when there is one; ?board= and the Publish dialog still override it. */
+export const PRODUCTION_BOARD_ORIGIN = 'https://board.invalid';
 export const DEFAULT_LANDING_ORIGIN = 'http://127.0.0.1:8080';
 export const PRODUCTION_LANDING_ORIGIN = 'https://webfpv.org';
 const ORIGIN_KEY = 'webfpv.board.origin';

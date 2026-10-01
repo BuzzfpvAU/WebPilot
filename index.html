@@ -44,7 +44,7 @@
          root now carries touch-action: manipulation, which stops the
          double-tap and keeps the pinch. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>WebFPV, a browser FPV racing simulator</title>
+    <title>WebPilot, inspection drone training in the browser (based on WebFPV)</title>
     <!--
       THE SCRIPTS OF THE DEPLOY THIS PAGE CAME FROM, ALWAYS. See src/fresh.js.
 
@@ -97,7 +97,7 @@
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="WebFPV" />
     <meta property="og:url" content="https://webfpv.org/sim/" />
-    <meta property="og:title" content="WebFPV, fly a quad in your browser" />
+    <meta property="og:title" content="WebPilot, inspection drone training in the browser" />
     <meta property="og:description" content="A real Betaflight control loop compiled to WebAssembly, a race track, and a lap timer. Plug in a gamepad and go." />
     <meta property="og:image" content="https://webfpv.org/sim/og.png" />
     <meta property="og:image:type" content="image/png" />
@@ -2649,6 +2649,8 @@
        */
       .brand-patreon { margin-top: 14px; }
       .brand-patreon:empty { display: none; }
+      /* Upstream's Patreon is upstream's: not shown on this fork. */
+      .brand-patreon { display: none !important; }
       a.patreon {
         display: inline-flex; align-items: center; gap: 7px;
         height: 28px; padding: 0 11px 0 8px; border-radius: 3px;

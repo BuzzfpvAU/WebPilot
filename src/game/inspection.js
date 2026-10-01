@@ -143,6 +143,16 @@ export function createInspection({ sim, notify }) {
     push();
     lightsToView();
     document.body.classList.toggle('is-inspection', Boolean(state.af));
+    /* The title's one line of advice is a racer's ("through a gate"). */
+    const note = document.querySelector('.first-note');
+    if (note) {
+      if (!note.dataset.upstream) {
+        note.dataset.upstream = note.textContent;
+      }
+      note.textContent = state.af
+        ? 'Push the left stick up to take off. Centred sticks hold position and height, so stop, look, and light what you are inspecting.'
+        : note.dataset.upstream;
+    }
     if (!state.af) {
       hud.style.display = 'none';
     }
