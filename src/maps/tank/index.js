@@ -255,11 +255,14 @@ const _fwd = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
 
-function aimLights(lights, quad, on, level) {
+/* The lights stand on the aircraft (quad.position) and point along `aim`,
+ * which is the camera gimbal's orientation when the shell has set one and
+ * the airframe's own otherwise. */
+function aimLights(lights, quad, aim, on, level) {
   const k = on ? level : 0;
-  _fwd.set(0, 0, -1).applyQuaternion(quad.quaternion);
-  _right.set(1, 0, 0).applyQuaternion(quad.quaternion);
-  _up.set(0, 1, 0).applyQuaternion(quad.quaternion);
+  _fwd.set(0, 0, -1).applyQuaternion(aim);
+  _right.set(1, 0, 0).applyQuaternion(aim);
+  _up.set(0, 1, 0).applyQuaternion(aim);
   for (const l of lights.spots) {
     const side = l.userData.side;
     l.intensity = lights.cd * k;
@@ -516,8 +519,35 @@ export async function buildMap(shell, onProgress, options) {
   const fwd = new THREE.Vector3();
   let exposure = 1.0;
   let lastMs = performance.now();
+  /* The gimbal's orientation, set by the shell (src/game/inspection.js)
+   * each frame, or null for the airframe's own. */
+  let aimQuat = null;
+  const aimNow = () => aimQuat || shell.quad.quaternion;
+  /*
+   * The first solid along a ray, analytically: the shell's inside, the
+   * floor, the roof and the centre column. Used by the auto exposure and
+   * by the photo grader and POI markers (rayHit below). Returns the
+   * distance, at most 50 m.
+   */
   const frontDistance = (p, f) => {
     let t = 50;
+    {
+      /* The column, from outside: the near root of the ray against a
+       * vertical cylinder of radius columnR on the axis. */
+      const a = f.x * f.x + f.z * f.z;
+      if (a > 1e-9) {
+        const b = 2 * (p.x * f.x + p.z * f.z);
+        const c = p.x * p.x + p.z * p.z - T.columnR * T.columnR;
+        const disc = b * b - 4 * a * c;
+        if (c > 0 && disc >= 0) {
+          const tc = (-b - Math.sqrt(disc)) / (2 * a);
+          const y = p.y + tc * f.y;
+          if (tc > 0 && y >= 0 && y <= T.height) {
+            t = Math.min(t, tc);
+          }
+        }
+      }
+    }
     const a = f.x * f.x + f.z * f.z;
     if (a > 1e-9) {
       const b = 2 * (p.x * f.x + p.z * f.z);
@@ -538,12 +568,12 @@ export async function buildMap(shell, onProgress, options) {
     return Math.max(0.05, t);
   };
   scene.onBeforeRender = () => {
-    aimLights(lights, shell.quad, lightsOn, level);
+    aimLights(lights, shell.quad, aimNow(), lightsOn, level);
     {
       const now = performance.now();
       const dt = Math.min(0.25, (now - lastMs) / 1000);
       lastMs = now;
-      fwd.set(0, 0, -1).applyQuaternion(shell.quad.quaternion);
+      fwd.set(0, 0, -1).applyQuaternion(aimNow());
       const d = frontDistance(shell.quad.position, fwd);
       const want = lightsOn ? Math.min(1, Math.max(0.03, (d / 1.6) * (d / 1.6))) : 1;
       exposure += (want - exposure) * Math.min(1, dt * 3);
@@ -553,7 +583,7 @@ export async function buildMap(shell, onProgress, options) {
       const u = motes.mat.uniforms;
       u.uCentre.value.copy(shell.quad.position);
       u.uLight.value.copy(shell.quad.position);
-      u.uDir.value.set(0, 0, -1).applyQuaternion(shell.quad.quaternion);
+      u.uDir.value.set(0, 0, -1).applyQuaternion(aimNow());
       u.uOn.value = lightsOn ? level : 0;
       u.uPx.value = renderer.getPixelRatio() * renderer.domElement.height * 0.01;
       /* A slow drift, so the motes are air and not a texture. Wall clock,
@@ -563,9 +593,85 @@ export async function buildMap(shell, onProgress, options) {
     }
   };
 
+  /*
+   * PHOTOGRAPHS. A capture is taken from the drawing buffer straight after
+   * the frame is rendered, in the same task, which is the one moment a
+   * WebGL canvas without preserveDrawingBuffer still holds the picture. It
+   * is scaled to a thumbnail and its brightness measured over the middle
+   * of the frame, for the grader in src/game/inspection.js.
+   */
+  let pendingShot = null;
+  const shotCanvas = document.createElement('canvas');
+  const takeShot = () => {
+    const src = renderer.domElement;
+    const w = 320;
+    const h = Math.max(1, Math.round((w * src.height) / Math.max(1, src.width)));
+    shotCanvas.width = w;
+    shotCanvas.height = h;
+    const g = shotCanvas.getContext('2d', { willReadFrequently: true });
+    g.drawImage(src, 0, 0, w, h);
+    const px = g.getImageData(Math.round(w * 0.25), Math.round(h * 0.25), Math.round(w * 0.5), Math.round(h * 0.5)).data;
+    let sum = 0;
+    let clipped = 0;
+    let dark = 0;
+    const n = px.length / 4;
+    for (let i = 0; i < px.length; i += 4) {
+      const l = (0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]) / 255;
+      sum += l;
+      if (l > 0.96) {
+        clipped += 1;
+      }
+      if (l < 0.04) {
+        dark += 1;
+      }
+    }
+    return {
+      url: shotCanvas.toDataURL('image/jpeg', 0.82),
+      luma: sum / n,
+      clipped: clipped / n,
+      dark: dark / n,
+    };
+  };
+  /* POI markers: a small lit ring where each photograph was aimed, with
+   * its number. Part of this world, so they go when it does. */
+  const markers = new THREE.Group();
+  scene.add(markers);
+  const markerMat = new THREE.MeshBasicMaterial({ color: 0x7dffb0, transparent: true, opacity: 0.9, depthTest: true });
+  const markerGeo = new THREE.TorusGeometry(0.09, 0.012, 6, 24);
+  const label = (text) => {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 64;
+    const g = c.getContext('2d');
+    g.fillStyle = 'rgba(8,12,10,0.75)';
+    g.beginPath();
+    g.arc(32, 32, 28, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#7dffb0';
+    g.font = 'bold 30px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(text, 32, 34);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    sp.scale.set(0.16, 0.16, 1);
+    sp.renderOrder = 10;
+    return sp;
+  };
+
   const post = {
     render() {
       renderer.render(scene, camera);
+      if (pendingShot) {
+        const cb = pendingShot;
+        pendingShot = null;
+        try {
+          cb(takeShot());
+        } catch (e) {
+          cb(null);
+        }
+      }
     },
     setSize() {},
     dispose() {},
@@ -619,6 +725,40 @@ export async function buildMap(shell, onProgress, options) {
       }
     },
     lightsState: () => ({ on: lightsOn, level }),
+    /* The camera gimbal's world orientation (a THREE.Quaternion), or null. */
+    setLightAim(q) {
+      aimQuat = q || null;
+    },
+    /* The first solid along a ray from p in direction d (unit), Three.js
+     * frame: { distance, point }. */
+    rayHit(p, d) {
+      const t = frontDistance(p, d);
+      return { distance: t, point: new THREE.Vector3().copy(p).addScaledVector(d, t) };
+    },
+    /* Take a photograph from the next rendered frame; cb gets
+     * { url, luma, clipped, dark } or null. */
+    capture(cb) {
+      pendingShot = cb;
+    },
+    /* A POI marker at point, facing back along the camera ray dir. */
+    addMarker(point, dir, text) {
+      const ring = new THREE.Mesh(markerGeo, markerMat);
+      ring.position.copy(point).addScaledVector(dir, -0.02);
+      ring.lookAt(ring.position.clone().sub(dir));
+      const sp = label(text);
+      sp.position.copy(point).addScaledVector(dir, -0.06);
+      sp.position.y += 0.15;
+      markers.add(ring, sp);
+    },
+    clearMarkers() {
+      for (const c of [...markers.children]) {
+        markers.remove(c);
+        if (c.isSprite) {
+          c.material.map.dispose();
+          c.material.dispose();
+        }
+      }
+    },
     tank: { ...T },
     stats: () => ({
       colliders: colliders.stats(),

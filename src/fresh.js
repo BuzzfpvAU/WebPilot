@@ -123,6 +123,7 @@
     'src/game/gaps.js',
     'src/game/ghost.js',
     'src/game/guide.js',
+    'src/game/inspection.js',
     'src/game/obstacles.js',
     'src/game/plantworld.js',
     'src/game/proven.js',

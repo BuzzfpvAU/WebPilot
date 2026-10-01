@@ -3081,6 +3081,7 @@ export async function boot({ loading, bootStart, mapId }) {
   let inspectionBounces = 0;
   const inspection = createInspection({
     sim,
+    input,
     notify: (text) => { notice = { text, untilMs: performance.now() + 2600 }; },
   });
   /* The seated world's own note, waiting for a flight to be said over. See
@@ -8461,7 +8462,13 @@ export async function boot({ loading, bootStart, mapId }) {
       fpvPos.y += parkedLift;
     }
     lastFpvY = fpvPos.y;
-    fpvQuat.copy(qPrev).multiply(qTilt);
+    /* An inspection aircraft's camera is on a stabilised gimbal the pilot
+     * tilts (src/game/inspection.js); every other camera is bolted on. */
+    if (inspection.active()) {
+      inspection.gimbal(qPrev, fpvQuat);
+    } else {
+      fpvQuat.copy(qPrev).multiply(qTilt);
+    }
     /*
      * Vibration, so the buzz the flight controller is fighting is something
      * the pilot can see. Driven by the motors' own speed out of the state
@@ -9186,6 +9193,8 @@ export async function boot({ loading, bootStart, mapId }) {
         height: p.y - view.height(p.x, p.z, p.y - SURFACE_BIAS, p.y),
         hit: bounceCount !== inspectionBounces,
         speed,
+        quad: shell.quad,
+        rate: Math.hypot(st[11], st[12], st[13]),
       });
       inspectionBounces = bounceCount;
       const ch = input.channels;
@@ -10696,7 +10705,11 @@ export async function boot({ loading, bootStart, mapId }) {
     shell.quad.position.copy(pCurr);
     shell.quad.quaternion.copy(qPrev);
     shell.quad.visible = false;
-    fpvQuat.copy(qPrev).multiply(qTilt);
+    if (inspection.active()) {
+      inspection.gimbal(qPrev, fpvQuat);
+    } else {
+      fpvQuat.copy(qPrev).multiply(qTilt);
+    }
     shell.camera.position.copy(fpvPos);
     shell.camera.quaternion.copy(fpvQuat);
     shell.camera.fov = ui.settings.cameraFov;

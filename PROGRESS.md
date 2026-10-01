@@ -62570,3 +62570,41 @@ Pages from this branch, or Render with the existing blueprint, serves it as it i
                              behind Inspection training shows the inspection line and no Support or board rows;
                              document.title is the fork's
     not run                  npm run verify (no physics, plant, ABI or build change in this entry)
+
+## 2026-10-01 | inspection | Camera gimbal tilt, photos, POI markers and photo grading
+
+The owner flew the deployed build ("it seems to work quite well") and asked for camera tilt and a simulated photo
+or POI. Asked before building, the owner chose: keys plus a gamepad or radio control; +90 to -90 degrees; the
+lights follow the camera; photos with a shutter and gallery, 3D POI markers, and a photo quality grade (not
+export, for now).
+
+### What was built
+
+- src/game/inspection.js: a stabilised gimbal (level horizon, the aircraft's heading, the pilot's tilt) that
+  main.js uses for the FPV camera in place of the fixed uptilt when an inspection aircraft is seated. Q and E
+  held tilt it at 60 deg/s, Z levels it. K learns a gamepad or radio's controls the way upstream learns the
+  restart switch, in three steps: a dial or slider (absolute tilt, like a gimbal wheel) or a TILT UP button then
+  a TILT DOWN button, then a shutter button or switch; the stick axes are never taken; saved in localStorage.
+  P takes a photo: shutter flash and sound, a 320 px thumbnail of the rendered frame, a numbered POI marker
+  where the camera ray meets a surface, and a grade: REJECT for too dark, overexposed or motion blur, USABLE for
+  too close (under 0.3 m) or too far (over 4 m), else GOOD. O opens the gallery. Reset clears photos and markers.
+- src/maps/tank/index.js: lights, dust and auto exposure follow the gimbal (setLightAim); rayHit (the shell,
+  floor, roof and now the centre column, analytically); capture, read from the drawing buffer straight after
+  the render in the same task; addMarker and clearMarkers.
+
+### What went wrong
+
+- The first browser run threw a frame fault: the new ground speed field was named `state.speed`, which already
+  held the speed mode index, so the HUD read `a.speeds[1.37]`. Renamed to `state.gs`.
+
+### RUN LOG
+
+    browser                  shots.js in the tank: tilt +53 lit the roof rafters; tilt -73 and a photo of the
+                             floor at 2.54 m graded GOOD; the same while moving at 0.6 stick graded REJECT,
+                             motion blur; the roof at 4.53 m REJECT, too dark and too far; the column level at
+                             2.02 m GOOD; four numbered markers drawn; the gallery shows all four with their
+                             grades; window.__frameFault null after the fix
+    learned controls         a simulated radio (navigator.getGamepads replaced in the page): K, a dial on axis
+                             4 bound as tilt, button 2 as the shutter; the dial at -0.5 set -45 deg and the
+                             button took a photo. Not tried on a real radio or gamepad.
+    not run                  npm run verify: no physics, plant, ABI or build change

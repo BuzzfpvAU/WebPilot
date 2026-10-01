@@ -34,7 +34,21 @@ motors idle.
 | V | Next speed mode: Close, Normal, Transit, Max |
 | J | Lights on or off |
 | [ and ] | Lights down and up |
+| Q and E (hold) | Camera tilt up and down, straight up to straight down |
+| Z | Camera level |
+| P | Take a photo |
+| O | Photo gallery |
+| K | Learn a gamepad or radio's camera tilt (a dial, slider or two buttons) and shutter button |
 | R | Restart |
+
+The camera is on a stabilised gimbal: it holds the horizon level, turns with the aircraft and
+tilts from +90 to -90 degrees, and the lights tilt with it.
+
+Every photo is a thumbnail of the real frame, a numbered POI marker where the camera was
+aimed, and a grade: **GOOD**, **USABLE** (too close, under 0.3 m, or too far, over 4 m) or
+**REJECT** (too dark, overexposed, or motion blur from moving faster than 0.25 m/s or
+turning faster than 20 degrees a second). The gallery lists them with time, height, range
+and tilt. Restarting clears them.
 
 The panel at the bottom left is the ground station: the flight mode, the speed mode,
 height, the nearest surface (tethered aircraft), light output, time left on the pack
@@ -80,7 +94,7 @@ and fails on what a pilot of the class would call broken.
 2. More vessels from the same builder: a boiler, a ship's hold and ballast tanks, a
    sewer or tunnel.
 3. Inspection tasks and scoring: defects to find and photograph, coverage, contacts,
-   time and battery, and a debrief.
+   time and battery, and a debrief. Photos, POI markers and photo grading are in.
 4. The LiDAR map: a live point cloud and a ground station view, with signal loss behind
    steel.
 5. Your own structures: import `.glb` / `.gltf` models with collision generated from
