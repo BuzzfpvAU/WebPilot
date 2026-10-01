@@ -50,4 +50,7 @@ export const MAP_BUILD_MS = {
   /* The storage tank: canvas textures and a few hundred meshes. An estimate
    * until it is measured the way the others were. */
   tank: 900,
+  /* The ballast tank: two canvas textures and a few dozen merged meshes. An
+   * estimate, like the tank's. */
+  ballast: 700,
 };

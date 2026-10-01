@@ -115,6 +115,39 @@ function band(name, v, lo, hi, unit) {
 
 const CENTRE = [0, 0, 0, 0.5];
 const CLIMB = [0, 0, 0, 1.0];
+/* Forward stick is -1: +pitch on the ABI's channel is the stick pulled
+ * back. This file said [0, 1, 0, 0.5] for forward until 2026-10-01, which
+ * was right only because the autopilot had pitch the wrong way round as
+ * well; see directions() below. */
+const FORWARD = [0, -1, 0, 0.5];
+
+/*
+ * WHICH WAY THE STICKS GO, in both modes. +pitch on the ABI's channel is
+ * the stick pulled back, so forward stick is -1 and has to fly the
+ * aircraft along its nose (+x at the start, heading zero), and right stick
+ * along its right (-y). Until 2026-10-01 the autopilot read +pitch as
+ * forward, and forward stick flew both aircraft backwards: every band in
+ * this file measures distances and stops, none a direction, so nothing
+ * saw it. The bands are the sign and a third of what full stick does in
+ * two seconds.
+ */
+async function directions(af) {
+  for (const [mode, name] of [[1, 'POSITION'], [2, 'ATTI']]) {
+    console.log(`\n${af.name}, which way the sticks go, ${name}`);
+    for (const [label, sticks, axis, sgn] of [
+      ['forward stick moves along the nose', [0, -1, 0, 0.5], S.X, 1],
+      ['back stick moves away from the nose', [0, 1, 0, 0.5], S.X, -1],
+      ['right stick moves to the right', [1, 0, 0, 0.5], S.Y, -1],
+      ['left stick moves to the left', [-1, 0, 0, 0.5], S.Y, 1],
+    ]) {
+      const r = await rig(af, mode, 0, null);
+      r.fly(2.0, CLIMB);
+      const a = r.fly(1.0, CENTRE);
+      const b = r.fly(2.0, sticks);
+      band(label, sgn * (b[axis] - a[axis]), 0.3, 99, 'm');
+    }
+  }
+}
 
 async function position(af) {
   console.log(`\n${af.name}, POSITION mode`);
@@ -144,7 +177,7 @@ async function position(af) {
   let vMax = 0;
   let lean = 0;
   const start = r.fly(0.004, CENTRE);
-  const runEnd = r.fly(4.0, [0, 1, 0, 0.5], (s) => {
+  const runEnd = r.fly(4.0, FORWARD, (s) => {
     vMax = Math.max(vMax, Math.hypot(s[S.VX], s[S.VY]));
     lean = Math.max(lean, tiltDeg(s));
   });
@@ -205,7 +238,7 @@ async function atti(af) {
   r.fly(2.0, CLIMB);
   r.fly(2.0, CENTRE);
   let lean = 0;
-  r.fly(2.0, [0, 0.5, 0, 0.5], (s) => { lean = Math.max(lean, tiltDeg(s)); });
+  r.fly(2.0, [0, -0.5, 0, 0.5], (s) => { lean = Math.max(lean, tiltDeg(s)); });
   const rel = r.fly(0.004, CENTRE);
   const v0 = Math.hypot(rel[S.VX], rel[S.VY]);
   const after = r.fly(3.0, CENTRE);
@@ -227,7 +260,7 @@ async function wall(af, guard) {
   let vAway = 0;
   let tilt = 0;
   let zMin = Infinity;
-  r.fly(8.0, [0, 1, 0, 0.5], (s) => {
+  r.fly(8.0, FORWARD, (s) => {
     near = Math.min(near, x0 - s[S.X] - af.dims.hullHx);
     maxRate = Math.max(maxRate, Math.hypot(s[S.P], s[S.Q], s[S.R]));
     vAway = Math.min(vAway, s[S.VX]);
@@ -282,7 +315,7 @@ async function tankWall(af) {
   let zLo = Infinity;
   let zHi = -Infinity;
   let tilt = 0;
-  r.fly(8.0, [0, 1, 0, 0.5], (s) => {
+  r.fly(8.0, FORWARD, (s) => {
     zLo = Math.min(zLo, s[S.Z]);
     zHi = Math.max(zHi, s[S.Z]);
     tilt = Math.max(tilt, tiltDeg(s));
@@ -308,6 +341,7 @@ for (const id of ['caged', 'tethered']) {
    * That shipped once (PROGRESS.md 2026-10-01): held here, in Node. */
   band('dims.hullR minus dims.propR (collide.js needs >= 0)', af.dims.hullR - af.dims.propR, 0, 1, 'm');
   band('angle_limit in the diff minus assist.angleLimit', (m ? Number(m[1]) : NaN) - af.assist.angleLimit, 0, 0, 'deg');
+  await directions(af);
   await position(af);
   await atti(af);
   await wall(af, af.assist.guard);

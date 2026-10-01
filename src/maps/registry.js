@@ -87,6 +87,15 @@ export const MAPS = [
     load: () => import('./tank/index.js'),
   },
   {
+    id: 'ballast',
+    name: 'Ballast tank',
+    mode: 'freestyle',
+    inspection: true,
+    note: 'A ship\'s double bottom: bays 1.6 m deep between floors and girders, joined by 800 by 600 mm lightening holes. Stiffeners, brackets and coated plate in the dark, and coating breakdown, pitting, cracks and damaged stiffeners to find and photograph.',
+    buildMs: MAP_BUILD_MS.ballast,
+    load: () => import('./ballast/index.js'),
+  },
+  {
     id: 'built',
     name: 'Your map',
     mode: 'freestyle',

@@ -442,8 +442,11 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
  * entry then the bar sat at 75 percent until the import resolved.
  *
  * tank: index.js, hardware.js (the welds, bolts and schoepentoeter) and
- * defects.js, the three files under src/maps/tank. */
-const MAP_MODULE_COUNT = { field: 1, city: 72, custom: 1, built: 5, tank: 3 };
+ * defects.js, the three files under src/maps/tank.
+ *
+ * ballast: index.js and defects.js under src/maps/ballast. Both inspection
+ * worlds also load src/maps/inspect, which matches neither prefix. */
+const MAP_MODULE_COUNT = { field: 1, city: 72, custom: 1, built: 5, tank: 3, ballast: 2 };
 /* Where a map's modules live, so the loading bar can count them. Data, not a
  * ternary: the ternary read "field or else city", so a third map counted its
  * modules under the city's prefix and the bar sat at zero.
@@ -458,6 +461,7 @@ const MAP_MODULE_PREFIX = {
   custom: '/src/maps/custom',
   built: '/src/maps/built/',
   tank: '/src/maps/tank/',
+  ballast: '/src/maps/ballast/',
 };
 
 /*
@@ -5204,6 +5208,18 @@ export async function boot({ loading, bootStart, mapId }) {
    * flight included, and from the run start, where the pack is latched.
    */
   function syncKeyHover() {
+    /*
+     * On an inspection aircraft the throttle stick is the autopilot's climb
+     * request (src/native/assist.c), and the middle of it holds height, so
+     * that is where a released key has to spring back to. The hover figure
+     * below is the raw stick an unassisted machine hovers at; there is no
+     * entry for these aircraft, it fell back to the five inch's 35 percent,
+     * and the autopilot read every released key as a request to descend.
+     */
+    if (airframeById(runAirframe).inspection) {
+      input.setKeyHover(0.5);
+      return;
+    }
     input.setKeyHover(hoverStickPercent(
       normaliseRates(ui.settings.rates).throttleCap, runAirframe, runWeight, runVoltage,
     ) / 100);

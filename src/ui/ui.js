@@ -3909,9 +3909,21 @@ const INSPECT_CARD = {
   id: 'inspect',
   label: 'Inspection training',
   art: 'assets/gate/inspection.jpg',
-  blurb: 'A dark storage tank, flown on an Elios 3 class caged aircraft or a Scout 137 class tethered one. Position hold, your own lights, and faults to find and photograph.',
-  facts: ['Assisted', 'Dark tank', 'Two aircraft'],
+  blurb: 'A storage tank or a ship\'s ballast tank, in the dark, on an Elios 3 class caged aircraft or a Scout 137 class tethered one. Position hold, your own lights, and faults to find and photograph.',
+  facts: ['Assisted', 'Two vessels', 'Two aircraft'],
   action: 'inspect-pick',
+};
+
+/* The inspection pick's third step, which vessel: a picture and three
+ * words for each inspection world. The pictures are frames of each world
+ * as an aircraft sees it (scripts/gatecards.js). */
+const VESSEL_ART = {
+  tank: 'assets/gate/inspection.jpg',
+  ballast: 'assets/gate/vessel-ballast.jpg',
+};
+const VESSEL_FACTS = {
+  tank: ['14 m across', 'Schoepentoeter', 'Welds'],
+  ballast: ['1.6 m bays', '800 x 600 holes', 'Tight'],
 };
 
 /*
@@ -4145,6 +4157,9 @@ export class Ui {
     /* Whether the gate is asking its second question, which inspection
      * aircraft. See INSPECT_CARD. */
     this.inspectPick = false;
+    /* The aircraft chosen on the second step, and the vessel on the third. */
+    this.inspectWay = null;
+    this.inspectVessel = null;
     if (this.craftGate || !this.mode) {
       const way = seatedWay(this.settings, this.mode);
       const main = WAYS.filter((w) => !w.pick);
@@ -6855,6 +6870,21 @@ export class Ui {
         facts: w.facts,
         action: w.action,
       });
+      if (this.onGate() && this.inspectPick === 'vessel') {
+        /* The third question: which vessel. Every inspection world in
+         * src/maps/registry.js is a card. */
+        return [
+          ...MAPS.filter((m) => m.inspection).map((m) => ({
+            label: m.name,
+            card: `vessel-${m.id}`,
+            art: VESSEL_ART[m.id],
+            blurb: m.note,
+            facts: VESSEL_FACTS[m.id] || [],
+            action: `vessel-${m.id}`,
+          })),
+          { label: 'Back', action: 'inspect-back' },
+        ];
+      }
       if (this.onGate() && this.inspectPick) {
         /* The second question: which inspection aircraft. */
         return [
@@ -12197,7 +12227,11 @@ export class Ui {
     const items = this.items();
     if (this.onGate()) {
       const way = seatedWay(this.settings, this.mode);
-      const want = way.pick && !this.inspectPick ? INSPECT_CARD.action : way.action;
+      let want = way.pick && !this.inspectPick ? INSPECT_CARD.action : way.action;
+      if (this.inspectPick === 'vessel') {
+        const seat = MAPS.find((m) => m.id === this.settings.map && m.inspection);
+        want = seat ? `vessel-${seat.id}` : `vessel-${(MAPS.find((m) => m.inspection) || {}).id}`;
+      }
       const at = items.findIndex((it) => it.action === want);
       if (at >= 0) {
         return at;
@@ -15136,7 +15170,7 @@ export class Ui {
   /* Open or close the gate's second question, which inspection aircraft,
    * with the cursor on the card that answers it. */
   answerInspectPick(open) {
-    this.inspectPick = open;
+    this.inspectPick = open === true ? 'craft' : open;
     if (this.onUiSound) {
       this.onUiSound(open ? 'select' : 'back');
     }
@@ -15169,7 +15203,7 @@ export class Ui {
         /* Out of the inspection pick to the gate's own cards; on the gate's
          * own cards, nothing. */
         if (this.inspectPick) {
-          this.answerInspectPick(false);
+          this.answerInspectPick(this.inspectPick === 'vessel' ? 'craft' : false);
         }
         return;
       }
@@ -15321,8 +15355,21 @@ export class Ui {
       window.location.href = 'src/trackbuilder/index.html';
       return;
     }
-    if (action === 'inspect-pick' || action === 'inspect-back') {
-      this.answerInspectPick(action === 'inspect-pick');
+    if (action === 'inspect-pick') {
+      this.answerInspectPick('craft');
+      return;
+    }
+    if (action === 'inspect-back') {
+      this.answerInspectPick(this.inspectPick === 'vessel' ? 'craft' : false);
+      return;
+    }
+    /* A vessel answers the last question: seat the aircraft chosen one step
+     * back, through its own way, into this vessel. */
+    if (action.startsWith('vessel-') && this.inspectWay) {
+      this.inspectVessel = action.slice('vessel-'.length);
+      const wayAction = this.inspectWay.action;
+      this.inspectWay = null;
+      this.act(wayAction);
       return;
     }
 
@@ -15555,6 +15602,13 @@ export class Ui {
      * pilot has just stopped flying.
      */
     const way = WAYS.find((w) => w.action === action);
+    if (way && way.pick === 'inspect' && !this.inspectVessel) {
+      /* The aircraft is answered; the vessel is asked before anything is
+       * seated, so Back can still change the aircraft. */
+      this.inspectWay = way;
+      this.answerInspectPick('vessel');
+      return;
+    }
     if (way) {
       /*
        * ONLY IF IT MOVED, and this guard is a bug fix rather than a tidy.
@@ -15586,16 +15640,16 @@ export class Ui {
       this.returnTo = 'title';
       this.roomFrom = null;
       if (way.inspection) {
-        /* Into an inspection world whatever the seat was: a pilot who
-         * took the caged aircraft into the town last time and comes back
-         * through this card asked for a tank. */
+        /* Into the vessel the pilot chose, or an inspection world whatever
+         * the seat was: a pilot who took the caged aircraft into the town
+         * last time and comes back through this card asked for a vessel. */
+        const chosen = MAPS.find((m) => m.inspection && m.id === this.inspectVessel);
+        this.inspectVessel = null;
         const seated = MAPS.find((m) => m.id === this.settings.map);
-        if (!(seated && seated.inspection)) {
-          const world = MAPS.find((m) => m.inspection);
-          if (world) {
-            this.seatWorld(world);
-            return;
-          }
+        const world = chosen || (seated && seated.inspection ? null : MAPS.find((m) => m.inspection));
+        if (world && world.id !== this.settings.map) {
+          this.seatWorld(world);
+          return;
         }
       } else if (way.mode === 'race') {
         if (!hasLoadedTrack()) {

@@ -299,7 +299,10 @@ int assist_run(const SimState *s, const double pilot[4], double rc_out[4], int o
   if (g_cfg.mode == 1) {
     if (sticks_h) {
       A.hold_xy = 0;
-      const double fwd = s_pitch * g_cfg.v_h;
+      /* +pitch on the ABI's channel is the stick pulled BACK, so forward
+       * is its negative. It was s_pitch until 2026-10-01, and forward
+       * stick flew the aircraft backwards: see PROGRESS.md. */
+      const double fwd = -s_pitch * g_cfg.v_h;
       const double left = -s_roll * g_cfg.v_h;
       v_des[0] = fwd * fx + left * lx;
       v_des[1] = fwd * fy + left * ly;
@@ -353,7 +356,7 @@ int assist_run(const SimState *s, const double pilot[4], double rc_out[4], int o
     lean_fwd = atan_det(a_fwd / g);
     lean_right = atan_det(-a_left / g);
   } else {
-    lean_fwd = s_pitch * g_cfg.tilt_max;
+    lean_fwd = -s_pitch * g_cfg.tilt_max;
     lean_right = s_roll * g_cfg.tilt_max;
   }
   lean_fwd = clampd(lean_fwd, -g_cfg.tilt_max, g_cfg.tilt_max);
