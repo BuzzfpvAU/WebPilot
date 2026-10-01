@@ -111,6 +111,7 @@ import { MAPS, mapById } from './maps/registry.js';
 import { MAP_PRELOAD } from './maps/preload.js';
 import { TUNES, tuneById, tunePath } from '../configs/registry.js';
 import { airframeById, simIdFor } from '../configs/airframes.js';
+import { createInspection } from './game/inspection.js';
 import { buildWhoopCraft } from './render/whoopcraft.js';
 import { hoverStickPercent, normaliseRates, ratesAreDefault, ratesDiff, ratesSummary, TOUCH_RATE_DEFAULTS } from '../configs/rates.js';
 import { clearPidsFor, PID_AXES, pidCliKey, pidsDiffFor, SLIDER_KEYS, SLIDERS } from '../configs/pids.js';
@@ -439,7 +440,7 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
  * alone. The entry is written out because it has moved with the directory:
  * it was three before looks.js came and four before egg.js, and with no
  * entry then the bar sat at 75 percent until the import resolved. */
-const MAP_MODULE_COUNT = { field: 1, city: 72, custom: 1, built: 5 };
+const MAP_MODULE_COUNT = { field: 1, city: 72, custom: 1, built: 5, tank: 1 };
 /* Where a map's modules live, so the loading bar can count them. Data, not a
  * ternary: the ternary read "field or else city", so a third map counted its
  * modules under the city's prefix and the bar sat at zero.
@@ -453,6 +454,7 @@ const MAP_MODULE_PREFIX = {
   city: '/src/maps/city/',
   custom: '/src/maps/custom',
   built: '/src/maps/built/',
+  tank: '/src/maps/tank/',
 };
 
 /*
@@ -1156,9 +1158,20 @@ export async function boot({ loading, bootStart, mapId }) {
   if (tuneText == null) {
     tuneText = new TextDecoder().decode(await fetchBytes(tunePath(configId)));
   }
+  /*
+   * THE RATES A CONFIG IS COMPOSED WITH. The pilot's own, except on an
+   * inspection aircraft, whose autopilot asks Betaflight's angle mode for a
+   * lean by stick position, and angle mode reads the stick through the
+   * rates curve: those fly the airframe's own linear rates whatever the
+   * menu holds. See `rates` on the inspection rows of configs/airframes.js.
+   */
+  const flownRates = (r) => {
+    const af = airframeById(ui.settings.airframe);
+    return af.inspection ? af.rates : r;
+  };
   let ratesText = ratesDiff(ui.settings.rates);
   let pidsText = pidsDiffFor(ui.settings.pids, configId);
-  let configText = composeConfig(tuneText, ui.settings.rates, RATES_KEEP, pidsText);
+  let configText = composeConfig(tuneText, flownRates(ui.settings.rates), RATES_KEEP, pidsText);
   if (sim.init(configText) !== SIM_OK) {
     if (configId !== 'custom') {
       throw new Error(`sim_init failed on ${configName}`);
@@ -1173,7 +1186,7 @@ export async function boot({ loading, bootStart, mapId }) {
     ui.persistSettings();
     tuneText = new TextDecoder().decode(await fetchBytes(tunePath(configId)));
     pidsText = pidsDiffFor(ui.settings.pids, configId);
-    configText = composeConfig(tuneText, ui.settings.rates, RATES_KEEP, pidsText);
+    configText = composeConfig(tuneText, flownRates(ui.settings.rates), RATES_KEEP, pidsText);
     if (sim.init(configText) !== SIM_OK) {
       throw new Error(`sim_init failed on ${configName}`);
     }
@@ -1985,8 +1998,11 @@ export async function boot({ loading, bootStart, mapId }) {
    * Only 'scored' puts a clock on the run, so 'off' and 'free' alike leave
    * score.timed false and the run never ends.
    */
-  const scoredRun = () => ui.settings.freestyleScoring === 'scored';
-  const scoringWanted = () => ui.settings.freestyleScoring !== 'off';
+  /* An inspection aircraft is not flown for tricks or against a clock: its
+   * run is an inspection, and the counter stays out of it. */
+  const inspectionSeated = () => Boolean(airframeById(ui.settings.airframe).inspection);
+  const scoredRun = () => !inspectionSeated() && ui.settings.freestyleScoring === 'scored';
+  const scoringWanted = () => !inspectionSeated() && ui.settings.freestyleScoring !== 'off';
   const score = new Counter({ timed: scoredRun(), tricks: scoringWanted() });
   /*
    * THE COUNTER'S GEOMETRY. The named gaps (src/game/gaps.js) are fed every
@@ -3060,6 +3076,13 @@ export async function boot({ loading, bootStart, mapId }) {
    * the aircraft changes rather than posing the old one. */
   let showcaseCraft = '5inch';
   let notice = null; /* { text, untilMs } for one off shell messages */
+  /* The inspection aircraft's autopilot settings, keys, lights and HUD.
+   * See src/game/inspection.js. */
+  let inspectionBounces = 0;
+  const inspection = createInspection({
+    sim,
+    notify: (text) => { notice = { text, untilMs: performance.now() + 2600 }; },
+  });
   /* The seated world's own note, waiting for a flight to be said over. See
    * showCourseNotes. */
   let heldNotes = null;
@@ -4326,6 +4349,7 @@ export async function boot({ loading, bootStart, mapId }) {
      * next fault is a new one and deserves to be reported in its turn. See
      * the frame boundary. */
     frameFault = null;
+    inspection.reset();
     /* A new run, so the mark is there to be found again, and the partners'. */
     eggFound = false;
     marksFound.clear();
@@ -4742,6 +4766,10 @@ export async function boot({ loading, bootStart, mapId }) {
   }
 
   function wantAngleMode() {
+    /* The inspection autopilot flies Betaflight in angle mode, always. */
+    if (airframeById(runAirframe).inspection) {
+      return true;
+    }
     if (crashflipOn || turtleRecover) {
       return false;
     }
@@ -5239,6 +5267,10 @@ export async function boot({ loading, bootStart, mapId }) {
         if (typeof sim.e.sim_set_airframe === 'function') {
           sim.e.sim_set_airframe(simIdFor(runAirframe));
         }
+        /* The inspection autopilot on for an inspection aircraft and off for
+         * every other, and angle mode with it. */
+        inspection.apply(runAirframe);
+        syncAngleMode();
         /*
          * The plant changed under a module that is already initialised, so
          * everything the shell derived from the OLD plant has to follow: the
@@ -5402,7 +5434,7 @@ export async function boot({ loading, bootStart, mapId }) {
        * already overwritten configText with the rejected text, so every one
        * of those recoveries would have restored the bad config too.
        */
-      const nextText = composeConfig(tuneText, s.rates, RATES_KEEP, pidsText);
+      const nextText = composeConfig(tuneText, flownRates(s.rates), RATES_KEEP, pidsText);
       /* Read BEFORE the init that zeroes it. */
       const before = readState();
       if (sim.init(nextText) === SIM_OK) {
@@ -5435,7 +5467,7 @@ export async function boot({ loading, bootStart, mapId }) {
       /* A local first, same reason as rates above: a refused sim_init has
        * already half-applied the new text, and recovery must restore the
        * text that worked, not the rejected one. */
-      const nextText = composeConfig(tuneText, s.rates, RATES_KEEP, nextPids);
+      const nextText = composeConfig(tuneText, flownRates(s.rates), RATES_KEEP, nextPids);
       if (sim.init(nextText) === SIM_OK) {
         pidsText = nextPids;
         configText = nextText;
@@ -5517,7 +5549,7 @@ export async function boot({ loading, bootStart, mapId }) {
      * is keyed by tune id, and carrying the old block across would fly one
      * tune with another tune's sliders. */
     const nextPids = pidsDiffFor(ui.settings.pids, entry.id);
-    const nextText = composeConfig(text, ui.settings.rates, RATES_KEEP, nextPids);
+    const nextText = composeConfig(text, flownRates(ui.settings.rates), RATES_KEEP, nextPids);
     const code = sim.init(nextText);
     if (code !== SIM_OK) {
       ui.settings.tune = configId;
@@ -6038,7 +6070,7 @@ export async function boot({ loading, bootStart, mapId }) {
     bumpConfigGen();
     const nextRates = normaliseRates(ratesFromDump(draft));
     const body = tuneBody(draft);
-    const nextText = composeConfig(body, nextRates, RATES_KEEP, '');
+    const nextText = composeConfig(body, flownRates(nextRates), RATES_KEEP, '');
     const code = sim.init(nextText);
     if (code !== SIM_OK) {
       notice = { text: `That dump could not be saved.\n${configFault(code)}`, untilMs: performance.now() + 3600 };
@@ -6696,6 +6728,10 @@ export async function boot({ loading, bootStart, mapId }) {
       setCrashflip(false);
       turtleRecover = false;
       setDownNearby();
+      return;
+    }
+    /* The inspection aircraft's own keys, M among them, before Angle or Acro. */
+    if (ui.screen === 'flight' && mode === 'flight' && inspection.key(code)) {
       return;
     }
     /* Angle or Acro, from the keyboard. See flipFlightMode. */
@@ -9144,6 +9180,14 @@ export async function boot({ loading, bootStart, mapId }) {
         ghostGapMs: ghostGap && nowWall < ghostGap.untilWall ? ghostGap.deltaMs : null,
         ghostFinal: Boolean(ghostGap && ghostGap.final),
       });
+      inspection.frame({
+        view,
+        flight: true,
+        height: p.y - view.height(p.x, p.z, p.y - SURFACE_BIAS, p.y),
+        hit: bounceCount !== inspectionBounces,
+        speed,
+      });
+      inspectionBounces = bounceCount;
       const ch = input.channels;
       const vis = turtleAxes(ch.roll, ch.pitch);
       ui.setStickOverlay({
@@ -9339,7 +9383,12 @@ export async function boot({ loading, bootStart, mapId }) {
       let second = runLaps === PRACTICE_LAPS
         ? '\nPractice: no lap limit. The green gate starts your lap'
         : '\nThe green gate starts your lap';
-      if (race.freestyle) {
+      if (inspectionSeated()) {
+        /* The inspection aircraft takes off on a push of the left stick and
+         * holds where it is left, which is the thing a racer will not
+         * expect. */
+        second = '\nLeft stick up to climb, centred holds. Right stick moves. M Position or ATTI.';
+      } else if (race.freestyle) {
         /* The counter counts the lines in every position (decision 2), so
          * even Lines only has something to promise now. With Manga and
          * scoring off none of that count is drawn, so the line promises
@@ -10432,6 +10481,22 @@ export async function boot({ loading, bootStart, mapId }) {
   });
   window.__race = () => ({
     laps: race ? race.laps : [],
+  });
+  /* The inspection panel's state and the autopilot's report, for checks. */
+  window.__inspection = () => ({
+    ...inspection.snapshot(),
+    landed,
+    takingOff,
+    z: stateCurr ? stateCurr[3] : null,
+    vz: stateCurr ? stateCurr[6] : null,
+    throttleIn: input.channels.throttle,
+    notice: notice ? notice.text : null,
+    bounces: bounceCount,
+    airframeModule: typeof sim.e.sim_airframe === 'function' ? sim.e.sim_airframe() : null,
+    gravity: sim.e.sim_gravity ? sim.e.sim_gravity() : null,
+    air: sim.e.sim_air ? sim.e.sim_air() : null,
+    volts: stateCurr ? stateCurr[18] : null,
+    rpm: stateCurr ? stateCurr[14] : null,
   });
   window.__craftState = () => ({
     mode,

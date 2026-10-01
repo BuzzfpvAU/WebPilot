@@ -1730,6 +1730,15 @@ static void world_solve(SimState *s, int nc, double np_[][3], double rp_[][3],
       sv->r[a] = rp_[c][a];
       sv->vs[a] = vsp_[c][a];
     }
+    /* A decoupled cage (PlantParams cage_decouple, the caged aircraft):
+     * the arm shrinks toward the CG, so the contact stops the craft without
+     * turning it. Never entered at 0, so no other airframe's arithmetic
+     * changes. */
+    if (PLANT.cage_decouple > 0.0 && ct->kind == 0) {
+      for (int a = 0; a < 3; a += 1) {
+        sv->r[a] -= PLANT.cage_decouple * sv->r[a];
+      }
+    }
     tangents(sv->n, sv->t1, sv->t2);
     sv->kn = eff_mass_inv(s->quat, sv->r, sv->n);
     sv->kt1 = eff_mass_inv(s->quat, sv->r, sv->t1);

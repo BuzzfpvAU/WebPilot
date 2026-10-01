@@ -47,4 +47,7 @@ export const MAP_BUILD_MS = {
    * as heavy as what they put on it, so this is the weight of a full yard
    * rather than a promise about every map. */
   built: 1353,
+  /* The storage tank: canvas textures and a few hundred meshes. An estimate
+   * until it is measured the way the others were. */
+  tank: 900,
 };

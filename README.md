@@ -1,3 +1,10 @@
+# WebPilot: WebFPVSimulator for inspection training
+
+This is a fork of WebFPVSimulator that adds confined space industrial inspection
+training: caged and tethered inspection aircraft under their own autopilot, flown in a
+dark storage tank. See [INSPECTION.md](INSPECTION.md). Everything below is upstream's
+README and still applies.
+
 # WebFPVSimulator
 
 A browser FPV simulator whose only current goal is flight feel

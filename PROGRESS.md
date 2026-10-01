@@ -62471,3 +62471,77 @@ Asked before any code, answered in the conversation:
     check:inspection         all passed (above)
     not run                  shots.js and a hand flight: the shell does not offer these aircraft yet. Feel is
                              not verified and is not claimed: the harness is green and the feel awaits the owner.
+
+## 2026-10-01 | inspection | The inspection mode in the shell, and the cage made decoupled
+
+### What was built
+
+- Title screen: a fifth card, **Inspection training** (WAYS in src/ui/ui.js, `inspection: true`), which seats
+  the caged aircraft and the storage tank. Inspection worlds are never offered as the answer to "freestyle"
+  (freestyleWorldToSeat) and seating an inspection aircraft moves the seat into one (seatAirframe), leaving one
+  moves it back to the track. The gate's column is widened from 100em to 118em for five cards.
+- `src/maps/registry.js`: the tank, `mode: 'freestyle'` so the rest of the shell treats it as a freestyle world,
+  `inspection: true` so the gate and the seat do not.
+- `src/game/inspection.js`: the shell's side. Pushes each airframe's autopilot settings to the module (or turns
+  it off for any other aircraft), the keys M (Position or ATTI), V (speed mode), J (lights), [ and ] (light
+  level), the ground station panel, and a body class that hides the trick score, the clock, the weight slider
+  and the pack corner while an inspection aircraft is seated. Wired into main.js in a handful of calls:
+  `inspection.apply` beside sim_set_airframe, `wantAngleMode` true for these airframes, `flownRates` around every
+  composeConfig so they fly their own linear rates, scoring off for them, a takeoff banner, `inspection.frame`
+  beside setOsd, `inspection.reset` in reset(), and `window.__inspection` for checks.
+- `src/maps/tank/index.js`: the aircraft's lights got an EXPOSURE scale (a camera setting, argued in the file)
+  after the first frames were blown out to white, and the spawn moved to 3 m from the axis (below).
+- INSPECTION.md, and a header on README.md saying what this fork is.
+
+### What went wrong
+
+- The first flight in the shell would not climb: the spawn was at radius 4.6 m, which is exactly the heating
+  coil's radius, so the aircraft spawned wedged under the coil. Moved to 3 m.
+- THE CAGE CLIMBED THE WALL. Flown into the curved tank wall after a yaw, the caged aircraft rose at up to 4 m/s
+  while the autopilot cut its throttle to the floor. Headless reproduction (240 capsules, as the tank) showed the
+  contact normals horizontal and the climb present at friction 0, so not friction: the forward pitched hull box
+  met the wall on its top front edge 25 cm above the CG, the angle loop fought that moment, the I term wound up
+  and Betaflight's airmode raised all four motors to keep authority. First fix tried: a round hull (normal
+  impulse through the CG). The climb went, but at any friction over 0.1 the friction moment at the cage radius
+  and the angle loop fed each other and it tipped past 80 degrees on the wall. Second fix, kept: a decoupled
+  cage, `cage_decouple` in PlantParams, 1.0 on the caged airframe and 0 (so absent from the arithmetic) on every
+  other: a frame contact's impulse acts through the CG and stops, bounces and drags the aircraft without turning
+  it. Held 1.63 to 1.75 m pushing on the wall at friction 0, 0.2, 0.42 and 0.8, lean 17 degrees, which is the
+  autopilot's own. That is the class's defining design (a cage that takes a collision without destabilising
+  the airframe) modelled at its limit, and the flat wall tap's 225 deg/s spike went with it (15.7 deg of lean
+  now). This is a physics change inside the owner's approval of the morning (cage collisions), recorded here.
+- `npm run check:inspection` gained the curved wall case so this cannot come back.
+- The lights first blew the frame to white (physical candela on an untone mapped renderer), then the wall a
+  hand's width away did. Now: an EXPOSURE scale on the candela, ACES tone mapping set by the tank and put back
+  on dispose, and an auto exposure from an analytic ray against the tank's cylinder and planes, eased like a
+  camera's. Close up the shell texture is soft (about 90 px a metre): detail textures are for the vessel round.
+- `npm run lint:shell` asserted exactly three ways in plus the builder; the gate now has four ways in and the
+  builder, so the lint's count and label list were updated to five cards (scripts/, not tests/). Its other
+  failure, "credits: the list hangs 1540 px off the bottom of the window, was 1518 px", fails identically on an
+  untouched checkout of upstream `f745664` in this container (run in a scratch worktree this turn), so it is
+  the container's fonts and not this work.
+
+### RUN LOG
+
+    files                    src/native/sim_internal.h, plant.c, world.c (cage_decouple); dist/sim.wasm;
+                             src/game/inspection.js (new); src/main.js; src/ui/ui.js; index.html;
+                             src/maps/registry.js, build-cost.js, tank/index.js; assets/gate/inspection.jpg
+                             (new, a frame of the tank from shots.js); scripts/inspection-check.js (curved
+                             wall case); scripts/shell-check.js (five cards); src/fresh.js (gen:preload);
+                             INSPECTION.md (new); README.md
+    verify                   npm run verify: 18 of 18, exit 0, trace de0401cd4266 (unchanged from before the
+                             fork), every numeric row identical to the earlier runs
+    goldens                  check:plant all passed; check:world-golden all passed (cage_decouple is 0 on
+                             every airframe they fly)
+    check:inspection         all passed, including the new curved tank wall case: height held to 0.09 m,
+                             lean 17.0 deg while pushing on the wall after a yaw
+    lints                    lint:preload up to date; lint:presets 6 of 6 clean (the two new tunes included);
+                             lint:nouns PASS; lint:boot 9 of 9; lint:responsive PASS; lint:devices PASS;
+                             lint:shell 1 problem, the credits overflow, identical on upstream (above)
+    browser                  scripts/shots.js through the real gate: Inspection training seats the caged
+                             aircraft in the tank, takes off on the left stick, holds 2.2 m, yaws, pushes
+                             into the curved wall and holds 1.72 m there with contacts counted; M, V, J and
+                             [ ] all act; frames looked at at the column, at the wall and backing off it
+    not run                  lint:input (slow, input untouched), lint:catalog (cannot run here). Nothing was
+                             flown by a person, on a real GPU or on a phone: the harness is green and the
+                             feel awaits the owner.

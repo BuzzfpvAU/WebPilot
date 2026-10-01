@@ -144,6 +144,14 @@ typedef struct {
   double camera_x;      /* lens glass in the body frame */
   double camera_y;
   double camera_z;
+  /* How much of a frame contact's turning moment the cage keeps away from
+   * the airframe, 0 to 1. 0 is every airframe that is not caged: the push
+   * acts at the hull point it touches. 1 is a cage decoupled from the
+   * airframe it protects, so a contact's impulse, normal and friction both,
+   * acts through the CG: it stops, bounces and drags the aircraft and never
+   * turns it. world.c scales each frame contact arm by 1 minus this. Zero,
+   * and so absent from the arithmetic, on every airframe that is not caged. */
+  double cage_decouple;
 } PlantParams;
 
 /*

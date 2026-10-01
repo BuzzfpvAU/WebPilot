@@ -76,7 +76,9 @@ export const TANK = {
   nozzleR: 0.35,
   nozzleLen: 0.9,
   ladderAngle: Math.PI * 0.5,
-  spawn: { x: 0, z: 4.6, yaw: 0 },
+  /* Between the centre column (0.3 m) and the heating coil (4.6 m), on the
+   * floor, facing the column. */
+  spawn: { x: 0, z: 3.0, yaw: 0 },
 };
 
 /* A canvas texture of rolled steel plate: a mill scale ground, rust
@@ -217,9 +219,21 @@ function floorTexture(size, seed) {
  * pi steradians, about 5,000 cd, split over two units. `lumens` scales it
  * so the tethered class's 12,000 lumens are dimmer by the same ratio.
  */
+/*
+ * THE EXPOSURE. The renderer draws with no tone mapping and an sRGB output,
+ * so a physically lit surface is "white" at a radiance of 1. A real camera
+ * on one of these aircraft exposes for the patch its lights hit, a couple
+ * of metres off, and a 5,000 cd array there is a few hundred lux. This
+ * scale is that exposure: the candela the lights really have, times the
+ * fraction that puts a grey steel wall two metres away at mid grey. It is
+ * a camera setting, not a property of the lights, which is why it is one
+ * number here rather than a smaller lumen figure in configs/airframes.js.
+ */
+const EXPOSURE = 0.016;
+
 function craftLights(scene, lumens) {
   const group = new THREE.Group();
-  const cd = (lumens / Math.PI) / 2;
+  const cd = (lumens / Math.PI) / 2 * EXPOSURE;
   const make = (side) => {
     const l = new THREE.SpotLight(0xfff4e6, cd, 40, Math.PI / 3, 0.55, 2);
     l.castShadow = false;
@@ -455,6 +469,19 @@ export async function buildMap(shell, onProgress, options) {
   /* Renderer state belongs to the map (src/maps/README.md). */
   renderer.shadowMap.enabled = false;
   renderer.setClearColor(0x000000, 1);
+  /*
+   * A FILMIC CURVE, and only here. Every other map draws untone mapped,
+   * which is right for daylight, but a light a hand's width from a steel
+   * wall is a hundred times brighter than the same light two metres off,
+   * and drawn linearly the near wall is a white sheet. A real inspection
+   * camera exposes for it and rolls the highlights off; ACES does the
+   * second half. Put back on dispose, because the next map must not
+   * inherit it (src/maps/README.md, renderer state belongs to the map).
+   */
+  const prevToneMapping = renderer.toneMapping;
+  const prevExposure = renderer.toneMappingExposure;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
@@ -477,8 +504,51 @@ export async function buildMap(shell, onProgress, options) {
   let lightsOn = true;
   let level = 1.0;
   const t1 = performance.now();
+  /*
+   * AUTO EXPOSURE, the inspection camera's. The lights fall off as the
+   * square of distance, so a lens 15 cm off the steel sees forty times the
+   * light it sees at a metre, and a camera on one of these aircraft stops
+   * down for it. The distance is to whatever is in front: the shell, the
+   * floor or the roof, by an analytic ray against the tank's own cylinder
+   * and planes. Exposure follows (d / 1.6)^2, clamped, eased over about a
+   * third of a second the way a camera's does. Display only.
+   */
+  const fwd = new THREE.Vector3();
+  let exposure = 1.0;
+  let lastMs = performance.now();
+  const frontDistance = (p, f) => {
+    let t = 50;
+    const a = f.x * f.x + f.z * f.z;
+    if (a > 1e-9) {
+      const b = 2 * (p.x * f.x + p.z * f.z);
+      const c = p.x * p.x + p.z * p.z - T.radius * T.radius;
+      const disc = b * b - 4 * a * c;
+      if (disc >= 0) {
+        const tc = (-b + Math.sqrt(disc)) / (2 * a);
+        if (tc > 0) {
+          t = Math.min(t, tc);
+        }
+      }
+    }
+    if (f.y < -1e-6) {
+      t = Math.min(t, -p.y / f.y);
+    } else if (f.y > 1e-6) {
+      t = Math.min(t, (T.height - p.y) / f.y);
+    }
+    return Math.max(0.05, t);
+  };
   scene.onBeforeRender = () => {
     aimLights(lights, shell.quad, lightsOn, level);
+    {
+      const now = performance.now();
+      const dt = Math.min(0.25, (now - lastMs) / 1000);
+      lastMs = now;
+      fwd.set(0, 0, -1).applyQuaternion(shell.quad.quaternion);
+      const d = frontDistance(shell.quad.position, fwd);
+      const want = lightsOn ? Math.min(1, Math.max(0.03, (d / 1.6) * (d / 1.6))) : 1;
+      exposure += (want - exposure) * Math.min(1, dt * 3);
+      renderer.toneMappingExposure = exposure;
+    }
     if (motes) {
       const u = motes.mat.uniforms;
       u.uCentre.value.copy(shell.quad.position);
@@ -537,12 +607,15 @@ export async function buildMap(shell, onProgress, options) {
     egg: null,
     marks: [],
     gaps: [],
-    /* The inspection controls the shell drives: the lights on the aircraft.
-     * level is 0 to 1 of the airframe's lumens. */
-    setLights(on, lvl) {
+    /* The inspection controls the shell drives (src/game/inspection.js): the
+     * lights on the aircraft. level is 0 to 1 of `lumens`, the airframe's. */
+    setLights(on, lvl, lumens) {
       lightsOn = Boolean(on);
       if (Number.isFinite(lvl)) {
         level = Math.max(0, Math.min(1, lvl));
+      }
+      if (Number.isFinite(lumens) && lumens > 0) {
+        lights.cd = (lumens / Math.PI) / 2 * EXPOSURE;
       }
     },
     lightsState: () => ({ on: lightsOn, level }),
@@ -554,6 +627,8 @@ export async function buildMap(shell, onProgress, options) {
       motes: motes ? motes.pts.geometry.attributes.position.count : 0,
     }),
     dispose() {
+      renderer.toneMapping = prevToneMapping;
+      renderer.toneMappingExposure = prevExposure;
       scene.onBeforeRender = () => {};
       shell.evictSessionRoots(scene);
       disposeSceneGraph(scene, SESSION_TEXTURES);

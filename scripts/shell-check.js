@@ -1473,20 +1473,21 @@ const BEHAVIOUR = `(() => {
       cards,
       backFromWhoop,
       whoop,
-      /* The three ways in, every one of them with a photograph AND a plan
+      /* The ways in, every one of them with a photograph AND a plan
        * drawing, then the builder's card with a photograph and no drawing,
        * and not a row among them: the whole point of the screen is that it
-       * is not a menu. */
-      asksFour: gate.length === 4
-        && gate.join() === 'Five inch racing,Whoop racing,Freestyle,Map builder'
+       * is not a menu. Four ways in this fork: upstream's three and
+       * Inspection training (src/ui/ui.js WAYS), so five cards. */
+      asksFour: gate.length === 5
+        && gate.join() === 'Five inch racing,Whoop racing,Freestyle,Inspection training,Map builder'
         && gateItems.filter((it) => !it.card).length === 0,
-      asCards: cards.length === 4 && cards.slice(0, 3).every((c) => c.shot && c.drawn)
-        && Boolean(cards[3].shot) && !cards[3].drawn,
+      asCards: cards.length === 5 && cards.slice(0, 4).every((c) => c.shot && c.drawn)
+        && Boolean(cards[4].shot) && !cards[4].drawn,
       builderAction,
       modeSetGate,
-      /* Four cards, laid out and visible, and the menu's own copy off the
+      /* Five cards, laid out and visible, and the menu's own copy off the
        * screen, when the mode is answered and the aircraft is not. */
-      gateWithMode: modeSetGate.isGate && modeSetGate.cards.length === 4
+      gateWithMode: modeSetGate.isGate && modeSetGate.cards.length === 5
         && modeSetGate.cards.every((c) => c.wide) && modeSetGate.keepNote === 0,
       /* One press: the whoop is seated, the mode is race, the seat is a
        * track rather than a world, the gate is gone and no Freestyle row
@@ -1870,7 +1871,7 @@ async function main() {
     } else {
       const g = b.modeGate;
       if (!g.asksFour) {
-        failures.push(`the gate opens on ${g.gate.join(', ') || 'nothing'}, not on the three ways in and the builder`);
+        failures.push(`the gate opens on ${g.gate.join(', ') || 'nothing'}, not on the four ways in and the builder`);
       }
       if (!g.asCards) {
         failures.push(

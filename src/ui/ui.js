@@ -333,8 +333,10 @@ function seatedFreestyleMap(s) {
  * would rather than open a room with nothing in it to press.
  */
 function freestyleWorldToSeat(s) {
-  const remembered = MAPS.find((x) => x.id === (s && s.freestyleMap) && x.mode === 'freestyle');
-  const worlds = MAPS.filter((x) => x.mode === 'freestyle');
+  /* Inspection worlds are seated by their own card, never as the answer to
+   * "freestyle". */
+  const remembered = MAPS.find((x) => x.id === (s && s.freestyleMap) && x.mode === 'freestyle' && !x.inspection);
+  const worlds = MAPS.filter((x) => x.mode === 'freestyle' && !x.inspection);
   return remembered || (worlds.length === 1 ? worlds[0] : null);
 }
 
@@ -1662,6 +1664,16 @@ export function seatAirframe(s, id) {
    * profile has never been offered it. The tune moved to the new aircraft's
    * default a few lines up, which is the tune the seed is keyed to. */
   seedAirframePids(s, to.id);
+  /* An inspection aircraft goes to an inspection world, and leaving one
+   * for another kind of aircraft goes back to the track, so a five inch is
+   * never seated in a dark tank by surprise. A pilot can still choose
+   * either world for either aircraft from the Map row. */
+  const inspectionWorld = MAPS.find((m) => m.inspection);
+  if (to.inspection && !from.inspection && inspectionWorld) {
+    s.map = inspectionWorld.id;
+  } else if (!to.inspection && from.inspection && MAPS.some((m) => m.id === s.map && m.inspection)) {
+    s.map = 'custom';
+  }
   return s;
 }
 
@@ -3309,7 +3321,17 @@ function tunePickItem(s, midRun) {
  */
 function craftItem(s, midRun) {
   const af = airframeById(s.airframe);
-  const other = AIRFRAMES.find((a) => a.id !== s.airframe) || af;
+  const other = AIRFRAMES.find((a) => a.id !== s.airframe && !a.inspection) || af;
+  if (af.inspection) {
+    return choice(
+      'Aircraft',
+      `${af.blurb} Flown under its own autopilot: right stick is speed, left stick up and down is climb, centred holds. M switches Position and ATTI, V the speed, J the lights. Not affiliated with or endorsed by the maker of the aircraft it is modelled on.${midRun ? MID_RUN_WARNING : ''}`,
+      AIRFRAME_IDS,
+      s.airframe,
+      (id) => airframeById(id).name,
+      (id) => { seatAirframe(s, id); },
+    );
+  }
   return choice(
     'Aircraft',
     `${af.blurb} Changing it loads that machine's tune, its pack and its camera, and switches the track builder between a ${other.trackClass === 'micro' ? 'sixty metre field and a living room' : 'living room and a sixty metre field'}. Your own rates are kept unless they are still the stock ones.${midRun ? MID_RUN_WARNING : ''}`,
@@ -3836,6 +3858,23 @@ const WAYS = [
      * hidden and these are the whole of the card. */
     facts: ['No gates', 'No clock', 'Build a map'],
   },
+  /*
+   * THE FORK'S WAY IN: inspection training. It seats the caged inspection
+   * aircraft and an inspection world, which is a freestyle world as far as
+   * the rest of the shell is concerned, so the mode is 'freestyle' and the
+   * `inspection` flag is what keeps the gate from treating it as the town.
+   * The tethered aircraft is one press away on the Aircraft row.
+   */
+  {
+    id: 'inspect-caged',
+    airframe: 'caged',
+    mode: 'freestyle',
+    inspection: true,
+    label: 'Inspection training',
+    art: 'assets/gate/inspection.jpg',
+    blurb: 'Confined space inspection inside a dark storage tank, on a caged aircraft of the Elios 3 class or a tethered one of the Scout 137 class. Position hold, your own lights, and a wall you are allowed to touch.',
+    facts: ['Assisted', 'Dark tank', 'Cage'],
+  },
 ].map((w) => ({ ...w, action: `way-${w.id}` }));
 
 /*
@@ -3868,6 +3907,9 @@ const BUILDER_CARD = {
  * only set once the gate has been answered, so before that the racing card
  * of the seated aircraft is the standing answer. */
 function seatedWay(settings, mode) {
+  if (airframeById(settings.airframe).inspection) {
+    return WAYS.find((w) => w.inspection) || WAYS[0];
+  }
   return WAYS.find((w) => w.airframe === settings.airframe && w.mode === (mode || 'race'))
     || WAYS.find((w) => w.airframe === settings.airframe)
     || WAYS[0];
@@ -15438,7 +15480,19 @@ export class Ui {
       }
       this.returnTo = 'title';
       this.roomFrom = null;
-      if (way.mode === 'race') {
+      if (way.inspection) {
+        /* Into an inspection world whatever the seat was: a pilot who
+         * took the caged aircraft into the town last time and comes back
+         * through this card asked for a tank. */
+        const seated = MAPS.find((m) => m.id === this.settings.map);
+        if (!(seated && seated.inspection)) {
+          const world = MAPS.find((m) => m.inspection);
+          if (world) {
+            this.seatWorld(world);
+            return;
+          }
+        }
+      } else if (way.mode === 'race') {
         if (!hasLoadedTrack()) {
           this.show('courses');
           return;

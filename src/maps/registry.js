@@ -71,6 +71,21 @@ export const MAPS = [
     poster: 'assets/posters/city.jpg',
     load: () => import('./city/index.js'),
   },
+  /*
+   * THE INSPECTION WORLDS, the fork's. A vessel from the inside, dark, lit by
+   * the aircraft. `inspection: true` is what the shell seats an inspection
+   * aircraft into; a freestyle world as far as the rest of the shell is
+   * concerned, so any aircraft can fly it.
+   */
+  {
+    id: 'tank',
+    name: 'Storage tank',
+    mode: 'freestyle',
+    inspection: true,
+    note: 'Inside a 14 m welded storage tank, 12 m to the roof. No light but the aircraft\'s. A centre column, roof rafters, a ladder, a heating coil and an inlet nozzle to fly round.',
+    buildMs: MAP_BUILD_MS.tank,
+    load: () => import('./tank/index.js'),
+  },
   {
     id: 'built',
     name: 'Your map',

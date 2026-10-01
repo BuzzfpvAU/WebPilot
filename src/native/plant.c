@@ -749,6 +749,26 @@ const PlantParams PLANT_TABLE[SIM_AIRFRAME_COUNT] = {
   .camera_x = 0.10,
   .camera_y = 0.0,
   .camera_z = 0.0,
+  /*
+   * THE CAGE IS DECOUPLED. The collision shape stays the hull box above,
+   * which is what the ground solver and the shell share, but a contact on
+   * the cage does not turn the aircraft inside it: the defining design of
+   * this class is a protective cage that takes a collision without
+   * destabilising the airframe. Modelled at its limit, a cage that passes
+   * a contact's impulse through the CG and none of its moment.
+   *
+   * Two failures measured on the way here, both pushing the aircraft into a
+   * curved tank wall after a yaw (PROGRESS.md 2026-10-01). As a plain box
+   * the forward pitched cage met the wall on its top front edge 25 cm above
+   * the CG; the angle loop fought that torque, the I term wound up, and
+   * Betaflight's airmode raised all four motors to keep authority, so the
+   * aircraft climbed the wall at up to 4 m/s on a throttle the autopilot
+   * had cut to its floor. As a sphere (normal impulse through the CG,
+   * friction at the cage radius) the climb went, but at any steel on cage
+   * friction above 0.1 the friction moment and the angle loop fed each
+   * other and the aircraft tipped past 80 degrees on the wall.
+   */
+  .cage_decouple = 1.0,
 },
 
 /* ---------------------------------------------------------------------

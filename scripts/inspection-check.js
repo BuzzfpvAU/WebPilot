@@ -57,7 +57,9 @@ async function rig(af, mode, guard, world) {
     must(sim.e.sim_world_clear(), 'sim_world_clear');
     must(sim.e.sim_world_frame(0, 0, 0, 0), 'sim_world_frame');
     for (const b of world) {
-      const i = sim.e.sim_world_box(...b, 0.3, 0.4);
+      const i = b.length === 7
+        ? sim.e.sim_world_capsule(...b, 0.15, 0.42)
+        : sim.e.sim_world_box(...b, 0.3, 0.4);
       if (i < 0) {
         throw new Error(`sim_world_box returned ${i}`);
       }
@@ -256,6 +258,40 @@ async function wall(af, guard) {
   console.log(`       held at ${held[S.Z].toFixed(2)} m after release, closest ${near.toFixed(3)} m, largest rate ${(maxRate * RAD).toFixed(0)} deg/s, lean ${tilt.toFixed(1)} deg, lowest ${zMin.toFixed(2)} m, rebound ${(-vAway).toFixed(2)} m/s`);
 }
 
+/*
+ * A TANK WALL, AT AN ANGLE. The curved shell of src/maps/tank, 240 capsules
+ * on a 7.5 m ring with the aircraft 3 m from it, flown into after a yaw so
+ * the cage meets the curve obliquely and slides along it. This is the case
+ * that found the cage climbing the wall on airmode and then tipping over on
+ * friction (PROGRESS.md 2026-10-01): it must push, hold its height and stay
+ * upright for as long as the pilot pushes.
+ */
+async function tankWall(af) {
+  console.log(`\n${af.name}, curved tank wall after a yaw`);
+  const ring = [];
+  for (let i = 0; i < 240; i += 1) {
+    const a = (i / 240) * Math.PI * 2;
+    const x = -4 + 7.5 * Math.cos(a);
+    const y = 7.5 * Math.sin(a);
+    ring.push([x, y, -3, x, y, 12, 0.5]);
+  }
+  const r = await rig(af, 1, 0, ring);
+  r.fly(1.5, CLIMB);
+  const top = r.fly(1.5, CENTRE);
+  r.fly(0.6, [0, 0, 1, 0.5]);
+  let zLo = Infinity;
+  let zHi = -Infinity;
+  let tilt = 0;
+  r.fly(8.0, [0, 1, 0, 0.5], (s) => {
+    zLo = Math.min(zLo, s[S.Z]);
+    zHi = Math.max(zHi, s[S.Z]);
+    tilt = Math.max(tilt, tiltDeg(s));
+  });
+  band('height held while pushing on the wall', Math.max(top[S.Z] - zLo, zHi - top[S.Z]), 0, 0.3, 'm');
+  band('largest lean while pushing on the wall', tilt, 0, af.assist.tiltMax + 5, 'deg');
+  band('still flying', r.report()[1], 1, 1, '');
+}
+
 for (const id of ['caged', 'tethered']) {
   const af = airframeById(id);
   if (af.id !== id) {
@@ -271,6 +307,9 @@ for (const id of ['caged', 'tethered']) {
   await position(af);
   await atti(af);
   await wall(af, af.assist.guard);
+  if (af.assist.guard === 0) {
+    await tankWall(af);
+  }
   if (af.assist.guard > 0) {
     await wall(af, 0);
   }
