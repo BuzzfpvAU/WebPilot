@@ -15,9 +15,18 @@ simulator or endorses it.
 
     npm run serve        # then open http://127.0.0.1:8000/
 
-On the title screen choose **Inspection training**, then the aircraft: **Caged (Elios 3
-class)** or **Tethered (Scout 137 class)**. Either is seated in the storage tank. Both are
-also on the **Aircraft** row of the Quad screen, whose preview shows the model.
+On the title screen choose **Inspection training**, then the aircraft, **Caged (Elios 3
+class)** or **Tethered (Scout 137 class)**, then the vessel: the **Storage tank** or the
+**Ballast tank**. Esc or Back steps back one question. Both aircraft are also on the
+**Aircraft** row of the Quad screen, whose preview shows the model.
+
+The **Ballast tank** is a ship's double bottom: twelve bays 1.6 m deep between floors and
+girders, joined only by 800 by 600 mm lightening holes. The caged aircraft fits a hole with
+75 mm to spare above and below, so fly it at about 0.8 m and hold your height. The tethered
+aircraft's LiDAR cage keeps it 0.5 m off everything in Position mode, which no hole allows:
+switch to ATTI (M) to take it through, as a pilot of the real thing would. Its cable comes in
+through a manhole in the tank top. The ballast tank's faults are coating breakdown, pitting
+on the bottom, cracks at bracket toes, and buckled or holed stiffeners.
 
 The tethered aircraft flies on a 30 m cable from a ground station on the floor behind the
 spawn. The cable is physics, not a picture: it weighs on the aircraft, drags, drapes over
@@ -117,6 +126,11 @@ Where every number comes from, published or derived, is written beside it in
   the schoepentoeter's vanes and legs.
 - **The defects** are `src/maps/tank/defects.js`: placed on those seams and bolts from a
   seed, drawn, and asked after each photo which ones its frame shows.
+- **The ballast tank** is `src/maps/ballast/index.js` and its faults `defects.js` there.
+- **What every inspection world shares** (the aircraft's lights, dust, exposure, the depth
+  buffer, photographs, markers, the cable, and the rule for which defects a photo shows) is
+  `src/maps/inspect/world.js` and `decals.js`. A new vessel is its geometry, its colliders,
+  its defects and one call to `inspectionWorld`.
 - **The shell's part** (keys, lights, panel) is `src/game/inspection.js`.
 - **The tether** is `src/native/tether.c`, in the plant at 1 kHz: 40 segments from the
   ground station's anchor to the aircraft's tail, gravity, air drag, a fixed length,

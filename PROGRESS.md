@@ -62796,3 +62796,68 @@ entry above records, "all now".
                              shows each model; the tethered aircraft flies with the cable drawn and the panel
                              reading TETHER 30 m pull 0.2 to 0.4 N; no frame fault
     not run                  nobody has flown the cable or the models; feel awaits the owner
+
+## 2026-10-01 | inspection | The ballast tank, a vessel pick, and two control bugs found on the way
+
+The owner asked for another vessel and chose (asked first): a ship's ballast tank, a realistic double bottom
+(1.6 m bays, 800 by 600 mm lightening holes), picked on Inspection training beside the storage tank, with its
+own defects: coating breakdown, pitting, cracks at bracket toes, buckled or holed stiffeners.
+
+APPROVAL, recorded here as the rules require: on 2026-10-01 the owner answered "Yes, fix it" to fixing the
+inspection autopilot's inverted pitch in src/native/assist.c, which covered flipping the sign in Position and
+ATTI, rewriting the two "assisted takeoff, hold, run and stop" plant goldens that pinned the backwards flight,
+and a verify run.
+
+- src/maps/inspect/world.js and decals.js (new): the lights, dust, exposure, depth target, photographs,
+  markers, cable drawing and the defect visibility rule, moved out of the storage tank unchanged so both
+  vessels share them. The tank now calls inspectionWorld; its crack and flange photo tests read as before.
+- src/maps/ballast/index.js and defects.js (new): 4 by 3 bays, floors and girders as extruded plates with a
+  rounded 800 by 600 hole each (box colliders round every hole, 102 boxes), bulb flat longitudinals 800 mm apart
+  top and bottom as per bay instances, 54 brackets, a light epoxy coating projected in metres, a manhole with a
+  fairlead where the tethered aircraft's 30 m cable comes in. Defects 6 to 10 a run, at least a crack and a
+  pitting patch; a stiffener defect shows from either side.
+- Gate: Inspection training asks the aircraft, then the vessel (cards for every inspection world in the
+  registry), Back one step at a time. Ballast card picture is a frame from inside, assets/gate/vessel-ballast.jpg.
+- Registry, build cost, module prefix and count (ballast 2), preload regenerated (250 served).
+
+### Two bugs found while flying the hole, both live on the site before this
+
+- THE KEYBOARD SANK THE INSPECTION AIRCRAFT. A released throttle key springs to kbHover, the raw stick an
+  unassisted machine hovers at; there is no table entry for these aircraft, it fell back to the five inch's 35
+  percent, and the autopilot reads anything under the middle as descend. main.js syncKeyHover rests it at 0.5
+  for an inspection aircraft. Gamepads and radios were never affected.
+- FORWARD STICK FLEW BACKWARDS, in both modes, on both aircraft, on every controller. assist.c read +pitch as
+  forward; the ABI's +pitch is the stick pulled back (its own comment at the end of the function says so).
+  Measured in the module: full forward for 2 s moved the aircraft 1.40 m along -x with the nose on +x. Every
+  band in check:inspection measured distances and stops and none a direction, and its own "forward" inputs were
+  written as +1, so the bug and the check agreed. Fixed (approval above); check:inspection gains directions():
+  forward, back, left and right in Position and ATTI, which failed eight bands before the fix and passes after.
+  Its four forward inputs are now FORWARD, -1. plant-golden: exactly the two assisted run scenarios moved, from
+  4000 ms where forward stick starts; rewritten; the other 27 bit identical; selftest passes.
+
+### What went wrong
+
+- The first cut of the shared module took a stray half comment from the tank file by line numbers, which
+  swallowed a function's doc comment; cut again by content.
+- Harness: holding the throttle key overshoots a climb by about 0.4 m, so the flythrough releases early.
+
+### RUN LOG
+
+    build                    emsdk 3.1.61, vendor/betaflight diff empty
+    verify                   npm run verify: 18 of 18, exit 0, trace de0401cd4266 unchanged (the replay has the
+                             autopilot off), Node and Chrome equal
+    goldens                  check:plant all passed after the approved rewrite of two scenarios, selftest passed;
+                             check:world-golden all passed
+    check:inspection         all passed, the new direction bands included (failed 8 before the fix)
+    check:tether             all passed; check:craft 40 of 40
+    lints                    lint:preload up to date; lint:nouns PASS; lint:boot 9 of 9; lint:responsive PASS;
+                             lint:shell 1 problem, the credits overflow recorded before as identical on upstream
+    browser                  ballast tank boots, no frame fault; caged aircraft held at 0.81 m flies through a
+                             girder's hole with 0 contacts, at 0.68 m it is stopped by the hole's lower edge; GOOD
+                             photos found coating breakdown (1.93 m, tethered), pitting (1.00 m), a buckled
+                             stiffener (0.79 m) and a holed one (0.87 m); tethered cable down the manhole, pull
+                             0.2 N; gate: aircraft, then Storage or Ballast tank, Esc back a step, Tethered into
+                             Ballast seats both; the storage tank's crack photo still GOOD and found after the
+                             refactor
+    not run                  a crack at a bracket toe was not photographed in this turn (drawn by the same ribbon
+                             as the tank's cracks); nobody has flown any of it
