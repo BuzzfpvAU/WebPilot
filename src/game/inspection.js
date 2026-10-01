@@ -32,6 +32,13 @@
  * lit, sharp, and close enough to see the surface but not so close that the
  * light burns it out.
  *
+ * DEFECTS are what the photos are for. A world that has them (the tank,
+ * src/maps/tank/defects.js) rolls a new set every run and says which of
+ * them each photo's frame shows; a defect is FOUND by the first photo that
+ * shows it and grades USABLE or better. A REJECT shows nothing, because an
+ * inspector cannot write up a blur. The gallery lists what each photo
+ * found and can reveal the rest, which ends the hunt for that run.
+ *
  * THE HUD is its own small panel, not the racing OSD's: it carries what an
  * inspection ground station shows a pilot (flight mode, speed mode,
  * height, the nearest surface, light output, time left on the pack, and
@@ -157,6 +164,9 @@ export function createInspection({ sim, notify, input, onControls }) {
     quad: null,
     gs: 0,                 /* ground speed, m/s, for the photo grader */
     rate: 0,
+    found: new Map(),      /* defect id -> the photo number that found it */
+    defectSeed: null,      /* the set `found` refers to */
+    revealed: false,
   };
   const gimbalQ = new THREE.Quaternion();
   const euler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -226,19 +236,67 @@ export function createInspection({ sim, notify, input, onControls }) {
   ].join(';');
   document.body.appendChild(gallery);
   const GRADE_COLOUR = { GOOD: '#7dffb0', USABLE: '#ffd27d', REJECT: '#ff8a7d' };
+  /* The view's defects, kept in step with `found`: a new set (a new run, a
+   * new map) forgets what was found in the old one. */
+  function defectSet() {
+    const v = state.view;
+    const set = v && typeof v.defects === 'function' ? v.defects() : null;
+    const seed = set ? set.seed : null;
+    if (seed !== state.defectSeed) {
+      state.defectSeed = seed;
+      state.found = new Map();
+      state.revealed = false;
+    }
+    return set;
+  }
+  function revealMissed() {
+    const set = defectSet();
+    const v = state.view;
+    if (!set || !v || typeof v.revealDefects !== 'function') {
+      return;
+    }
+    state.revealed = true;
+    v.revealDefects(set.list.filter((d) => !state.found.has(d.id)).map((d) => d.id));
+    renderGallery();
+  }
   function renderGallery() {
     gallery.textContent = '';
+    const set = defectSet();
     const head = document.createElement('div');
     head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px';
     const h = document.createElement('strong');
     h.style.fontSize = '15px';
     const good = state.photos.filter((ph) => ph.grade === 'GOOD').length;
     h.textContent = `Photos this flight: ${state.photos.length}, ${good} good`;
+    if (set) {
+      h.textContent += `. Defects found: ${state.found.size} of ${set.list.length}`;
+    }
     const hint = document.createElement('span');
     hint.style.opacity = '0.7';
     hint.textContent = 'O closes';
     head.append(h, hint);
     gallery.append(head);
+    if (set && set.list.length) {
+      const bar = document.createElement('div');
+      bar.style.cssText = 'margin:-4px 0 10px;font-size:12px;opacity:0.9';
+      if (state.revealed) {
+        const missed = set.list.filter((d) => !state.found.has(d.id));
+        bar.textContent = missed.length
+          ? `Missed, now ringed in red: ${missed.map((d) => d.label).join('; ')}.`
+          : 'Every defect was found.';
+      } else {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = 'Reveal the ones I missed';
+        b.style.cssText = 'font:inherit;color:#e8f1ea;background:rgba(255,90,74,0.18);border:1px solid rgba(255,90,74,0.6);border-radius:4px;padding:3px 8px;cursor:pointer';
+        b.addEventListener('click', revealMissed);
+        const note = document.createElement('span');
+        note.style.cssText = 'margin-left:8px;opacity:0.7';
+        note.textContent = `Run seed ${set.seed}. Revealing ends the hunt for this run.`;
+        bar.append(b, note);
+      }
+      gallery.append(bar);
+    }
     if (!state.photos.length) {
       const p = document.createElement('p');
       p.textContent = 'No photos yet. Aim the camera with Q and E, light the surface, hold still and press P.';
@@ -263,6 +321,12 @@ export function createInspection({ sim, notify, input, onControls }) {
       m.style.opacity = '0.8';
       m.textContent = `${ph.time}  alt ${ph.alt.toFixed(1)} m  range ${ph.range.toFixed(2)} m  tilt ${ph.tilt > 0 ? '+' : ''}${ph.tilt.toFixed(0)}\u00b0`;
       cap.append(g, m);
+      for (const label of ph.defects || []) {
+        const f = document.createElement('div');
+        f.style.cssText = 'color:#ffb37d;font-weight:600';
+        f.textContent = label;
+        cap.append(f);
+      }
       card.append(img, cap);
       grid.append(card);
     }
@@ -629,7 +693,7 @@ export function createInspection({ sim, notify, input, onControls }) {
     const q = gimbal(state.quad.quaternion, new THREE.Quaternion());
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
     const origin = state.quad.position.clone();
-    const hit = v.rayHit(origin, dir);
+    let hit = v.rayHit(origin, dir);
     const at = { speed: state.gs, rate: state.rate, tilt: state.tilt, alt: origin.y, lights: state.lightsOn };
     flash.style.transition = 'none';
     v.capture((shot) => {
@@ -643,6 +707,14 @@ export function createInspection({ sim, notify, input, onControls }) {
       if (!shot) {
         notify('Photo failed.');
         return;
+      }
+      /* A photo that shows a defect is ranged on the nearest one it shows,
+       * not on whatever the middle of the frame happens to reach: framing
+       * a bolt at a metre with the roof behind it is not "too far". */
+      const seen = Array.isArray(shot.seen) ? shot.seen : [];
+      if (seen.length) {
+        const near = seen.reduce((a, b) => (b.dist < a.dist ? b : a));
+        hit = { distance: near.dist, point: new THREE.Vector3().fromArray(near.pos) };
       }
       const issues = [];
       let severe = false;
@@ -664,6 +736,23 @@ export function createInspection({ sim, notify, input, onControls }) {
       }
       const grade = severe ? 'REJECT' : (issues.length ? 'USABLE' : 'GOOD');
       const n = state.photos.length + 1;
+      /* What this photo shows, if it is good enough to show anything. */
+      const set = defectSet();
+      const shows = [];
+      let fresh = 0;
+      if (set && grade !== 'REJECT') {
+        for (const { id } of seen) {
+          const d = set.list.find((x) => x.id === id);
+          if (!d) {
+            continue;
+          }
+          if (!state.found.has(id)) {
+            state.found.set(id, n);
+            fresh += 1;
+          }
+          shows.push(d.label);
+        }
+      }
       state.photos.push({
         n,
         url: shot.url,
@@ -674,11 +763,19 @@ export function createInspection({ sim, notify, input, onControls }) {
         tilt: at.tilt,
         time: fmtClock(state.flightS),
         point: hit.point.toArray(),
+        defects: shows,
+        seen: seen.map((x) => x.id),
       });
       if (typeof v.addMarker === 'function' && hit.distance < 50) {
         v.addMarker(hit.point, dir, String(n));
       }
-      notify(`Photo ${n}: ${grade}${issues.length ? `, ${issues.join(', ')}` : ''}. Range ${hit.distance.toFixed(2)} m.`);
+      let found = '';
+      if (fresh) {
+        found = ` Found ${fresh === 1 ? 'a defect' : `${fresh} defects`}, ${state.found.size} of ${set.list.length}.`;
+      } else if (shows.length) {
+        found = ' Shows a defect already found.';
+      }
+      notify(`Photo ${n}: ${grade}${issues.length ? `, ${issues.join(', ')}` : ''}. Range ${hit.distance.toFixed(2)} m.${found}`);
       if (gallery.style.display !== 'none') {
         renderGallery();
       }
@@ -760,6 +857,10 @@ export function createInspection({ sim, notify, input, onControls }) {
     if (state.af.enduranceS > 0) {
       const left = state.af.enduranceS - state.flightS;
       lines.push(`BATTERY   ${left > 0 ? fmtClock(left) : 'LAND NOW'}`);
+    } else if (view && typeof view.tetherTension === 'function' && view.tether) {
+      /* The cable's pull at the aircraft, from the plant (tether.c): what a
+       * tether station's tension readout shows. */
+      lines.push(`TETHER    ${view.tether.length} m  pull ${view.tetherTension().toFixed(1)} N`);
     } else {
       lines.push('POWER     tether');
     }
@@ -768,6 +869,12 @@ export function createInspection({ sim, notify, input, onControls }) {
     {
       const last = state.photos[state.photos.length - 1];
       lines.push(`PHOTOS    ${state.photos.length}${last ? `  last ${last.grade}` : ''}`);
+    }
+    {
+      const set = defectSet();
+      if (set) {
+        lines.push(`DEFECTS   ${state.found.size} of ${set.list.length} found${state.revealed ? '  (revealed)' : ''}`);
+      }
     }
     if (state.learn) {
       lines.push('LEARNING  controls, K skips');
@@ -789,6 +896,11 @@ export function createInspection({ sim, notify, input, onControls }) {
     if (state.view && typeof state.view.clearMarkers === 'function') {
       state.view.clearMarkers();
     }
+    /* A new run, a new set of defects to find. */
+    if (state.view && typeof state.view.rollDefects === 'function') {
+      state.view.rollDefects();
+    }
+    defectSet();
     push();
   }
 
@@ -816,6 +928,16 @@ export function createInspection({ sim, notify, input, onControls }) {
       tilt: state.tilt,
       bind: state.bind,
       photos: state.photos.map(({ url, ...rest }) => rest),
+      defects: (() => {
+        const set = defectSet();
+        return set ? {
+          seed: set.seed,
+          total: set.list.length,
+          found: [...state.found.keys()],
+          revealed: state.revealed,
+          list: set.list,
+        } : null;
+      })(),
       report: (() => {
         const r = report();
         return r ? Array.from(r) : null;

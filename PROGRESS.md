@@ -62651,3 +62651,148 @@ gamepads and radios; defaults for standard pads plus a menu row to remap; tilt a
                              axis 6 learned as tilt, button 8 as the photo; the row then read Learned, "Tilt dial
                              or slider, axis 6. Photo button 8.". Not tried on real hardware.
     not run                  npm run verify: no physics, plant, ABI or build change
+
+## 2026-10-01 | inspection | Welds, bolts, a schoepentoeter, and defects to find
+
+The owner asked for more detail in the tank: welds rather than what read as bricks, bolts in places, and random
+faults (rusty or cracked welds, missing bolts) for the pilot to find and photograph. Asked first, the owner chose:
+raised bead geometry for the welds; bolts on the manway and nozzle flanges, the rafter clips, the ladder brackets
+and the coil stands; a schoepentoeter separator on the inlet to inspect top and bottom; a new random set every
+run; found means a graded photo with it in frame.
+
+- src/maps/tank/hardware.js (new): every weld is a seam (a centre line, its direction and the surface normal) and
+  one sweep turns them into a merged bead mesh with a rippled cap: shell courses and staggered vertical seams,
+  floor and roof lap seams, the shell to floor fillet, the column foot and the nozzle. Bolts are three
+  InstancedMeshes (washer, nut, stud), 312 of them. The schoepentoeter runs 4.6 m from the nozzle at 1.2 m,
+  tapering 0.70 to 0.34 m, vanes down both sides bolted top and bottom, plate centre seams and splices top and
+  underside, two legs on bolted base plates. A 24 inch manway with a bolted cover in the bottom course.
+- src/maps/tank/defects.js (new): six to ten per run from a seed, at least one on the schoepentoeter's top and one
+  on its underside, 0.8 m apart, never under the ladder or behind the manway. Corroded weld (a lumpy rust bead and
+  a stain), cracked weld (along the crown, or across into the plate, in a dark halo), missing bolt (instance
+  hidden, hole and washer footprint drawn). seen(camera) answers which a frame shows: middle 70%, within 1.5 m for
+  a crack, 2 m for a bolt, 3 m for rust, seen from its own side, nothing in between.
+- src/maps/tank/index.js: the painted dark seam lines (the brickwork look) are a faint heat tint now; the rust
+  blots became speck clusters; the shell has 256 segments so beads sit on it; colliders for the schoepentoeter
+  (six boxes), its flange, spool and legs and the manway; rayHit also tests meshes; capture reports seen defects.
+- src/game/inspection.js: a defect is found by the first USABLE or GOOD photo that shows it; a photo that shows
+  one is ranged and marked on it; DEFECTS line in the panel; the gallery says what each photo found and has
+  Reveal the ones I missed (red rings, ends the hunt). Restart rolls a new set.
+- src/main.js: `__rollDefects(seed)`, harness only; MAP_MODULE_COUNT tank 3. src/fresh.js regenerated.
+- Labels say "plate ring" where a tank man would say "course", because lint:nouns keeps "course" off the screen.
+
+### What went wrong
+
+- THE TANK HAD NO DEPTH BUFFER, since it was written. The shell's renderer is made with depth: false, every other
+  map draws through targets with their own depth, and the tank drew straight to the canvas. Opaque objects are
+  sorted near to far, so the farther painted over the nearer: the coil showed through the schoepentoeter and its
+  vanes through its top plate. It went unseen with a few separated internals. The tank now renders into a half
+  float target with depth and one full screen pass applies the filmic curve, exposure and sRGB as before.
+- The first underside photo graded "too far, 11.80 m" while it found a bolt a metre away, because range was the
+  frame's centre ray reaching the roof past the edge of the device. Fixed by ranging on the defect.
+- The container's proxy refuses cdn.jsdelivr.net (403). The harness cache was filled from three@0.160.0 off the
+  npm registry, which is the same files.
+
+### RUN LOG
+
+    browser                  shots.js, caged aircraft in the tank, low preset: boots, no frame fault; 198 seams,
+                             312 bolts, 316 colliders; a corroded weld on the top plate photographed from above
+                             and found; a missing vane bolt photographed from under the device and found; a cracked
+                             shell weld from 0.95 m GOOD and found; a missing nozzle flange bolt from 1.19 m GOOD
+                             and found; gallery lists finds, Reveal rings the rest; R rolls a new seed; the title
+                             renders normally after leaving the tank
+    check:inspection         all passed (its worlds are its own, untouched)
+    lint:preload             up to date after regeneration; lint:nouns PASS; check:fresh 18 of 18 (before the
+                             regeneration)
+    not run                  npm run verify: no physics, plant, ABI or build change (the tank's colliders are world
+                             content through the existing interface). Not flown on a real GPU or by a person.
+
+## 2026-10-01 | inspection | APPROVAL: tether cable physics in the plant
+
+Asked in the conversation and answered by the owner, "Approve, all now", on 2026-10-01. What it covers:
+
+- A tether cable for the tethered inspection aircraft only (airframe simId 3): a chain of point masses from a
+  ground station anchor to the aircraft, stepped in C inside the plant at 1 kHz, with gravity, drag, a fixed
+  length, collision against the world's shapes (it drapes and snags), and its tension applied to the aircraft at
+  the attach point. Every other airframe has no cable and must keep a bit-identical trace.
+- Module ABI: two new exports, one to set the anchor and length (and switch the cable on or off), one to read the
+  cable's points for drawing.
+- Risks named to the owner: the tethered aircraft's hold, stops and climb change under the cable's weight and
+  check:inspection's bands for it may need arguing here; frame cost of the cable's collision queries at 1 kHz;
+  determinism, so npm run verify is run.
+- Order the owner approved: goldens pinning the caged and tethered aircraft as they are now land first and green
+  (the plant goldens fly only the five inch and the whoop today); then the cable with new checks (length never
+  exceeded, a snag holds, the aircraft settles in a hover on the cable); then verify.
+
+Same request, no approval needed (shell and render only): 3D models for both aircraft (an Elios 3 class
+geodesic cage, a Scout 137 class uncaged quad with LiDAR and lights), the cable drawn, a caged or tethered choice
+on Inspection training, and both shown with pictures where a quad is chosen.
+
+## 2026-10-01 | inspection | The two aircraft: models, a pick on the gate, and the tether in the plant
+
+The owner asked for a caged drone like the Elios 3 and a tethered one like the Scout 137 when choosing the
+quad. Asked first, the owner chose all four of: proper 3D models, a visible cable, a caged or tethered pick on
+Inspection training, both shown with pictures where a quad is chosen; and full cable physics, approved as the
+entry above records, "all now".
+
+- Coverage first (the owner's condition): scripts/plant-golden.js pins the caged and tethered aircraft, three runs
+  each (free air acro; an assisted takeoff, hold, run, stop and sliding landing on grass; a wall contact through
+  sim_contact_at), committed and green before any plant change. Their configs are their tunes plus their rates
+  from configs/airframes.js. The selftest first went red: the new grounded runs lifted straight off and never slid,
+  so grass friction was not in their traces. They were made to land drifting rather than the selftest touched.
+- src/native/tether.c (new), world.c (world_tether_push), sim.c (step, lay on reset and pose), sim_abi.h
+  (sim_set_tether, sim_tether_state, SIM_TETHER_SEGS 40), build-wasm.sh. Position based: gravity and implicit
+  quadratic drag on the nodes, 12 projection passes holding each segment to its share and each node within its
+  length of cable from the anchor, the aircraft's end weighted by its mass; nodes pushed out of the floor and the
+  static shapes after the projection, a touching node keeping 0.85 of its sliding speed; what the projection moved
+  the aircraft's end by is applied to its position, velocity and, through the attach point 120 mm behind the CG,
+  its rates. Refused for any airframe but the tethered one. 25 g/m, 5 mm, Cd 1.2.
+- Cost, measured in Node in a tank of 240 wall capsules: 5 us a step off, 69 us with two collision passes, 36 us
+  with one, which changed nothing check:tether sees. About 0.6 ms of a 60 fps frame on this machine.
+- scripts/tether-check.js (new, npm run check:tether), every band chosen before its first run.
+- Shell: main.js syncTether on every run, world and aircraft, drawTether each flight frame; the tank has a ground
+  station (a solid case, anchor at its reel, 30 m), draws the cable as forty yellow cylinders, and the panel shows
+  the pull. src/render/inspectcraft.js (new): a geodesic cage round 5 inch props, LiDAR and a lit nose; an uncaged
+  quad on 8 inch push props with skids, a LiDAR mast, light bars and the tether boss. craft.js craftBuilderFor.
+- Gate: Inspection training is one card that asks which aircraft with two cards (Esc or Back returns); pictures
+  are the Quad screen's studio view of each model (scripts/gatecards.js, two new shots). Two cards are capped at a
+  four card width.
+- scripts/craft-check.js crashed before it measured anything (no real sizes for the inspection aircraft, since
+  they were added). It has them now, the project's class figures, a per aircraft wheelbase from plant.c's motor
+  positions, and down held like up for models built to their hulls. configs/airframes.js: the tethered arm is
+  0.1697, plant.c's 120 mm a side, not 0.170, which the 0.5 mm wheelbase band caught.
+
+### What went wrong
+
+- First golden wall run: the autopilot holds a craft posed in the air as landed, so it fell 40 m. It takes off now.
+- The first snag check would not have wrapped anything; redesigned so the hanging cable sweeps across the column.
+- gatecards.js exits 1 here on a refused local request that every card would hit; the two pictures were made with
+  the same steps through shots.js directly.
+- The cable is unlit wherever the aircraft's lights are not, which is true and makes it hard to photograph.
+
+### Measured, not judged
+
+- Snag: pushed sideways against the caught cable the aircraft swings round on it and is still creeping at 0.26
+  m/s after 14 s, inside the 0.3 band set before the run. Plausible, and a pilot should judge it.
+
+### RUN LOG
+
+    build                    emsdk 3.1.61; the untouched tree rebuilt byte identical to the committed sim.wasm
+                             (e8b2cd3f); vendor/betaflight diff empty before and after
+    verify                   npm run verify: 18 of 18, exit 0, trace de0401cd4266 (unchanged: the replay has no
+                             cable, and the off path must be bit identical), Node and Chrome equal, 4 rates equal
+    goldens                  check:plant 35 scenarios all passed, selftest all passed (18 grounded, 22 throttle);
+                             check:world-golden all passed; both with the cable built in and off
+    check:tether             all passed: refused on 5inch and caged; hover height wander 0.010 m, horizontal
+                             0.002 m, mean pull 0.616 N, cable never under the floor; 6 m cable held at 6.000 m,
+                             speed 0.011 m/s; snag 24 points touching, held at 4.651 m of 6, 0.261 m/s; two runs
+                             identical
+    check:inspection         all passed, before and after the arm correction
+    check:craft              40 of 40 (it could not run at all before this)
+    lints                    lint:preload regenerated (246 served); lint:nouns PASS; lint:boot 9 of 9;
+                             lint:responsive PASS; lint:shell 1 problem, the credits overflow recorded above as
+                             identical on upstream
+    browser                  shots.js: gate shows five cards, Inspection training opens Caged and Tethered, Esc
+                             returns to five, Tethered seats the tethered aircraft in the tank; the Quad screen
+                             shows each model; the tethered aircraft flies with the cable drawn and the panel
+                             reading TETHER 30 m pull 0.2 to 0.4 N; no frame fault
+    not run                  nobody has flown the cable or the models; feel awaits the owner

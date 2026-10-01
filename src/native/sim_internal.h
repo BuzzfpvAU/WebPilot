@@ -332,6 +332,22 @@ void world_tick(void);
  * only. For assist.c's virtual cage. */
 int world_proximity(const double p_plant[3], double reach, double n_out[][3],
                     double d_out[], int max);
+/* A tether node, a sphere of radius r at p (plant frame), pushed out of
+ * the static shapes in place; the summed push normals, and how many. */
+int world_tether_push(double p_plant[3], double r, double n_plant[3]);
+
+/*
+ * tether.c: the tethered aircraft's cable, stepped from sim.c after the
+ * world. See that file's header. Off unless sim_set_tether turns it on,
+ * and a module whose tether is never turned on steps bit identically to
+ * one without this file.
+ *   tether_step   one 1 ms step of the cable, and its pull on the craft
+ *   tether_lay    a teleport or a reset: lay the cable out afresh
+ */
+void tether_step(SimState *s, int ground_on, const double gn[3], double gd);
+void tether_lay(const SimState *s);
+/* sim.c's state, for sim_set_tether; null before sim_init. */
+SimState *sim_state_ptr(void);
 
 void plant_reset(SimState *s);
 

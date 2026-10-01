@@ -15,8 +15,14 @@ simulator or endorses it.
 
     npm run serve        # then open http://127.0.0.1:8000/
 
-On the title screen choose **Inspection training**. That seats the caged aircraft in
-the storage tank. The tethered aircraft is on the **Aircraft** row of the Quad screen.
+On the title screen choose **Inspection training**, then the aircraft: **Caged (Elios 3
+class)** or **Tethered (Scout 137 class)**. Either is seated in the storage tank. Both are
+also on the **Aircraft** row of the Quad screen, whose preview shows the model.
+
+The tethered aircraft flies on a 30 m cable from a ground station on the floor behind the
+spawn. The cable is physics, not a picture: it weighs on the aircraft, drags, drapes over
+the coil, wraps the column and the schoepentoeter, and holds the aircraft back when it is
+snagged or all paid out. The panel shows its pull at the aircraft.
 
 | Control | Position mode | ATTI mode |
 |---|---|---|
@@ -57,6 +63,21 @@ aimed, and a grade: **GOOD**, **USABLE** (too close, under 0.3 m, or too far, ov
 turning faster than 20 degrees a second). The gallery lists them with time, height, range
 and tilt. Restarting clears them.
 
+**Defects.** Every run hides a new set of six to ten faults in the tank, at least one on the
+top of the schoepentoeter (the vane inlet device on the nozzle) and one on its underside:
+
+- **Corroded weld**: a stretch of bead grown fat and lumpy with rust, a stain weeping from it.
+- **Cracked weld**: a dark line along the crown of a bead, or across it into the plate.
+- **Missing bolt**: a nut gone from a flange, clip, bracket or stand, the hole left showing.
+
+A defect is found by the first photo that shows it and grades USABLE or better: it is in
+the middle 70% of the frame, near enough (a crack within 1.5 m, a missing bolt 2 m, a
+corroded weld 3 m), seen from its own side (the top of a plate is not seen from under it),
+and nothing solid is in the way. A photo that shows a defect is ranged on that defect. The
+panel counts what has been found; the gallery says what each photo found, and **Reveal the
+ones I missed** rings the rest in red, which ends the hunt for that run. The gallery gives
+the run's seed.
+
 The panel at the bottom left is the ground station: the flight mode, the speed mode,
 height, the nearest surface (tethered aircraft), light output, time left on the pack
 (caged aircraft) and how many times the aircraft has touched something.
@@ -89,7 +110,21 @@ Where every number comes from, published or derived, is written beside it in
 - **The tank** is `src/maps/tank/index.js`, a parametric 14 m by 12 m welded tank whose
   curved shell is a ring of 240 overlapping capsules, so a cage rolls round a smooth
   wall rather than over a staircase of boxes.
+- **The welds, bolts and schoepentoeter** are `src/maps/tank/hardware.js`. Every weld is
+  a raised bead swept along a seam on the shell, floor, roof, column, nozzle and the
+  schoepentoeter's plates; every bolt is an instance (washer, nut, stud) on the manway
+  cover, the nozzle flange, the rafter clips, the ladder brackets, the coil stands and
+  the schoepentoeter's vanes and legs.
+- **The defects** are `src/maps/tank/defects.js`: placed on those seams and bolts from a
+  seed, drawn, and asked after each photo which ones its frame shows.
 - **The shell's part** (keys, lights, panel) is `src/game/inspection.js`.
+- **The tether** is `src/native/tether.c`, in the plant at 1 kHz: 40 segments from the
+  ground station's anchor to the aircraft's tail, gravity, air drag, a fixed length,
+  collision with every static shape and the floor, and its pull applied to the aircraft.
+  Off for every other aircraft, and an aircraft with no cable steps bit identically to
+  before. `npm run check:tether` flies hover, length, snag, floor and repeatability.
+- **The models** are `src/render/inspectcraft.js`, each built inside its plant hull;
+  `npm run check:craft` measures them.
 
 `npm run check:inspection` flies both aircraft headless through takeoff, holds, full
 stick runs and stops, ATTI drift, flat and curved wall contacts and the virtual cage,
@@ -100,8 +135,8 @@ and fails on what a pilot of the class would call broken.
 1. Done: the aircraft, the autopilot, the cage, lights and dust in one dark tank.
 2. More vessels from the same builder: a boiler, a ship's hold and ballast tanks, a
    sewer or tunnel.
-3. Inspection tasks and scoring: defects to find and photograph, coverage, contacts,
-   time and battery, and a debrief. Photos, POI markers and photo grading are in.
+3. Inspection tasks and scoring: coverage, contacts, time and battery, and a debrief.
+   Photos, POI markers, photo grading and defects to find and photograph are in.
 4. The LiDAR map: a live point cloud and a ground station view, with signal loss behind
    steel.
 5. Your own structures: import `.glb` / `.gltf` models with collision generated from

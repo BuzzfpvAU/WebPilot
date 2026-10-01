@@ -560,10 +560,10 @@ export const AIRFRAMES = [
     cameraFov: 95,
     cameraAngle: 0,
     dims: {
-      arm: 0.170,
+      arm: 0.1697, /* plant.c's motors, 120 mm out on each axis */
       propR: 0.1016,
       /* The props are the outside of this aircraft: arm plus blade is
-       * 0.272 m, the frame's own 448 by 479 mm envelope. collide.js refuses
+       * 0.2713 m, the frame's own 448 by 479 mm envelope. collide.js refuses
        * a hull inside the blade, which 0.07 was, and the page would not
        * start with this aircraft seated. */
       hullR: 0.1016,

@@ -600,6 +600,31 @@ int sim_set_assist(int mode, double v_h, double v_up, double v_down,
 int sim_set_assist_guard(double standoff);
 int sim_assist_report(double *out);
 
+/*
+ * THE TETHER, added 2026-10-01 with the owner's approval (PROGRESS.md):
+ * the tethered inspection aircraft's cable, stepped in the plant by
+ * tether.c. Additive, version unchanged: off by default, and a module whose
+ * tether is never turned on steps bit identically to one from before.
+ *   sim_set_tether(on, ax, ay, az, length)
+ *     on 1: a cable of `length` metres (1 to 200) from an anchor at ax ay az
+ *     (plant frame, as sim_set_pose takes) to the aircraft, laid out
+ *     straight; laid at the distance if that is longer than `length`.
+ *     SIM_ERR_BAD_STATE before sim_init or when the airframe in force is not
+ *     the tethered one (SIM_AIRFRAME_TETHERED, 3). on 0: no cable. The
+ *     setting survives sim_reset, which lays the cable out afresh, as does
+ *     sim_set_pose.
+ *   sim_tether_state(out)
+ *     SIM_TETHER_DOUBLES doubles: the SIM_TETHER_SEGS + 1 points of the
+ *     cable, anchor first, aircraft last, x y z each (plant frame), then the
+ *     tension at the aircraft in newtons, the number of points touching a
+ *     surface, and the cable's length as laid. Returns the point count, or 0
+ *     with nothing written when there is no cable. Read only.
+ */
+#define SIM_TETHER_SEGS 40
+#define SIM_TETHER_DOUBLES (3 * (SIM_TETHER_SEGS + 1) + 3)
+int sim_set_tether(int on, double ax, double ay, double az, double length);
+int sim_tether_state(double *out);
+
 /* Number of doubles sim_state writes. SIM_STATE_DOUBLES for this version. */
 int sim_state_size(void);
 

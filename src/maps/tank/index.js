@@ -8,7 +8,10 @@
  * (API 650 courses of 2 m plate with staggered vertical seams), and the
  * internals are the things a pilot has to fly round in a real one: a centre
  * roof support column, radial roof rafters, a fixed ladder up the shell, a
- * heating coil on stands near the floor, and an inlet nozzle.
+ * heating coil on stands near the floor, a manway, and an inlet nozzle with
+ * a schoepentoeter on it. The welds as beads, the bolts, the schoepentoeter
+ * and the manway are hardware.js; the faults a flight is sent to find are
+ * defects.js.
  *
  * GEOMETRY IS PARAMETRIC on purpose. TANK below is the only place a size
  * lives, so the next vessels (a boiler, a ship's hold, a ballast tank) are
@@ -57,6 +60,10 @@ import { disposeSceneGraph } from '../../render/shell.js';
 import { SESSION_TEXTURES } from '../../render/session-textures.js';
 import { qualityFor } from '../../render/quality.js';
 import { yieldToPaint } from '../../ui/loading.js';
+import {
+  beadTexture, boltMeshes, fittings, floorSeams, lcg, memberSeams, schoepentoeter, shellSeams, sweepBeads,
+} from './hardware.js';
+import { createDefects } from './defects.js';
 
 /* Everything a tank is, in metres, Three.js frame (y up). */
 export const TANK = {
@@ -75,10 +82,16 @@ export const TANK = {
   nozzleY: 1.2,
   nozzleR: 0.35,
   nozzleLen: 0.9,
+  manwayY: 0.75,        /* a 24 inch manway in the bottom course */
+  manwayR: 0.305,
   ladderAngle: Math.PI * 0.5,
   /* Between the centre column (0.3 m) and the heating coil (4.6 m), on the
    * floor, facing the column. */
   spawn: { x: 0, z: 3.0, yaw: 0 },
+  /* The tethered aircraft's ground station, on the floor a metre behind
+   * the spawn, and the cable it pays out, metres. */
+  station: { x: 0.7, z: 4.0, w: 0.45, d: 0.35, h: 0.30 },
+  tetherLength: 30,
 };
 
 /* A canvas texture of rolled steel plate: a mill scale ground, rust
@@ -107,35 +120,49 @@ function plateTexture(w, h, coursesTall, platesRound, seed) {
     g.arc(x, y, r, 0, Math.PI * 2);
     g.fill();
   }
-  /* Rust, heavier low down where product and water sat. */
-  for (let i = 0; i < 900; i += 1) {
-    const x = rnd() * w;
-    const y = h * Math.pow(rnd(), 0.6);
-    const r = 3 + rnd() * 22;
-    g.fillStyle = `rgba(${120 + Math.floor(rnd() * 50)},${55 + Math.floor(rnd() * 25)},${25},${0.05 + 0.18 * (y / h)})`;
-    g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
-    g.fill();
+  /* Rust, heavier low down where product and water sat: clusters of small
+   * specks rather than round blots, which close to the steel read as
+   * paint, and which a pilot hunting a corroded weld would chase. */
+  for (let i = 0; i < 700; i += 1) {
+    const cx = rnd() * w;
+    const cy = h * Math.pow(rnd(), 0.6);
+    const spread = 4 + rnd() * 18;
+    const a = 0.04 + 0.14 * (cy / h);
+    for (let k = 0; k < 9; k += 1) {
+      const x = cx + (rnd() - 0.5) * spread * 2;
+      const y = cy + (rnd() - 0.5) * spread * 2;
+      g.fillStyle = `rgba(${100 + Math.floor(rnd() * 50)},${48 + Math.floor(rnd() * 22)},22,${a})`;
+      g.beginPath();
+      g.arc(x, y, 0.8 + rnd() * 3.5, 0, Math.PI * 2);
+      g.fill();
+    }
   }
-  /* Welds: horizontal course seams, vertical seams staggered by half a
-   * plate on alternate courses, the way a shell is erected. */
+  /*
+   * The seams' heat tint: the plate either side of a weld darkened and
+   * blued by the heat, a band a few centimetres wide. The welds themselves
+   * are raised beads in hardware.js on exactly these lines. A dark line
+   * painted here is what made the shell read as brickwork, so there is
+   * none: what separates the plates is the bead and the light on it.
+   */
   const ch = h / coursesTall;
   const pw = w / platesRound;
-  g.lineCap = 'round';
+  const tint = (x0, y0, x1, y1, across) => {
+    const grd = across === 'y'
+      ? g.createLinearGradient(0, y0 - 6, 0, y0 + 6)
+      : g.createLinearGradient(x0 - 6, 0, x0 + 6, 0);
+    grd.addColorStop(0, 'rgba(48,46,52,0)');
+    grd.addColorStop(0.5, 'rgba(48,46,52,0.45)');
+    grd.addColorStop(1, 'rgba(48,46,52,0)');
+    g.fillStyle = grd;
+    if (across === 'y') {
+      g.fillRect(x0, y0 - 6, x1 - x0, 12);
+    } else {
+      g.fillRect(x0 - 6, y0, 12, y1 - y0);
+    }
+  };
   for (let k = 0; k <= coursesTall; k += 1) {
     const y = k * ch;
-    g.strokeStyle = 'rgba(40,36,32,0.9)';
-    g.lineWidth = 5;
-    g.beginPath();
-    g.moveTo(0, y);
-    g.lineTo(w, y);
-    g.stroke();
-    g.strokeStyle = 'rgba(150,120,90,0.45)';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.moveTo(0, y + 2);
-    g.lineTo(w, y + 2);
-    g.stroke();
+    tint(0, y, w, y, 'y');
     /* Rust weeping down from the seam. */
     for (let i = 0; i < platesRound * 3; i += 1) {
       const x = rnd() * w;
@@ -151,12 +178,7 @@ function plateTexture(w, h, coursesTall, platesRound, seed) {
     const off = (k % 2) * pw * 0.5;
     for (let i = 0; i <= platesRound; i += 1) {
       const x = (off + i * pw) % w;
-      g.strokeStyle = 'rgba(40,36,32,0.9)';
-      g.lineWidth = 4;
-      g.beginPath();
-      g.moveTo(x, (coursesTall - 1 - k) * ch);
-      g.lineTo(x, (coursesTall - k) * ch);
-      g.stroke();
+      tint(x, (coursesTall - 1 - k) * ch, x, (coursesTall - k) * ch, 'x');
     }
   }
   const t = new THREE.CanvasTexture(c);
@@ -167,8 +189,9 @@ function plateTexture(w, h, coursesTall, platesRound, seed) {
   return t;
 }
 
-/* The floor: lapped plates and sludge pooled toward the low side. */
-function floorTexture(size, seed) {
+/* The floor: lapped plates and sludge pooled toward the low side. The
+ * roof's plates are the same grid with no sludge. */
+function floorTexture(size, seed, roof) {
   const c = document.createElement('canvas');
   c.width = size;
   c.height = size;
@@ -178,9 +201,9 @@ function floorTexture(size, seed) {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
     return s / 4294967296;
   };
-  g.fillStyle = '#3f3b36';
+  g.fillStyle = roof ? '#57534d' : '#3f3b36';
   g.fillRect(0, 0, size, size);
-  for (let i = 0; i < 1800; i += 1) {
+  for (let i = 0; i < (roof ? 600 : 1800); i += 1) {
     const x = rnd() * size;
     const y = rnd() * size;
     const r = 3 + rnd() * 20;
@@ -192,9 +215,11 @@ function floorTexture(size, seed) {
     g.arc(x, y, r, 0, Math.PI * 2);
     g.fill();
   }
+  /* The lap edges, a thin shadow where one plate steps onto the next. The
+   * welds are beads in hardware.js (floorSeams) on the same lines. */
   const plate = size / 7;
-  g.strokeStyle = 'rgba(25,22,20,0.9)';
-  g.lineWidth = 3;
+  g.strokeStyle = 'rgba(25,22,20,0.45)';
+  g.lineWidth = Math.max(1, size / 1024);
   for (let i = 0; i <= 7; i += 1) {
     g.beginPath();
     g.moveTo(i * plate, 0);
@@ -336,7 +361,7 @@ function dust(scene, count, seed) {
  * The colliders: the shell as a ring of capsules, the roof as a slab, and
  * every internal as what it is. Three.js frame, metres.
  */
-function buildColliders(T) {
+function buildColliders(T, hw) {
   const col = new Colliders();
   const ringR = T.radius + T.wallCapsuleR;
   for (let i = 0; i < T.wallCapsules; i += 1) {
@@ -378,6 +403,18 @@ function buildColliders(T) {
     const a = la + side * (0.22 / lr);
     col.add('pole', lr * Math.cos(a), 0, lr * Math.sin(a), lr * Math.cos(a), T.height - 0.5, lr * Math.sin(a), 0.03);
   }
+  /* The tether's ground station: a case on the floor. */
+  {
+    const st = T.station;
+    col.addBox('obstacle', st.x - st.w / 2, 0, st.z - st.d / 2, st.x + st.w / 2, st.h, st.z + st.d / 2);
+  }
+  /* The schoepentoeter, the manway and the support legs (hardware.js). */
+  for (const b of hw.boxes) {
+    col.addBox('pole', b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z);
+  }
+  for (const p of hw.poles) {
+    col.add('pole', p.a.x, p.a.y, p.a.z, p.b.x, p.b.y, p.b.z, p.r);
+  }
   col.build();
   return col;
 }
@@ -389,21 +426,27 @@ function buildVisuals(scene, T, q) {
   const courses = Math.round(T.height / T.course);
   const texW = q.id === 'low' ? 2048 : 4096;
   const shellTex = plateTexture(texW, 1024, courses, plates, 0x7a3b11);
+  /* 256 segments, not 128: a facet's chord falls half a millimetre inside
+   * the circle rather than two, so a weld bead on the true circle never
+   * shows a gap or sinks out of sight mid facet. */
   const shell = new THREE.Mesh(
-    new THREE.CylinderGeometry(T.radius, T.radius, T.height, 128, 1, true),
+    new THREE.CylinderGeometry(T.radius, T.radius, T.height, 256, 1, true),
     steel(shellTex),
   );
   shell.material.side = THREE.BackSide;
+  shell.userData.noRay = true;
   shell.position.y = T.height * 0.5;
   scene.add(shell);
 
   const floor = new THREE.Mesh(new THREE.CircleGeometry(T.radius, 96), steel(floorTexture(2048, 0x11f00d)));
   floor.rotation.x = -Math.PI / 2;
+  floor.userData.noRay = true;
   scene.add(floor);
 
-  const roof = new THREE.Mesh(new THREE.CircleGeometry(T.radius, 96), steel(plateTexture(1024, 1024, 7, 7, 0x2bad)));
+  const roof = new THREE.Mesh(new THREE.CircleGeometry(T.radius, 96), steel(floorTexture(1024, 0x2bad, true)));
   roof.rotation.x = Math.PI / 2;
   roof.position.y = T.height;
+  roof.userData.noRay = true;
   scene.add(roof);
 
   const member = new THREE.MeshStandardMaterial({ color: 0x55504a, roughness: 0.7, metalness: 0.5 });
@@ -423,10 +466,12 @@ function buildVisuals(scene, T, q) {
   coil.rotation.x = Math.PI / 2;
   coil.position.y = T.coilY;
   scene.add(coil);
+  /* The stands stop under the saddle the U bolt clamps the pipe to. */
+  const standH = T.coilY - T.coilPipeR - 0.012;
   for (let i = 0; i < 12; i += 1) {
     const a = (i / 12) * Math.PI * 2;
-    const stand = new THREE.Mesh(new THREE.BoxGeometry(0.06, T.coilY, 0.06), member);
-    stand.position.set(T.coilR * Math.cos(a), T.coilY * 0.5, T.coilR * Math.sin(a));
+    const stand = new THREE.Mesh(new THREE.BoxGeometry(0.06, standH, 0.06), member);
+    stand.position.set(T.coilR * Math.cos(a), standH * 0.5, T.coilR * Math.sin(a));
     scene.add(stand);
   }
   /* Inlet nozzle. */
@@ -458,6 +503,133 @@ function buildVisuals(scene, T, q) {
   ladder.position.set(lr * Math.cos(la), 0, lr * Math.sin(la));
   ladder.rotation.y = -la + Math.PI / 2;
   scene.add(ladder);
+
+  /* The hardware: fittings and their bolts, the schoepentoeter, and every
+   * weld as a bead (hardware.js). */
+  const fit = fittings(scene, T, member);
+  const sch = schoepentoeter(scene, T, member);
+  const blocked = blockedFor(T);
+  const seams = [
+    ...shellSeams(T, blocked),
+    ...floorSeams(T, false),
+    ...floorSeams(T, true),
+    ...memberSeams(T),
+    ...sch.seams,
+  ];
+  const beadTex = beadTexture();
+  const beadMat = new THREE.MeshStandardMaterial({
+    map: beadTex,
+    bumpMap: beadTex,
+    bumpScale: 3,
+    roughness: 0.7,
+    metalness: 0.45,
+  });
+  const beads = new THREE.Mesh(sweepBeads(seams, q.id === 'low' ? 0.16 : 0.08), beadMat);
+  beads.userData.noRay = true;
+  scene.add(beads);
+  const groups = [...fit.groups, ...sch.groups];
+  const bolts = boltMeshes(groups, lcg(0xb017));
+  for (const m of bolts.meshes) {
+    scene.add(m);
+  }
+  return {
+    seams,
+    groups,
+    bolts,
+    blocked,
+    boxes: sch.boxes,
+    poles: [...sch.poles, ...fit.solids],
+  };
+}
+
+/*
+ * Where a weld defect cannot be: under the ladder, where the stiles stand
+ * between it and any camera; behind the manway's cover; inside the
+ * nozzle's bore.
+ */
+function blockedFor(T) {
+  const la = T.ladderAngle;
+  const lx = Math.cos(la);
+  const lz = Math.sin(la);
+  const ma = T.ladderAngle + Math.PI / 2;
+  const man = new THREE.Vector3(T.radius * Math.cos(ma), T.manwayY, T.radius * Math.sin(ma));
+  const na = T.ladderAngle + Math.PI;
+  const noz = new THREE.Vector3(T.radius * Math.cos(na), T.nozzleY, T.radius * Math.sin(na));
+  return (p) => {
+    /* The ladder: within half a metre of its plane, near the shell. */
+    const along = p.x * lx + p.z * lz;
+    const across = Math.abs(-p.x * lz + p.z * lx);
+    if (along > T.radius - 0.6 && across < 0.45) {
+      return true;
+    }
+    if (p.distanceTo(man) < T.manwayR + 0.15) {
+      return true;
+    }
+    return p.distanceTo(noz) < T.nozzleR - 0.02;
+  };
+}
+
+/*
+ * The tether's ground station and its cable, drawn. The cable's shape is
+ * the plant's (src/native/tether.c), handed over each frame by the shell
+ * through setTether; this only draws it, as forty short cylinders between
+ * its points, in the high visibility yellow these cables are made in.
+ */
+function tetherVisuals(scene, T) {
+  const st = T.station;
+  const caseMat = new THREE.MeshStandardMaterial({ color: 0x2a2d31, roughness: 0.6, metalness: 0.2 });
+  const box = new THREE.Mesh(new THREE.BoxGeometry(st.w, st.h, st.d), caseMat);
+  box.position.set(st.x, st.h / 2, st.z);
+  scene.add(box);
+  const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.12, 24),
+    new THREE.MeshStandardMaterial({ color: 0x444a52, roughness: 0.5, metalness: 0.6 }));
+  reel.rotation.z = Math.PI / 2;
+  reel.position.set(st.x, st.h + 0.11, st.z);
+  scene.add(reel);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.015, 8, 6), new THREE.MeshBasicMaterial({ color: 0x55ff88 }));
+  lamp.position.set(st.x + st.w * 0.35, st.h + 0.01, st.z - st.d * 0.4);
+  scene.add(lamp);
+  const anchor = new THREE.Vector3(st.x, st.h + 0.22, st.z);
+  const SEGS = 40;
+  const cableMat = new THREE.MeshStandardMaterial({ color: 0xf2c230, roughness: 0.55, metalness: 0.05 });
+  const cable = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 6, 1, true), cableMat, SEGS);
+  cable.frustumCulled = false;
+  cable.visible = false;
+  cable.userData.noRay = true;
+  scene.add(cable);
+  const Y = new THREE.Vector3(0, 1, 0);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const mid = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  const sc = new THREE.Vector3();
+  const R = 0.006;
+  return {
+    anchor,
+    tension: 0,
+    set(pts, tension) {
+      if (!pts) {
+        cable.visible = false;
+        this.tension = 0;
+        return;
+      }
+      for (let i = 0; i < SEGS; i += 1) {
+        dir.subVectors(pts[i + 1], pts[i]);
+        const len = dir.length();
+        mid.addVectors(pts[i], pts[i + 1]).multiplyScalar(0.5);
+        if (len > 1e-6) {
+          q.setFromUnitVectors(Y, dir.multiplyScalar(1 / len));
+        }
+        /* A slack segment is shorter than its share: coiled cable. Drawn a
+         * little fatter so a pile on the floor reads as a pile. */
+        m.compose(mid, q, sc.set(R, Math.max(len, 0.002), R));
+        cable.setMatrixAt(i, m);
+      }
+      cable.instanceMatrix.needsUpdate = true;
+      cable.visible = true;
+      this.tension = Number.isFinite(tension) ? tension : 0;
+    },
+  };
 }
 
 export async function buildMap(shell, onProgress, options) {
@@ -495,11 +667,32 @@ export async function buildMap(shell, onProgress, options) {
   progress(0.2);
   await yieldToPaint();
 
-  buildVisuals(scene, T, q);
+  const hw = buildVisuals(scene, T, q);
   progress(0.6);
   await yieldToPaint();
 
-  const colliders = buildColliders(T);
+  const colliders = buildColliders(T, hw);
+  const tether = tetherVisuals(scene, T);
+  /* What can stand between a camera and a defect, or stop a photo's ray
+   * short of the shell: every solid built so far but the shell, floor and
+   * roof (a ray from inside never crosses them before its end), the beads
+   * and the bolts (millimetres high). Gathered before the aircraft, the
+   * lights, the defects and the markers join the scene. */
+  const occluders = [];
+  scene.updateMatrixWorld(true);
+  scene.traverse((o) => {
+    if (o.isMesh && !o.isInstancedMesh && !o.userData.noRay) {
+      occluders.push(o);
+    }
+  });
+  const defects = createDefects({
+    scene,
+    seams: hw.seams,
+    groups: hw.groups,
+    bolts: hw.bolts,
+    blocked: hw.blocked,
+  });
+  defects.roll(Number.isFinite(opts.defectSeed) ? opts.defectSeed : undefined);
   scene.add(shell.quad);
 
   const lights = craftLights(scene, opts.lumens ?? 16000);
@@ -565,8 +758,37 @@ export async function buildMap(shell, onProgress, options) {
     } else if (f.y > 1e-6) {
       t = Math.min(t, (T.height - p.y) / f.y);
     }
+    /* The schoepentoeter, by its collider boxes: a slab test each. */
+    for (const b of hw.boxes) {
+      let t0 = 0;
+      let t1 = t;
+      for (const ax of ['x', 'y', 'z']) {
+        const o = p[ax];
+        const v = f[ax];
+        if (Math.abs(v) < 1e-9) {
+          if (o < b.min[ax] || o > b.max[ax]) {
+            t1 = -1;
+            break;
+          }
+          continue;
+        }
+        let ta = (b.min[ax] - o) / v;
+        let tb = (b.max[ax] - o) / v;
+        if (ta > tb) {
+          const x = ta;
+          ta = tb;
+          tb = x;
+        }
+        t0 = Math.max(t0, ta);
+        t1 = Math.min(t1, tb);
+      }
+      if (t1 >= t0 && t0 > 0) {
+        t = Math.min(t, t0);
+      }
+    }
     return Math.max(0.05, t);
   };
+  const photoRay = new THREE.Raycaster();
   scene.onBeforeRender = () => {
     aimLights(lights, shell.quad, aimNow(), lightsOn, level);
     {
@@ -630,6 +852,8 @@ export async function buildMap(shell, onProgress, options) {
       luma: sum / n,
       clipped: clipped / n,
       dark: dark / n,
+      /* The defects this frame shows, by the camera that drew it. */
+      seen: defects.seen(camera, occluders),
     };
   };
   /* POI markers: a small lit ring where each photograph was aimed, with
@@ -660,9 +884,34 @@ export async function buildMap(shell, onProgress, options) {
     return sp;
   };
 
+  /*
+   * A DEPTH BUFFER, which the canvas does not have. The shell makes its
+   * renderer with depth: false (src/render/shell.js), because every other
+   * map draws through a post chain whose targets carry their own. Drawn
+   * straight to the canvas, this tank had no depth test at all: opaque
+   * objects are drawn near to far, so whatever was farther painted over
+   * whatever was nearer, and the heating coil showed through the
+   * schoepentoeter. The scene goes into a half float target with depth,
+   * and one full screen pass puts it on the canvas, where the filmic curve,
+   * the exposure and the sRGB transfer are applied as they were before.
+   */
+  const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: true });
+  const blitScene = new THREE.Scene();
+  const blitCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const blitMat = new THREE.MeshBasicMaterial({ map: target.texture, depthTest: false, depthWrite: false });
+  blitScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), blitMat));
+  const bufSize = new THREE.Vector2();
   const post = {
     render() {
+      renderer.getDrawingBufferSize(bufSize);
+      if (target.width !== bufSize.x || target.height !== bufSize.y) {
+        target.setSize(bufSize.x, bufSize.y);
+      }
+      renderer.setRenderTarget(target);
+      renderer.clear();
       renderer.render(scene, camera);
+      renderer.setRenderTarget(null);
+      renderer.render(blitScene, blitCam);
       if (pendingShot) {
         const cb = pendingShot;
         pendingShot = null;
@@ -674,7 +923,10 @@ export async function buildMap(shell, onProgress, options) {
       }
     },
     setSize() {},
-    dispose() {},
+    dispose() {
+      target.dispose();
+      blitMat.dispose();
+    },
   };
   progress(1);
 
@@ -712,6 +964,14 @@ export async function buildMap(shell, onProgress, options) {
     updateAnim() {},
     egg: null,
     marks: [],
+    /* The tethered aircraft's ground station: where the cable starts, Three.js
+     * frame, and how long it is. main.js hands both to the plant. */
+    tether: { anchor: tether.anchor.clone(), length: T.tetherLength },
+    /* The cable's points from the plant, Three.js frame, or null for none. */
+    setTether(pts, tension) {
+      tether.set(pts, tension);
+    },
+    tetherTension: () => tether.tension,
     gaps: [],
     /* The inspection controls the shell drives (src/game/inspection.js): the
      * lights on the aircraft. level is 0 to 1 of `lumens`, the airframe's. */
@@ -732,8 +992,29 @@ export async function buildMap(shell, onProgress, options) {
     /* The first solid along a ray from p in direction d (unit), Three.js
      * frame: { distance, point }. */
     rayHit(p, d) {
-      const t = frontDistance(p, d);
+      let t = frontDistance(p, d);
+      /* The analytic shapes, then every other solid by the mesh: the coil,
+       * the rafters, the ladder, the vanes. Once a photo, not once a
+       * frame, so the cost of a mesh ray is nothing. */
+      photoRay.set(p, d);
+      photoRay.near = 0;
+      photoRay.far = t;
+      const hits = photoRay.intersectObjects(occluders, false);
+      if (hits.length) {
+        t = Math.max(0.05, hits[0].distance);
+      }
       return { distance: t, point: new THREE.Vector3().copy(p).addScaledVector(d, t) };
+    },
+    /* The defects of this flight: { seed, list }, list as defects.js's. */
+    defects: () => ({ seed: defects.seed(), list: defects.list() }),
+    /* A new set for a new flight, from seed or a fresh one. */
+    rollDefects(seed) {
+      defects.roll(seed);
+      return { seed: defects.seed(), list: defects.list() };
+    },
+    /* Red rings on the listed defects, for after the hunt. */
+    revealDefects(ids) {
+      defects.reveal(ids);
     },
     /* Take a photograph from the next rendered frame; cb gets
      * { url, luma, clipped, dark } or null. */
@@ -765,11 +1046,16 @@ export async function buildMap(shell, onProgress, options) {
       buildMs: t1 - t0,
       lights: lights.spots.length,
       motes: motes ? motes.pts.geometry.attributes.position.count : 0,
+      seams: hw.seams.length,
+      bolts: hw.bolts.count,
+      defects: defects.list().length,
+      defectSeed: defects.seed(),
     }),
     dispose() {
       renderer.toneMapping = prevToneMapping;
       renderer.toneMappingExposure = prevExposure;
       scene.onBeforeRender = () => {};
+      post.dispose();
       shell.evictSessionRoots(scene);
       disposeSceneGraph(scene, SESSION_TEXTURES);
     },

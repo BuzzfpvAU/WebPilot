@@ -232,6 +232,12 @@ static void reset_dynamics(void) {
   g_ground_near = 0;
   world_forget();
   assist_reset();
+  tether_lay(&S);
+}
+
+/* The state, for tether.c's sim_set_tether; null before sim_init. */
+SimState *sim_state_ptr(void) {
+  return g_initialised ? &S : 0;
 }
 
 SIM_EXPORT int sim_init(const unsigned char *diff_utf8, int len) {
@@ -1171,6 +1177,7 @@ SIM_EXPORT int sim_set_pose(double px, double py, double pz,
   S.quat[2] = qy * ninv;
   S.quat[3] = qz * ninv;
   world_forget();
+  tether_lay(&S);
   return SIM_OK;
 }
 
@@ -1486,6 +1493,9 @@ SIM_EXPORT int sim_step(int n) {
     }
     if (!g_stand_on) {
       world_step(&S, g_ground_on, g_ground_n, g_ground_d);
+      /* The tethered aircraft's cable, tether.c. Off unless the shell
+       * turned it on, and then a no op. */
+      tether_step(&S, g_ground_on, g_ground_n, g_ground_d);
     }
     stand_apply();
     /* The road vehicles' clock, here and not in world_step, because the
