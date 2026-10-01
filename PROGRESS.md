@@ -62627,3 +62627,27 @@ check:inspection now bands hullR minus propR at zero or more for both inspection
     check:inspection         all passed, the new dims band included
     not run                  npm run verify: no physics, plant, ABI or build change (dims are the shell's
                              collider and drawing, not the plant's hull, which is plant.c's)
+
+## 2026-10-01 | inspection | Camera tilt and photo on the controller
+
+The owner asked to map the photo and camera angle keys to the controller. Asked first, the owner chose: both
+gamepads and radios; defaults for standard pads plus a menu row to remap; tilt and photo only.
+
+- src/game/inspection.js: on a pad the browser reports as `standard` (never a radio in joystick mode), LB tilts
+  up, RB tilts down and A takes a photo, until a control is learned for that job. Upstream reads pad buttons 0 to
+  3 only while a menu is open, so they are free in flight. Learning now listens on any screen (poll(), called
+  from main.js every frame) and reports what is set (controlsInfo()).
+- src/ui/ui.js: Settings, under Sticks, gains **Camera controls** (Default, Listening or Learned, with the
+  current mapping and the step being learned in its note) and **Forget camera controls**, only with an
+  inspection aircraft seated; setCameraInfo repaints the screen when what the row says changes.
+- index.html: the Patreon anchor is hidden everywhere, not only in the title chip (it was showing in the
+  Settings top bar).
+
+### RUN LOG
+
+    browser                  a simulated standard pad (navigator.getGamepads replaced in the page): in flight with
+                             nothing learned, LB held 0.8 s tilted to +49, RB held 1.5 s to -42, A took a photo.
+                             A simulated radio (mapping ''): Settings, Camera controls, Listening; a dial on
+                             axis 6 learned as tilt, button 8 as the photo; the row then read Learned, "Tilt dial
+                             or slider, axis 6. Photo button 8.". Not tried on real hardware.
+    not run                  npm run verify: no physics, plant, ABI or build change

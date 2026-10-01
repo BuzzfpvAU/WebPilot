@@ -103,13 +103,38 @@ function padById(id) {
 
 const pressed = (gp, i) => Boolean(gp.buttons && gp.buttons[i] && gp.buttons[i].pressed);
 
+/*
+ * DEFAULTS FOR A STANDARD PAD, so an Xbox or PlayStation pad works with no
+ * setup: the browser's standard mapping puts LB at 4, RB at 5 and A (cross)
+ * at 0. Used only while nothing has been learned for that job, and only on a
+ * pad the browser reports as `standard`, which a radio in joystick mode never
+ * is, so a radio's switches are never taken by surprise. Upstream reads
+ * buttons 0 to 3 only while a menu is open, so in flight they are free.
+ */
+const PAD_TILT_UP = 4;
+const PAD_TILT_DOWN = 5;
+const PAD_PHOTO = 0;
+const PAD_NAMES = { 0: 'A', 1: 'B', 2: 'X', 3: 'Y', 4: 'LB', 5: 'RB', 6: 'LT', 7: 'RT' };
+function standardPad() {
+  const pads = (navigator.getGamepads && navigator.getGamepads()) || [];
+  for (const gp of pads) {
+    if (gp && gp.mapping === 'standard') {
+      return gp;
+    }
+  }
+  return null;
+}
+function buttonName(gp, i) {
+  return gp && gp.mapping === 'standard' && PAD_NAMES[i] ? PAD_NAMES[i] : `button ${i + 1}`;
+}
+
 /* The module's own refusal for a bad argument, so a stale wasm without the
  * export is told apart from a call that was refused. */
 function callable(sim, name) {
   return sim && sim.e && typeof sim.e[name] === 'function';
 }
 
-export function createInspection({ sim, notify, input }) {
+export function createInspection({ sim, notify, input, onControls }) {
   const state = {
     af: null,
     mode: 1,
@@ -408,11 +433,72 @@ export function createInspection({ sim, notify, input }) {
       if (i >= order.length) {
         state.learn = null;
         notify('Camera controls saved.');
+        changed();
         return;
       }
       state.learn = { step: order[i], base: null };
     }
     notify(LEARN_TEXT[state.learn.step]);
+    changed();
+  }
+  function changed() {
+    if (typeof onControls === 'function') {
+      onControls();
+    }
+  }
+  /* What the Settings row says: the learned controls, the standard pad
+   * defaults standing in for anything not learned, or the step being
+   * learned now. */
+  function controlsInfo() {
+    const b = state.bind;
+    const std = standardPad();
+    let tilt = 'Q and E';
+    if (b.tilt && b.tilt.kind === 'axis') {
+      tilt = `dial or slider, axis ${b.tilt.index + 1}`;
+    } else if (b.tilt && b.tilt.kind === 'buttons') {
+      tilt = b.tilt.down != null
+        ? `${buttonName(padById(b.tilt.id), b.tilt.up)} up, ${buttonName(padById(b.tilt.id), b.tilt.down)} down`
+        : `${buttonName(padById(b.tilt.id), b.tilt.up)} up`;
+    } else if (std) {
+      tilt = 'LB up, RB down';
+    }
+    let photo = 'P';
+    if (b.photo) {
+      photo = b.photo.kind === 'axis' ? `switch, axis ${b.photo.index + 1}` : buttonName(padById(b.photo.id), b.photo.index);
+    } else if (std) {
+      photo = 'A';
+    }
+    return {
+      learning: state.learn ? LEARN_TEXT[state.learn.step].replace(' K skips.', '') : null,
+      learned: Boolean(b.tilt || b.photo),
+      summary: `Tilt ${tilt}. Photo ${photo}.`,
+      pad: Boolean(padById(null)),
+    };
+  }
+  /* Settings' row: start learning, or stop. */
+  function learnToggle() {
+    if (state.learn) {
+      state.learn = null;
+      notify('Camera controls: stopped.');
+      changed();
+      return;
+    }
+    learnStep();
+  }
+  function forgetControls() {
+    state.bind = {};
+    state.learn = null;
+    state.lastAxis = null;
+    saveBindings(state.bind);
+    notify('Camera controls forgotten. Q and E tilt, P takes a photo.');
+    changed();
+  }
+  /* Every frame, in flight or in a menu: learning listens wherever it is
+   * started from. */
+  function poll() {
+    if (state.learn) {
+      runLearn();
+    }
   }
   function stickAxes() {
     const s = new Set();
@@ -480,6 +566,22 @@ export function createInspection({ sim, notify, input }) {
       }
     }
     const b = state.bind;
+    const std = standardPad();
+    if (!b.tilt && std) {
+      if (pressed(std, PAD_TILT_UP)) {
+        rate += 1;
+      }
+      if (pressed(std, PAD_TILT_DOWN)) {
+        rate -= 1;
+      }
+    }
+    if (!b.photo && std) {
+      const on = pressed(std, PAD_PHOTO);
+      if (on && !state.photoPrev) {
+        takePhoto();
+      }
+      state.photoPrev = on;
+    }
     if (b.tilt) {
       const gp = padById(b.tilt.id);
       if (gp && b.tilt.kind === 'axis' && b.tilt.index < gp.axes.length) {
@@ -624,9 +726,7 @@ export function createInspection({ sim, notify, input }) {
     state.quad = quad || state.quad;
     state.gs = speed;
     state.rate = rate || 0;
-    if (state.learn) {
-      runLearn();
-    } else {
+    if (!state.learn) {
       readControls(Math.min(0.1, dtS));
     }
     if (quad && view && typeof view.setLightAim === 'function') {
@@ -699,6 +799,10 @@ export function createInspection({ sim, notify, input }) {
     reset,
     gimbal,
     takePhoto,
+    poll,
+    controlsInfo,
+    learnToggle,
+    forgetControls,
     active: () => Boolean(state.af),
     /* For tests and the console: what the panel says, without the DOM. */
     snapshot: () => ({

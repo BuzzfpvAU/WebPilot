@@ -3082,6 +3082,8 @@ export async function boot({ loading, bootStart, mapId }) {
   const inspection = createInspection({
     sim,
     input,
+    /* The Settings row follows the learning as it happens. */
+    onControls: () => ui.setCameraInfo(inspection.controlsInfo()),
     notify: (text) => { notice = { text, untilMs: performance.now() + 2600 }; },
   });
   /* The seated world's own note, waiting for a flight to be said over. See
@@ -6543,6 +6545,10 @@ export async function boot({ loading, bootStart, mapId }) {
       } else {
         input.beginRestartCapture();
       }
+    } else if (action === 'camera-controls') {
+      inspection.learnToggle();
+    } else if (action === 'camera-controls-clear') {
+      inspection.forgetControls();
     } else if (action === 'restart-switch-clear') {
       input.clearRestartSwitch();
       notice = { text: 'Restart switch forgotten.\nR on the keyboard still restarts.', untilMs: performance.now() + 2800 };
@@ -9296,6 +9302,11 @@ export async function boot({ loading, bootStart, mapId }) {
     ) ? guidedPrompt(race) : '';
     const padSum = input.padSummary();
     ui.setPadInfo(padSum);
+    /* The inspection camera's learned controls listen in any screen, and
+     * the Settings row follows them and a pad arriving (setCameraInfo
+     * repaints only on a change). */
+    inspection.poll();
+    ui.setCameraInfo(inspection.controlsInfo());
     noteLostSticks(padSum, nowWall);
     /* Stick help's watch runs while its screen is up and only then, so every
      * visit starts from where the sticks are when it opens. See STICK HELP

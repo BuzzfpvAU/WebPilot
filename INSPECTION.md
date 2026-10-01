@@ -39,6 +39,13 @@ motors idle.
 | P | Take a photo |
 | O | Photo gallery |
 | K | Learn a gamepad or radio's camera tilt (a dial, slider or two buttons) and shutter button |
+
+**On a controller.** A standard gamepad (Xbox, PlayStation) works with no setup: **LB** tilts
+up, **RB** tilts down, **A** (cross) takes a photo. For a radio, or to choose your own buttons,
+go to **Settings, Camera controls** (shown with an inspection aircraft seated) and choose it,
+then turn the dial or slider you want for tilt (or press a tilt up button, then a tilt down
+button), then press the button or flip the switch you want for the photo. **Forget camera
+controls** goes back to the defaults. K does the same in flight.
 | R | Restart |
 
 The camera is on a stabilised gimbal: it holds the horizon level, turns with the aircraft and

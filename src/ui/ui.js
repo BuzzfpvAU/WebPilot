@@ -7593,6 +7593,25 @@ export class Ui {
           note: 'R on the keyboard still restarts.',
         }] : []),
         /*
+         * THE INSPECTION CAMERA'S CONTROLS, the fork's, offered only with an
+         * inspection aircraft seated. The learning itself is in
+         * src/game/inspection.js; this row starts and stops it and shows what
+         * is set, refreshed through setCameraInfo as it happens.
+         */
+        ...(airframeById(s.airframe).inspection ? [{
+          label: 'Camera controls',
+          value: this.cameraInfo && this.cameraInfo.learning ? 'Listening' : (this.cameraInfo && this.cameraInfo.learned ? 'Learned' : 'Default'),
+          action: 'camera-controls',
+          note: this.cameraInfo && this.cameraInfo.learning
+            ? `${this.cameraInfo.learning} Choose this row again to stop.`
+            : `${this.cameraInfo ? this.cameraInfo.summary : ''} Choose this row to set the camera tilt and the photo button on your gamepad or radio: a dial, slider or two buttons for tilt, then a button or switch for the photo.`,
+        }] : []),
+        ...(airframeById(s.airframe).inspection && this.cameraInfo && this.cameraInfo.learned && !this.cameraInfo.learning ? [{
+          label: 'Forget camera controls',
+          action: 'camera-controls-clear',
+          note: 'Back to the defaults: LB and RB tilt and A takes a photo on a standard pad, Q, E and P on the keyboard.',
+        }] : []),
+        /*
          * WHICH STICK CARRIES WHICH CHANNEL, and it sits here because the
          * two rows above are the other two things a pilot does to their
          * sticks before flying.
@@ -14075,6 +14094,17 @@ export class Ui {
     this.settings.stickMode = next;
     this.writeSettings();
     return next;
+  }
+
+  /* The inspection camera's controls, for the Settings row. Repaints that
+   * screen when what the row would say has changed. */
+  setCameraInfo(info) {
+    const key = (i) => (i ? `${i.learning}|${i.learned}|${i.summary}` : '');
+    const was = key(this.cameraInfo);
+    this.cameraInfo = info;
+    if (this.screen === 'pilot' && was !== key(info)) {
+      this.renderMenu();
+    }
   }
 
   setPadInfo(info) {
