@@ -74,6 +74,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadSim, SIM_OK, simErrorName } from '../tests/lib/simmod.js';
+import { airframeById } from '../configs/airframes.js';
+import { ratesDiff } from '../configs/rates.js';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const GOLDEN = join(root, 'tests/goldens/plant.json');
@@ -98,7 +100,7 @@ const SAMPLE_MS = 250;
 /* Where the plane sits under a level, parked craft: the plant's own
  * hull_hz_down (src/native/plant.c), the same number src/main.js seats
  * REST_HEIGHT from. */
-const REST = { 0: 0.045, 1: 0.010 };
+const REST = { 0: 0.045, 1: 0.010, 2: 0.20, 3: 0.12 };
 /* The shell's grass (src/game/collide.js GROUND_MU and GROUND_E). Written
  * out rather than imported, so that retuning the shell's grass shows up here
  * as a deliberate edit and not as a silent golden failure. */
@@ -413,12 +415,67 @@ const SCENARIOS = [
     sticks: runIn(3, 2000, (ms, st, ctx) => [0, 0, 0, heightHold(ctx, st, 3)]),
     exercises: (s) => s.speedDrop(2000) > 2,
   },
+  /* The inspection aircraft. See RATES_FOR. */
+  ...[['caged', 2], ['tethered', 3]].flatMap(([id, af]) => [
+    {
+      name: `${id}, free air acro`, ms: 5000, airframe: af, sticks: FREESTYLE,
+      exercises: (s) => s.maxRate > 4,
+    },
+    {
+      name: `${id}, assisted takeoff, hold, run and stop`, ms: 12000, airframe: af, ground: 'grass',
+      assist: assistFor(id, 1),
+      /* Then down to the floor still drifting forward, so it lands sliding
+       * and the grass's friction is in the trace. */
+      sticks: [
+        [0, 0, 0, 0, 0.5], [500, 0, 0, 0, 0.5], [504, 0, 0, 0, 1], [2500, 0, 0, 0, 1],
+        [2504, 0, 0, 0, 0.5], [4000, 0, 0, 0, 0.5], [4004, 0, -1, 0, 0.5], [6000, 0, -1, 0, 0.5],
+        [6004, 0, 0, 0, 0.5], [7500, 0, 0, 0, 0.5], [7504, 0, -0.6, 0, 0], [12000, 0, -0.6, 0, 0],
+      ],
+      exercises: (s) => s.maxZ > 1.0 && s.maxSpeed > 0.5 && s.lastContactMs > 8000,
+    },
+    {
+      name: `${id}, wall contact through sim_contact_at`, ms: 10000, airframe: af, ground: 'grass',
+      assist: assistFor(id, 1),
+      /* Up off the floor, then drifting sideways into a wall. The autopilot
+       * holds a craft posed in the air as landed, so it takes off. */
+      events: [
+        { ms: 4000, contactAt: { n: [0, -1, 0], e: 0.15, mu: 0.42, r: [0.02, 0.25, 0] } },
+        { ms: 4004, contactAt: { n: [0, -1, 0], e: 0.15, mu: 0.42, r: [0.02, 0.25, 0] } },
+      ],
+      sticks: [[0, 0, 0, 0, 0.5], [300, 0, 0, 0, 0.5], [304, 0, 0, 0, 1], [2300, 0, 0, 0, 1],
+        [2304, 0, 0, 0, 0.5], [2800, 0, 0, 0, 0.5], [2804, -1, 0, 0, 0.5], [4000, -1, 0, 0, 0.5],
+        [4004, 0, 0, 0, 0.5], [5000, 0, 0, 0, 0.5], [5004, 0.6, 0, 0, 0], [10000, 0.6, 0, 0, 0]],
+      exercises: (s) => s.maxZ > 1.0 && s.speedDrop(4000) > 0.1 && s.lastContactMs > 6000,
+    },
+  ]),
 ];
 
 const CONFIG_FOR = {
   0: 'tests/fixtures/config-baseline.diff',
   1: 'configs/whoop-freestyle.diff',
+  2: 'configs/inspection-caged.diff',
+  3: 'configs/inspection-tethered.diff',
 };
+/*
+ * THE INSPECTION AIRCRAFT, pinned 2026-10-01 before the tether cable went
+ * into the plant (the owner's condition: coverage lands first). They fly
+ * as the shell flies them: their tune, then their rates from
+ * configs/airframes.js, the same text scripts/inspection-check.js builds.
+ * A retune of either in airframes.js is a change to how they fly and shows
+ * here as one.
+ */
+const RATES_FOR = {
+  2: ratesDiff(airframeById('caged').rates),
+  3: ratesDiff(airframeById('tethered').rates),
+};
+/* Their autopilots (src/native/assist.c) at the shell's defaults. */
+function assistFor(id, mode) {
+  const a = airframeById(id).assist;
+  return {
+    mode, speed: a.speeds[a.defaultSpeed], vUp: a.vUp, vDown: a.vDown,
+    tiltMax: a.tiltMax, angleLimit: a.angleLimit, hover: a.hover, guard: a.guard,
+  };
+}
 
 function upZ(st) {
   const x = st[ST.QX];
@@ -472,7 +529,7 @@ function planeFor(sc, ms) {
 const MUTATE = { groundMu: 0, throttle: 0 };
 
 /* Low enough that the hull is at the grass whichever way up it is. */
-const LOW = { 0: 0.12, 1: 0.05 };
+const LOW = { 0: 0.12, 1: 0.05, 2: 0.3, 3: 0.2 };
 
 /* The per 100 ms record the `exercises` tests read. */
 const BIN_MS = 100;
@@ -535,6 +592,11 @@ async function fly(wasm, configs, sc) {
   }
   if (sc.gravity != null) {
     call(sim, 'sim_set_gravity', sc.gravity);
+  }
+  if (sc.assist) {
+    const a = sc.assist;
+    call(sim, 'sim_set_assist', a.mode, a.speed, a.vUp, a.vDown, a.tiltMax, a.angleLimit, a.hover);
+    call(sim, 'sim_set_assist_guard', a.guard);
   }
   if (sc.stand) {
     const s0 = sim.readState().state;
@@ -708,7 +770,7 @@ async function runAll({ write, only, quiet }) {
   const configs = {};
   const configHashes = {};
   for (const [af, rel] of Object.entries(CONFIG_FOR)) {
-    configs[af] = await readFile(join(root, rel), 'utf8');
+    configs[af] = await readFile(join(root, rel), 'utf8') + (RATES_FOR[af] || '');
     configHashes[rel] = sha(configs[af]).slice(0, 16);
   }
   const golden = existsSync(GOLDEN) ? JSON.parse(await readFile(GOLDEN, 'utf8')) : null;
